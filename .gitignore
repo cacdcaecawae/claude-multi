@@ -1,0 +1,8 @@
+# Only the code. accounts/ holds each account's login and conversation records; the rest is local state
+# (registry, log, token cache, inbox, the island's pid and pin).
+*
+!.gitignore
+!claude-multi.js
+!claude-multi.test.js
+!island.ps1
+!island.ico
