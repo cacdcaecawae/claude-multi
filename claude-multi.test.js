@@ -130,3 +130,25 @@ console.log('tokens ok');
   fs.rmSync(dir, { recursive: true });
   console.log('notes ok');
 }
+
+// The page's 记录 view: what you said, Claude's text, a line per tool call; the rest left out.
+{
+  const { history } = require('./claude-multi');
+  const f = require('path').join(require('os').tmpdir(), `cm-hist-${process.pid}.jsonl`), T = '2026-10-07T08:00:00Z';
+  const u = (content, extra = {}) => ({ type: 'user', timestamp: T, message: { role: 'user', content }, ...extra });
+  const a = (content) => ({ type: 'assistant', timestamp: T, message: { role: 'assistant', content } });
+  fs.writeFileSync(f, [
+    u('<local-command-caveat>Caveat</local-command-caveat>', { isMeta: true }),
+    u('<command-name>/rename</command-name>\n<command-message>rename</command-message>\n<command-args>新名字</command-args>'),
+    u('修一下 bug<system-reminder>ignore me</system-reminder>'),
+    a([{ type: 'thinking', thinking: '...' }, { type: 'text', text: '好的。' }, { type: 'tool_use', name: 'Bash', input: { command: 'npm test', description: 'Run tests' } }]),
+    u([{ type: 'tool_result', tool_use_id: 'x', content: 'ok' }]),
+    u('<task-notification>\n<task-id>b1</task-id>'),
+    u('Summary of earlier work', { isCompactSummary: true }),
+    a([{ type: 'text', text: '测试通过。' }]),
+  ].map((x) => JSON.stringify(x)).join('\n') + '\n');
+  assert.deepEqual(history(f).map((x) => `${x.role}:${x.text}`),
+    ['user:/rename 新名字', 'user:修一下 bug', 'claude:好的。', 'tool:Bash  Run tests', 'note:更早的内容已压缩', 'claude:测试通过。']);
+  fs.rmSync(f);
+  console.log('history ok');
+}

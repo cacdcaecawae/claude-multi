@@ -226,7 +226,9 @@ $inbox = Join-Path $root 'inbox'
 [void](New-Item -ItemType Directory -Force -Path $inbox)
 $ns = 'xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"'
 function X([string]$xaml) { [Windows.Markup.XamlReader]::Parse($xaml) }
-function Esc([string]$s) { [Security.SecurityElement]::Escape($s) }
+# For XAML attribute values (every use is one): XML-escaped, and a leading "{" marked literal with "{}", or
+# XAML would take a title like {"ok":true} for a markup extension and fail to load.
+function Esc([string]$s) { $e = [Security.SecurityElement]::Escape($s); if ($e.StartsWith('{')) { '{}' + $e } else { $e } }
 function Tint([double]$pct) { if ($pct -ge 80) { '#FF453A' } elseif ($pct -ge 50) { '#FFD60A' } else { '#30D158' } }
 function Bar([double]$pct, [int]$w, [double]$h = 5, [string]$m = '0', [double]$o = 1) {
   $fill = [Math]::Round([Math]::Min(100, $pct) / 100 * $w)
@@ -731,13 +733,51 @@ function Day([double]$ms) {
   if ($d -eq (Get-Date).Date) { '今天' } elseif ($d -eq (Get-Date).Date.AddDays(-1)) { '昨天' }
   elseif ($d -gt (Get-Date).Date.AddDays(-7)) { '7 天内' } else { '更早' }
 }
-# The account that wrote it last while that one can still go an hour (MIN_RUN in claude-multi.js),
-# else the recommended one.
-function Resume-Account($s) {
-  $u = $script:data
-  if (-not $u -or $u.accounts[$s.acct].runway -ge 1) { return [int]$s.acct + 1 }
-  if ($u -and $null -ne $u.rec) { return [int]$u.rec + 1 }
-  1
+# One account to the end: a conversation continues on its own account (the one that wrote it last). Only
+# when that one has under an hour left (MIN_RUN in claude-multi.js) and the recommended one has more does a
+# dialog offer the switch. Returns the account number, 0 when cancelled.
+function Pick-Account($s) {
+  $own = [int]$s.acct + 1; $u = $script:data
+  if (-not $u -or $null -eq $u.rec -or [int]$u.rec -eq [int]$s.acct) { return $own }
+  $a = $u.accounts[$s.acct]; $b = $u.accounts[$u.rec]
+  if ($a.err -or $a.runway -ge 1 -or $b.runway -le $a.runway) { return $own }
+  Ask-Account $s $own ([int]$u.rec + 1)
+}
+# Accounts don't share their prompt cache, so the other one reads the whole conversation in again on its
+# first reply: worth a question. The choice comes back through the dialog's Tag.
+function Ask-Account($s, [int]$own, [int]$other) {
+  $a = $script:data.accounts[$own - 1]; $b = $script:data.accounts[$other - 1]
+  $why = if ($a.runway -le 0) { "账号 $own 已经到上限了" } else { "账号 $own 只能再连续用约 $($a.runway) 小时" }
+  $d = X @"
+<Window $ns Width="440" SizeToContent="Height" WindowStyle="None" AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize"
+  ShowInTaskbar="False" WindowStartupLocation="CenterOwner" Foreground="White" FontFamily="Segoe UI Variable Text, Microsoft YaHei UI" UseLayoutRounding="True">
+ <Window.Resources>$styles</Window.Resources>
+ <Grid Margin="16">
+  <Border Background="Black" CornerRadius="18"><Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270" Opacity="0.55"/></Border.Effect></Border>
+  <Border Background="#FA161618" CornerRadius="18" BorderBrush="#26FFFFFF" BorderThickness="1" Padding="22,20,22,18">
+   <StackPanel>
+    <TextBlock Text="换个账号继续？" FontSize="16" FontWeight="SemiBold" Foreground="White"/>
+    <TextBlock Text="$(Esc $s.title)" FontSize="12" Foreground="#8CFFFFFF" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+    <TextBlock TextWrapping="Wrap" FontSize="13" Foreground="#E6FFFFFF" Margin="0,16,0,0" LineHeight="20"
+      Text="$why，账号 $other 还能连续用约 $($b.runway) 小时。"/>
+    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8CFFFFFF" Margin="0,8,0,0" LineHeight="18"
+      Text="两个账号不共用缓存：换过去后，第一轮回复要把整段对话重新读一遍，会多用一些新账号的额度。"/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+     <Button x:Name="Keep" Style="{StaticResource Text}" FontSize="13" Margin="0,0,10,0" Padding="4,4" Content="仍用账号 $own"/>
+     <Button x:Name="Switch" Style="{StaticResource Primary}" FontSize="13" Content="换到账号 $other"/>
+    </StackPanel>
+   </StackPanel>
+  </Border>
+ </Grid>
+</Window>
+"@
+  if ($script:cw -and $script:cw.IsVisible) { $d.Owner = $script:cw } else { $d.WindowStartupLocation = 'CenterScreen' }
+  $d.FindName('Keep').Tag = $own; $d.FindName('Switch').Tag = $other
+  foreach ($k in 'Keep', 'Switch') { $d.FindName($k).Add_Click({ param($x) $w = [Windows.Window]::GetWindow($x); $w.Tag = $x.Tag; $w.Close() }) }
+  $d.Add_KeyDown({ param($x, $e) if ($e.Key -eq 'Escape') { $x.Close() } }) # Esc: neither
+  $d.Add_MouseLeftButtonDown({ param($x) $x.DragMove() })
+  [void]$d.ShowDialog()
+  if ($d.Tag) { [int]$d.Tag } else { 0 }
 }
 
 function Open-Chats {
@@ -1548,7 +1588,7 @@ function Save-Name($ed) {
   Run-Node "rename $($s.id) `"$($name -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1')`"" { Load-Chats }
 }
 function Add-Chat($s) {
-  $n = Resume-Account $s
+  $n = [int]$s.acct + 1 # its own account; a switch is only ever offered on click (Pick-Account)
   $mixed = $script:folder -eq '' -or $script:folder -eq '*' # rows from several folders say which one
   # right column: at rest the time (or a 运行中 chip), on hover the action, in the same cell
   # running in the web service (started or continued from the web page): no window here, a tab joins it
@@ -1622,7 +1662,8 @@ function Add-Chat($s) {
     param($x)
     $s = $x.Tag
     if ($s.web) { Open-WebChat $s.id $s.cwd }
-    elseif ($s.pid) { Focus-Claude $s.pid } else { Open-Terminal $s.cwd "resume $($s.id) $(Resume-Account $s)" }
+    elseif ($s.pid) { Focus-Claude $s.pid }
+    else { $n = Pick-Account $s; if ($n) { Open-Terminal $s.cwd "resume $($s.id) $n" } }
   })
   [void]$cList.Children.Add($b)
 }

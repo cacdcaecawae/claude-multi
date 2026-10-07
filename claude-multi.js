@@ -748,6 +748,49 @@ function unreadNotes(list, notes = readNotes(60), marks = readMarks()) {
   }).slice(0, 10);
 }
 
+// A conversation's record as readable messages, for the page's 记录 view (a window here only shows its
+// current screen): what you said, Claude's replies, one line per tool call. Tool output, thinking and
+// Claude's own bookkeeping (reminders, background-task notices) are left out. The last 16 MB, last 600 items.
+function history(file, max = 600) {
+  const fd = fs.openSync(file, 'r'), size = fs.fstatSync(fd).size;
+  const lines = slice(fd, Math.max(0, size - 16777216), 16777216).split('\n');
+  fs.closeSync(fd);
+  const out = [];
+  const add = (role, text, at) => {
+    text = String(text ?? '').trim();
+    if (text) out.push({ role, text: text.length > 20000 ? text.slice(0, 20000) + '…' : text, at });
+  };
+  for (const l of lines) {
+    if (!l.includes('"type":"user"') && !l.includes('"type":"assistant"')) continue;
+    if (l.includes('"type":"tool_result"')) continue; // tool output, often huge (screenshots): not shown, not parsed
+    let j;
+    try { j = JSON.parse(l); } catch { continue; }
+    if (j.isMeta || j.isSidechain) continue;
+    const at = Date.parse(j.timestamp) || 0, c = j.message?.content;
+    if (j.type === 'user') {
+      if (j.isCompactSummary) { add('note', '更早的内容已压缩', at); continue; }
+      for (const p of typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : []) {
+        if (p.type === 'image') add('user', '[图片]', at);
+        if (p.type !== 'text') continue;
+        let t = p.text.trim();
+        if (/^<(task-notification|teammate-message|local-command-stdout|local-command-caveat|system-reminder)/.test(t)) continue;
+        const cmd = /<command-name>([^<]*)<\/command-name>/.exec(t);
+        if (cmd) t = `${cmd[1]} ${/<command-args>([^<]*)<\/command-args>/.exec(t)?.[1] ?? ''}`; // a slash command, as typed
+        add('user', t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ''), at);
+      }
+    } else if (Array.isArray(c)) {
+      for (const p of c) {
+        if (p.type === 'text') add('claude', p.text, at);
+        else if (p.type === 'tool_use') {
+          const i = p.input ?? {}, what = i.description ?? i.command ?? i.file_path ?? i.pattern ?? i.query ?? i.url ?? i.skill ?? i.prompt ?? '';
+          add('tool', `${p.name}  ${String(what).split('\n')[0].slice(0, 160)}`, at);
+        }
+      }
+    }
+  }
+  return out.slice(-max);
+}
+
 async function web() {
   const http = require('http'), pty = require('@lydell/node-pty');
   const me = tailscaleMe();
@@ -790,6 +833,8 @@ async function web() {
       for (let k; (k = line.indexOf('\n')) >= 0; line = line.slice(k + 1)) {
         let m; try { m = JSON.parse(line.slice(0, k)); } catch { continue; }
         if (m.gone) { t.gone = true; send(t, 'gone', {}); continue; }
+        // lines scrolled off the window's top: the page scrolls its screen as far, so they go to its history
+        if (m.s) { if (t.h) send(t, 'data', `\x1b[${t.h};1H` + '\n'.repeat(m.s)); continue; }
         if (m.w !== t.w || m.h !== t.h) { t.w = m.w; t.h = m.h; send(t, 'size', { w: m.w, h: m.h }); }
         t.frame = m.f; send(t, 'data', m.f);
       }
@@ -812,6 +857,11 @@ async function web() {
       return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: me.login };
     },
     'GET /api/tokens': () => tokenStats(),
+    'GET /api/history': (q) => { // asked every 4 s while shown: the cached list gives the file, read fresh below
+      const s = sessions().find((x) => x.id === q.get('id'));
+      if (!s) throw new Error('找不到这个对话');
+      return { items: history(s.file) };
+    },
     'POST /api/read': (q, b) => { // {id} one conversation's notifications, {all: true} every one; the island drops them too
       const id = b.all ? '*' : /^[\w-]{1,80}$/.test(b.id ?? '') ? b.id : null;
       if (!id) throw new Error('缺少对话 id');
@@ -871,6 +921,8 @@ async function web() {
       if (req.headers['tailscale-user-login'] !== me.login) return out(403, { err: `只有 ${me.login} 能打开` });
       const url = new URL(req.url, 'http://x');
       if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
+      const icon = { '/favicon.ico': ['island.ico', 'image/x-icon'], '/icon-180.png': ['icon-180.png', 'image/png'] }[url.pathname]; // the island's
+      if (req.method === 'GET' && icon) { res.writeHead(200, { 'content-type': icon[1], 'cache-control': 'max-age=86400' }); return res.end(fs.readFileSync(path.join(ROOT, icon[0]))); }
       if (req.method === 'GET' && url.pathname === '/api/term') { // the terminal's output, as server-sent events
         const t = terms.get(url.searchParams.get('key'));
         if (!t) return out(404, { err: '这个终端已经结束' });
@@ -1037,7 +1089,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes };
+module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

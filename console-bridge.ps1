@@ -2,8 +2,9 @@ param([int]$TargetPid)
 # console-bridge.ps1 <pid>: lets the web page show and type into a conversation that runs in a terminal
 # window on this computer. Windows has no way to take over another program's terminal, but a process can
 # attach to its console: this reads the visible screen (chars and 16 colors) about 8 times a second and
-# writes one JSON line {"f": vt, "w", "h"} whenever it changed (vt redraws it in xterm.js), and turns each
-# JSON line {"k": vt input} on stdin into key presses in that console. {"gone": true} once the console is gone.
+# writes one JSON line {"f": vt, "w", "h"} whenever it changed (vt redraws it in xterm.js), preceded by
+# {"s": n} when n lines scrolled off the top meanwhile, and turns each JSON line {"k": vt input} on stdin into
+# key presses in that console. {"gone": true} once the console is gone.
 Add-Type -TypeDefinition @'
 using System; using System.Collections.Generic; using System.IO; using System.Text; using System.Threading;
 using System.Runtime.InteropServices;
@@ -41,33 +42,61 @@ public static class Bridge {
       Environment.Exit(0); // the page's server went away
     });
     reader.IsBackground = true; reader.Start();
-    string last = null;
+    string last = null; string[] lastRows = null;
     for (;;) {
-      string f; int w, h;
-      if (!Frame(outH, out f, out w, out h)) { o.WriteLine("{\"gone\":true}"); o.Flush(); return; }
-      if (f != last) { last = f; o.WriteLine("{\"w\":" + w + ",\"h\":" + h + ",\"f\":" + Json(f) + "}"); o.Flush(); }
+      string f; int w, h; string[] rows;
+      if (!Frame(outH, out f, out w, out h, out rows)) { o.WriteLine("{\"gone\":true}"); o.Flush(); return; }
+      if (f != last) {
+        int s = lastRows != null && lastRows.Length == rows.Length ? Scrolled(lastRows, rows) : 0;
+        if (s > 0) o.WriteLine("{\"s\":" + s + "}"); // before the frame: the page scrolls those lines into its history
+        last = f; lastRows = rows;
+        o.WriteLine("{\"w\":" + w + ",\"h\":" + h + ",\"f\":" + Json(f) + "}"); o.Flush();
+      }
       Thread.Sleep(120);
     }
   }
 
+  // A console keeps no lines above its window (Windows Terminal keeps them, out of reach), so the page builds
+  // its own history: the lines that moved off the top since the last look. That is the smallest k for which
+  // the top half of this screen is the last one's rows moved up by k, with at least 3 lines of text in it so
+  // that a nearly blank screen redrawn doesn't pass for a scroll. The bottom half is left out of the match:
+  // Claude redraws its prompt there.
+  static int Scrolled(string[] a, string[] b) {
+    int h = b.Length, m = Math.Max(3, h / 2);
+    bool same = true;
+    for (int r = 0; r < m && same; r++) same = a[r] == b[r];
+    if (same) return 0;
+    for (int k = 1; k < h - m; k++) {
+      bool ok = true; int text = 0;
+      for (int r = 0; r < m && ok; r++) { ok = a[r + k] == b[r]; if (b[r].Trim().Length > 0) text++; }
+      if (ok && text >= 3) return k;
+    }
+    return 0; // redrawn rather than scrolled (cleared, resized), or more than half a screen at once
+  }
+
   // The visible window as VT: home, each row with its colors, then the cursor. Wide chars take two cells.
-  static bool Frame(IntPtr h, out string f, out int w, out int hgt) {
-    f = null; w = hgt = 0;
+  // rows: the same rows as plain text, to tell a scroll from a redraw.
+  static bool Frame(IntPtr h, out string f, out int w, out int hgt, out string[] rows) {
+    f = null; w = hgt = 0; rows = null;
     INFO i;
     if (!GetConsoleScreenBufferInfo(h, out i)) return false;
     w = i.Win.R - i.Win.L + 1; hgt = i.Win.B - i.Win.T + 1;
     var cells = new CELL[w * hgt]; var r = i.Win;
     if (!ReadConsoleOutput(h, cells, new COORD((short)w, (short)hgt), new COORD(0, 0), ref r)) return false;
     var sb = new StringBuilder("\x1b[H");
+    rows = new string[hgt];
     for (int y = 0; y < hgt; y++) {
       int prev = -1;
+      var row = new StringBuilder();
       for (int x = 0; x < w; x++) {
         var c = cells[y * w + x];
         if ((c.Attr & 0x200) != 0) continue; // trailing half of a wide char
         int a = c.Attr & 0xFF;
         if (a != prev) { sb.Append(Sgr(a)); prev = a; }
-        sb.Append(c.Ch == '\0' ? ' ' : c.Ch);
+        char ch = c.Ch == '\0' ? ' ' : c.Ch;
+        sb.Append(ch); row.Append(ch);
       }
+      rows[y] = row.ToString();
       sb.Append("\x1b[0m\x1b[K");
       if (y < hgt - 1) sb.Append("\r\n");
     }
