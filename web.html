@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#000000">
 <title>Claude 多账号</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.css">
 <style>
   :root { --bg: #000; --card: #161618; --card2: #1f1f22; --line: rgba(255,255,255,.08); --fg: #fff; --fg2: rgba(255,255,255,.62);
     --fg3: rgba(255,255,255,.38); --green: #30d158; --orange: #ff9f0a; --red: #ff453a; --blue: #0a84ff; --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; }
@@ -64,18 +64,19 @@
   .opt { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.08); font-size: 14px; border: 1px solid transparent; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .opt.on { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
   input[type=text], textarea { width: 100%; background: rgba(255,255,255,.08); border: 0; border-radius: 12px; color: var(--fg); font: inherit; padding: 10px 12px; outline: none; }
-  #term { position: fixed; inset: 0; background: #0c0c0c; z-index: 10; display: none; flex-direction: column; padding-top: env(safe-area-inset-top); }
+  #term { position: fixed; inset: 0; background: #0b0b0d; z-index: 10; display: none; flex-direction: column; padding-top: env(safe-area-inset-top); }
   #term.on { display: flex; }
   #termHead { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
   #termHead .main { flex: 1; min-width: 0; }
-  #screen { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+  #screen { flex: 1; min-height: 0; overflow: auto; background: #0b0b0d; }
+  #screen .xterm { padding: 6px 2px 4px 10px; background: #0b0b0d; } /* on the terminal itself: the fit add-on subtracts it */
   #keys { display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; border-top: 1px solid var(--line); scrollbar-width: none; }
   #keys button { flex: none; background: rgba(255,255,255,.1); border-radius: 9px; padding: 7px 11px; font-size: 13px; font-weight: 600; }
   #send { display: flex; gap: 8px; padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
   #send textarea { flex: 1; resize: none; height: 40px; max-height: 120px; }
   #gone { display: none; background: rgba(255,69,58,.15); color: #ff8a80; font-size: 13px; padding: 6px 12px; }
   /* a computer's browser: the real keyboard types straight into the terminal, so no key row or input box */
-  @media (pointer: fine) { #keys, #send { display: none; } #screen { padding-bottom: 8px; } }
+  @media (pointer: fine) { #keys, #send { display: none; } }
   .toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: #2c2c2e; padding: 10px 16px; border-radius: 12px; font-size: 14px;
     z-index: 30; max-width: 90vw; white-space: pre-wrap; display: none; }
 </style>
@@ -102,8 +103,11 @@
 <div class="sheet" id="sheet"><div class="in" id="sheetIn"></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/lib/addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-unicode11@0.9.0/lib/addon-unicode11.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.19.0/lib/addon-webgl.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.12.0/lib/addon-web-links.min.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -136,7 +140,7 @@ function renderChats() {
   const run = state.sessions.filter((s) => s.pid), rest = state.sessions.filter((s) => !s.pid).slice(0, 40);
   const row = (s) => `<button class="row" data-open="${esc(s.id)}"><div class="main"><div class="t">${esc(s.title)}</div>
     <div class="m">${esc(s.cwd.split(/[\\/]/).pop())} · 账号 ${s.acct + 1}${s.prompt ? ' · ' + esc(s.prompt) : ''}</div></div>
-    ${s.pid ? `<span class="chip ${s.where}">${s.where === 'web' ? '手机上' : '电脑上'}</span>` : `<span class="m">${ago(s.at)}</span>`}</button>`;
+    ${s.pid ? `<span class="chip ${s.where}">${s.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="m">${ago(s.at)}</span>`}</button>`;
   $('#view').innerHTML = `<h1>对话</h1><div class="sub">${esc(state.me)} · 电脑上的 Claude</div>
     <button class="btn primary" id="newBtn" style="width:100%;padding:12px">＋ 新对话</button>
     ${notes.length ? `<h2><span>提示<span class="badge">${notes.length}</span></span><button class="m" id="readAll">全部已读</button></h2>
@@ -152,7 +156,7 @@ function renderChats() {
     const s = state.sessions.find((x) => x.id === b.dataset.open);
     if (!s) return toast('这个对话已经不在列表里了');
     if (notes.some((n) => n.id === s.id)) post('/api/read', { id: s.id }).catch(() => {}); // opened it: its notification is done
-    openTerm({ id: s.id, acct: acctFor(s) }, s.title, `${s.cwd} · ${s.pid ? (s.where === 'web' ? '在手机上运行' : '电脑窗口里的那个终端') : '用账号 ' + acctFor(s) + ' 继续'}`);
+    openTerm({ id: s.id, acct: acctFor(s) }, s.title, `${s.cwd} · ${s.pid ? (s.where === 'web' ? '在网页上运行' : '和电脑上的窗口同步：两边一样，可以直接打字（大小跟电脑窗口）') : '用账号 ' + acctFor(s) + ' 继续'}`);
   }));
 }
 
@@ -217,13 +221,30 @@ function newSheet() {
 }
 $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') e.target.classList.remove('on'); };
 
-// --- the terminal: a conversation started or continued here runs at the phone's size; one open in a window
-// on the computer keeps that window's size, and the font shrinks to fit it.
-let term = null, fit = null, es = null, key = null, kind = null;
+// --- the terminal. A conversation running in the web service (started or continued here) takes the size of
+// the screen you type on, or last opened it; another screen showing it at the same time (a terminal tab on the
+// computer, a second browser) scales its font to fit. One open in a window on the computer keeps that
+// window's size, and the font shrinks to fit it.
+let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve();
+const FONT = matchMedia('(pointer: fine)').matches ? 14 : 13;
+const THEME = { background: '#0b0b0d', foreground: '#e8e8ea', cursor: '#ffffff', cursorAccent: '#0b0b0d', selectionBackground: 'rgba(100,181,255,.35)',
+  black: '#1c1c1f', red: '#ff6961', green: '#30d158', yellow: '#ffd60a', blue: '#4ea1ff', magenta: '#d48cff', cyan: '#5ad8e6', white: '#d1d1d6',
+  brightBlack: '#6e6e73', brightRed: '#ff8a80', brightGreen: '#5ee07f', brightYellow: '#ffe35a', brightBlue: '#82bcff', brightMagenta: '#e2a8ff', brightCyan: '#8fe7f0', brightWhite: '#ffffff' };
 const KEYS = [['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['←', '\x1b[D'], ['→', '\x1b[C'], ['^C', '\x03'], ['⏎', '\r'], ['⌫', '\x7f']];
 $('#keys').innerHTML = KEYS.map(([l], i) => `<button data-k="${i}">${l}</button>`).join('');
 $('#keys').onclick = (e) => { const b = e.target.closest('[data-k]'); if (b) input(KEYS[+b.dataset.k][1]); };
-const input = (data) => key && post('/api/input', { key, data }).catch((e) => toast(e.message));
+// in order; when another screen had the size, this one takes it first (you type here, so it decides)
+const input = (data) => {
+  if (!key) return;
+  const k = key, takeBack = kind === 'pty' && ptySize && mine && (ptySize.w !== mine.cols || ptySize.h !== mine.rows);
+  q = q.then(() => (takeBack ? claim() : null)).then(() => post('/api/input', { key: k, data })).catch((e) => toast(e.message));
+};
+function claim() { // this screen's size for the conversation
+  if (!term || kind !== 'pty') return Promise.resolve();
+  term.options.fontSize = FONT; fit.fit();
+  mine = { cols: term.cols, rows: term.rows }; ptySize = { w: mine.cols, h: mine.rows };
+  return post('/api/resize', { key, ...mine }).catch(() => {});
+}
 $('#go').onclick = () => { const v = $('#line').value; if (!v) return; input(v.replace(/\n/g, '\r') + '\r'); $('#line').value = ''; };
 $('#back').onclick = closeTerm;
 function sizeFont(cols) { // a window on the computer: shrink the font until its width fits the phone
@@ -233,22 +254,38 @@ function sizeFont(cols) { // a window on the computer: shrink the font until its
 async function openTerm(body, title, sub) {
   $('#termTitle').textContent = title; $('#termSub').textContent = sub; $('#gone').style.display = 'none';
   $('#term').classList.add('on'); $('#screen').innerHTML = '';
-  term = new Terminal({ fontSize: 13, fontFamily: 'Menlo, Consolas, "Cascadia Mono", monospace', theme: { background: '#0c0c0c' }, cursorBlink: true, scrollback: 3000 });
-  fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open($('#screen')); fit.fit();
+  mine = ptySize = null;
+  term = new Terminal({ fontSize: FONT, lineHeight: 1.12, theme: THEME, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
+    fontFamily: '"SF Mono", Menlo, "Cascadia Mono", Consolas, "PingFang SC", "Microsoft YaHei", monospace' });
+  fit = new FitAddon.FitAddon(); term.loadAddon(fit);
+  term.loadAddon(new Unicode11Addon.Unicode11Addon()); term.unicode.activeVersion = '11'; // Chinese and emoji two cells wide, as Claude Code counts them
+  term.loadAddon(new WebLinksAddon.WebLinksAddon()); // links open in a new tab
+  term.open($('#screen'));
+  // WebGL on a computer only: sharper and faster there; on phones it drew at the wrong pixel density, and
+  // mobile browsers drop its context when the page goes to the background
+  if (matchMedia('(pointer: fine)').matches) try { const gl = new WebglAddon.WebglAddon(); gl.onContextLoss(() => gl.dispose()); term.loadAddon(gl); } catch {}
+  fit.fit();
   term.onData(input);
   try { ({ key, kind } = await post('/api/open', { ...body, cols: term.cols, rows: term.rows })); } catch (e) { toast(e.message); return closeTerm(); }
   es = new EventSource('/api/term?key=' + encodeURIComponent(key));
   es.addEventListener('data', (e) => term.write(JSON.parse(e.data)));
   es.addEventListener('size', (e) => {
     const s = JSON.parse(e.data);
-    if (kind === 'pc' && s.w) { term.resize(s.w, s.h); sizeFont(s.w); }
-    else { fit.fit(); post('/api/resize', { key, cols: term.cols, rows: term.rows }); }
+    if (!s.w) return;
+    if (kind === 'pc') { term.resize(s.w, s.h); sizeFont(s.w); return; }
+    ptySize = s;
+    if (mine && s.w === mine.cols && s.h === mine.rows) { if (term.cols !== s.w || term.rows !== s.h) { term.options.fontSize = FONT; fit.fit(); } return; }
+    if (mine) { term.resize(s.w, s.h); sizeFont(s.w); } // another screen took it: show that size, scaled
   });
   es.addEventListener('gone', () => { $('#gone').style.display = 'block'; });
+  if (kind === 'pty') claim(); // opening it here: this screen's size
   if (matchMedia('(pointer: fine)').matches) term.focus(); // a phone would pop its keyboard over the screen
 }
 function closeTerm() { es?.close(); es = null; term?.dispose(); term = null; key = null; $('#term').classList.remove('on'); load(); }
-window.addEventListener('resize', () => { if (!term || !key) return; if (kind === 'pc') sizeFont(term.cols); else { fit.fit(); post('/api/resize', { key, cols: term.cols, rows: term.rows }); } });
+window.addEventListener('resize', () => { if (!term || !key) return; if (kind === 'pc') sizeFont(term.cols); else claim(); });
+// back to this screen (switched apps, picked the phone up): it takes the size again
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && key) claim(); });
+window.addEventListener('focus', () => { if (key) claim(); });
 
 document.querySelectorAll('nav button').forEach((b) => (b.onclick = () => { tab = b.dataset.tab; history.replaceState(null, '', '#' + tab); if (tab === 'tokens') tokens = null; render(); }));
 load();

@@ -553,6 +553,13 @@ function Open-Terminal([string]$dir, [string]$cmdArgs) { # a new Windows Termina
   if ($dir.EndsWith('\')) { $dir += '.' } # "D:\" would escape its closing quote
   Start-Process wt.exe -ArgumentList "-d `"$dir`" node `"$js`" $cmdArgs"
 }
+# A conversation running in the web service has no window here: a tab joins it (claude-multi attach), or the
+# tab that joined it already comes to the front (found by its attach process, like a Claude by its own).
+function Open-WebChat([string]$id, [string]$dir) {
+  $tab = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue | Where-Object { "$($_.CommandLine)" -like "*claude-multi.js* attach $id*" })[0]
+  if ($tab) { Focus-Claude ([int]$tab.ProcessId) } else { Open-Terminal $dir "attach $id" }
+}
+function Web-Pids { try { ConvertFrom-Json ([IO.File]::ReadAllText("$root\web-terms.json")) } catch { @() } } # written by claude-multi web
 # Brings up a running Claude's terminal tab: a helper process selects the tab and prints the window, which
 # we raise (allowed: the user just clicked us, so we hold the foreground).
 function Focus-Claude([int]$claudePid) {
@@ -634,7 +641,8 @@ function New-Alert($n, [datetime]$t) {
   $el.Add_MouseLeftButtonUp({
     param($s, $e)
     $e.Handled = $true
-    if ($s.Tag) { Focus-Claude $s.Tag }
+    if ($s.Tag -and $s.DataContext -and (Web-Pids) -contains $s.Tag) { Open-WebChat $s.DataContext $env:USERPROFILE }
+    elseif ($s.Tag) { Focus-Claude $s.Tag }
     Mark-Read $s.DataContext
     $s.Parent.Children.Remove($s) # read: gone, whether it was showing or waiting in the unread list
     if ($Alerts.Children.Count -eq 0) { $Alerts.Visibility = 'Collapsed' }
@@ -1096,7 +1104,7 @@ function Find-Chat([string]$id) {
   $null
 }
 function Free-Spots { $n = 0; foreach ($g in $script:arr.groups) { foreach ($col in $g) { foreach ($w in $col) { if (-not $w.Count) { $n++ } } } }; $n }
-function Live-Ids { @($script:chats | Where-Object { $_.pid } | ForEach-Object { $_.id }) }
+function Live-Ids { @($script:chats | Where-Object { $_.pid -and -not $_.web } | ForEach-Object { $_.id }) } # web-run ones have no window to place
 function Need-Groups { [int][Math]::Max(1, [Math]::Ceiling((Live-Ids).Count / ($script:arr.r * $script:arr.c))) }
 # Every conversation still waiting can get a window of its own: if not, one more empty group.
 function Grow-Groups { for ($i = Free-Spots; $i -lt $script:arr.tray.Count; $i += $script:arr.r * $script:arr.c) { $script:arr.groups.Add((New-Group)) } }
@@ -1543,11 +1551,13 @@ function Add-Chat($s) {
   $n = Resume-Account $s
   $mixed = $script:folder -eq '' -or $script:folder -eq '*' # rows from several folders say which one
   # right column: at rest the time (or a 运行中 chip), on hover the action, in the same cell
-  $rest = if ($s.pid) { "<Border Background='#2E30D158' CornerRadius='8' Padding='8,2'><TextBlock Text='运行中' FontSize='11' FontWeight='SemiBold' Foreground='#30D158'/></Border>" }
+  # running in the web service (started or continued from the web page): no window here, a tab joins it
+  $rest = if ($s.web) { "<Border Background='#2E0A84FF' CornerRadius='8' Padding='8,2'><TextBlock Text='网页上' FontSize='11' FontWeight='SemiBold' Foreground='#64B5FF'/></Border>" }
+    elseif ($s.pid) { "<Border Background='#2E30D158' CornerRadius='8' Padding='8,2'><TextBlock Text='运行中' FontSize='11' FontWeight='SemiBold' Foreground='#30D158'/></Border>" }
     else { "<TextBlock Text='$(Ago $s.at)' FontSize='12' Foreground='#66FFFFFF'/>" }
-  $act = if ($s.pid) { '切回窗口' } else { "继续 · 账号 $n" }
+  $act = if ($s.web) { '在电脑上打开' } elseif ($s.pid) { '切回窗口' } else { "继续 · 账号 $n" }
   $who = if ($script:data) { "（$($script:data.accounts[$n - 1].label)）" } else { '' }
-  $tip = if ($s.pid) { '还开着，点击切回它的终端标签' } else { "用账号 $n$who 在 $($s.cwd) 继续" }
+  $tip = if ($s.web) { '在网页上运行：点击开一个终端标签接上它，两边同步，关掉标签不会结束对话' } elseif ($s.pid) { '还开着，点击切回它的终端标签' } else { "用账号 $n$who 在 $($s.cwd) 继续" }
   # one folder can hold conversations of several accounts
   $sub = @(@(if ($mixed) { "<Run Text='$(Esc (Split-Path $s.cwd -Leaf))' Foreground='#99FFFFFF'/>" }) +
     "<Run Text='账号 $([int]$s.acct + 1)'/>" +
@@ -1611,7 +1621,8 @@ function Add-Chat($s) {
   $b.Add_Click({
     param($x)
     $s = $x.Tag
-    if ($s.pid) { Focus-Claude $s.pid } else { Open-Terminal $s.cwd "resume $($s.id) $(Resume-Account $s)" }
+    if ($s.web) { Open-WebChat $s.id $s.cwd }
+    elseif ($s.pid) { Focus-Claude $s.pid } else { Open-Terminal $s.cwd "resume $($s.id) $(Resume-Account $s)" }
   })
   [void]$cList.Children.Add($b)
 }

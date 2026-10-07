@@ -361,6 +361,8 @@ function listSessions(reg) {
   // running means that pid also started when Claude wrote down (without PowerShell, the pid alone)
   const starts = procStarts(alive.map((j) => j.pid));
   for (const j of alive) if (!starts || !j.procStart || starts.get(String(j.pid)) === String(j.procStart)) live.set(j.sessionId, j.pid);
+  let webPids = new Set(); // the Claudes the web service runs (web-terms.json, written by it)
+  try { webPids = new Set(JSON.parse(fs.readFileSync(WEB_TERMS, 'utf8'))); } catch {}
   const tmp = os.tmpdir().toLowerCase(), out = [];
   for (const s of found.values()) {
     const fd = fs.openSync(s.file, 'r'), size = fs.fstatSync(fd).size;
@@ -375,7 +377,8 @@ function listSessions(reg) {
     try { named = JSON.parse(fs.readFileSync(path.join(s.file.slice(0, -6), 'custom-title.json'), 'utf8')).customTitle; } catch {}
     const title = named || field(tail, 'customTitle', true) || field(tail, 'aiTitle', true) || field(head, 'aiTitle') || prompt;
     if (!cwd || !title || cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)) continue; // nothing to go back to
-    out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid: live.get(s.id) ?? null,
+    const pid = live.get(s.id) ?? null;
+    out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, web: !!pid && webPids.has(pid),
       who: reg.profiles[s.acct].label.split('@')[0] });
   }
   return out.sort((a, b) => b.at - a.at);
@@ -434,6 +437,58 @@ function resume(id, n) {
   copyTo(s, p);
   process.chdir(s.cwd);
   start(p, ['--resume', id], 'resume');
+}
+// attach ID: this terminal joins a conversation running in the web service (one started or continued from
+// the web page): the same screen on both sides, either one types. The size follows the side you type on;
+// the other side scales to it. Closing this tab leaves the conversation running there.
+async function attach(id) {
+  const base = `http://127.0.0.1:${WEB_PORT}`;
+  const headers = { 'tailscale-user-login': tailscaleMe()?.login ?? '', 'content-type': 'application/json' };
+  const post = async (p, body) => {
+    const r = await fetch(base + p, { method: 'POST', headers, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.err || r.status);
+    return j;
+  };
+  const size = () => ({ cols: process.stdout.columns || 100, rows: process.stdout.rows || 30 });
+  let key;
+  try {
+    const r = await post('/api/open', { id, ...size() });
+    if (r.kind !== 'pty') throw new Error('它在电脑的终端窗口里运行，直接切过去就行');
+    key = r.key;
+  } catch (e) { console.log(`接不上这个对话：${e.message}`); process.exit(1); }
+  let pty = null; // its size, as the web service last said
+  const claim = (force) => {
+    const m = size();
+    if (!force && pty && pty.w === m.cols && pty.h === m.rows) return Promise.resolve();
+    pty = { w: m.cols, h: m.rows };
+    return post('/api/resize', { key, ...m }).catch(() => {});
+  };
+  let q = Promise.resolve(); // keystrokes in order, each after a size claim if another side had it
+  process.stdin.setRawMode(true);
+  process.stdin.on('data', (d) => { const data = d.toString('utf8'); q = q.then(() => claim()).then(() => post('/api/input', { key, data })).catch(() => {}); });
+  process.stdout.on('resize', () => claim(true));
+  try {
+    const r = await fetch(`${base}/api/term?key=${encodeURIComponent(key)}`, { headers });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).err || r.status);
+    // a nudge to a size one row off and back: Claude redraws the whole screen for this tab
+    post('/api/resize', { key, cols: size().cols, rows: Math.max(10, size().rows - 1) }).then(() => claim(true));
+    const dec = new TextDecoder();
+    let buf = '';
+    for await (const chunk of r.body) {
+      buf += dec.decode(chunk, { stream: true });
+      for (let k; (k = buf.indexOf('\n\n')) >= 0; buf = buf.slice(k + 2)) {
+        const block = buf.slice(0, k), ev = /^event: (\w+)/m.exec(block)?.[1], data = /^data: (.*)$/m.exec(block)?.[1];
+        if (ev === 'data') process.stdout.write(JSON.parse(data));
+        else if (ev === 'size') pty = JSON.parse(data);
+        else if (ev === 'gone') process.exit(0); // Claude exited: the tab closes, as for one run here
+      }
+    }
+    throw new Error('网页服务断开了');
+  } catch (e) { // exit code 1 keeps the tab open, so the reason stays readable
+    process.stdout.write(`\r\n\x1b[0m和网页服务的连接断了（${e.message}）。对话记录还在，从对话列表里重新打开就行。\r\n`);
+    process.exit(1);
+  }
 }
 // Before account p continues conversation s: its newest record (and side folder) into p's config dir.
 function copyTo(s, p) {
@@ -629,6 +684,7 @@ async function usage(args) {
 // Listens on 127.0.0.1 only. `tailscale serve` publishes it to the tailnet over HTTPS and names the visitor
 // in Tailscale-User-Login; only this machine's own Tailscale user gets in, as the page runs Claude here.
 const NOTES = path.join(ROOT, 'notes.jsonl');
+const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes running in the web service
 const WEB_PORT = 7788;
 const TAILSCALE = 'C:\\Program Files\\Tailscale\\tailscale.exe';
 
@@ -710,9 +766,13 @@ async function web() {
   function startPty(p, cwd, args, cols = 100, rows = 30) {
     const key = `p${Date.now().toString(36)}`;
     const proc = pty.spawn(claudeExe, args, { name: 'xterm-256color', cols, rows, cwd, env: childEnv(p.configDir) });
-    const t = { kind: 'pty', key, pid: proc.pid, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd };
-    proc.onData((d) => { t.buf = (t.buf + d).slice(-262144); send(t, 'data', d); });
-    proc.onExit(() => { t.gone = true; send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
+    // pid read live: node-pty only knows it once the pseudo-terminal is ready (it is 0 right after spawn)
+    const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd };
+    proc.onData((d) => {
+      if (!t.listed && proc.pid) { t.listed = true; saveTerms(); }
+      t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
+    });
+    proc.onExit(() => { t.gone = true; saveTerms(); send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t);
     log('web_session', { profile_id: p.id, cwd, args: args.join(' ') });
     return t;
@@ -735,10 +795,15 @@ async function web() {
       }
     });
     proc.on('exit', () => { t.gone = true; send(t, 'gone', {}); terms.delete(key); });
+    setTimeout(() => { if (!t.clients.size) proc.kill(); }, 30000); // opened but nobody came to watch: not left running
     terms.set(key, t);
     return t;
   }
   const where = (s) => [...terms.values()].find((t) => !t.gone && t.pid === s.pid); // ours, or a window here
+  // for the island and `claude-multi attach`: which running conversations are ours
+  function saveTerms() {
+    try { fs.writeFileSync(WEB_TERMS, JSON.stringify([...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid).map((t) => t.pid))); } catch {}
+  }
 
   const api = {
     'GET /api/state': async (q) => {
@@ -788,7 +853,11 @@ async function web() {
     },
     'POST /api/resize': (q, b) => { // phone-sized for our own terminals; a window here keeps its own size
       const t = terms.get(b.key);
-      if (t?.kind === 'pty' && !t.gone && b.cols > 0 && b.rows > 0) { t.proc.resize(Math.min(300, b.cols | 0), Math.min(200, b.rows | 0)); t.w = b.cols | 0; t.h = b.rows | 0; }
+      if (t?.kind === 'pty' && !t.gone && b.cols > 0 && b.rows > 0) {
+        t.w = Math.min(300, b.cols | 0); t.h = Math.min(200, b.rows | 0);
+        t.proc.resize(t.w, t.h);
+        send(t, 'size', { w: t.w, h: t.h }); // the side you use last decides; the others scale to it
+      }
       return {};
     },
   };
@@ -832,7 +901,7 @@ async function web() {
     } catch (e) { out(500, { err: e.message }); }
   });
   server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
-  server.listen(WEB_PORT, '127.0.0.1', () => console.log(`手机页面：https://${me.host}/  （只有 ${me.login} 能打开）`));
+  server.listen(WEB_PORT, '127.0.0.1', () => saveTerms() || console.log(`手机页面：https://${me.host}/  （只有 ${me.login} 能打开）`));
 }
 
 // Claude Code's status line: the account (bold, in its own color), model and effort, the conversation's folder
@@ -985,6 +1054,7 @@ if (require.main === module) {
   else if (cmd === 'island') island();
   else if (cmd === 'chats') chats(process.argv[3]);
   else if (cmd === 'resume') resume(process.argv[3], process.argv[4]);
+  else if (cmd === 'attach') attach(process.argv[3]);
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'web') web();
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));
