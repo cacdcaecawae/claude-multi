@@ -83,6 +83,7 @@
   #term.hist #screen, #term.hist #keys { display: none; }
   #term.hist #send { display: flex; }
   #hist .col { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  #hOld, #hNew { display: contents; } /* their messages sit in the column's flow */
   .hm { white-space: pre-wrap; word-break: break-word; font-size: 14.5px; line-height: 1.6; }
   .hm.user { align-self: flex-end; max-width: 85%; background: rgba(10,132,255,.2); border-radius: 16px 16px 4px 16px; padding: 8px 13px; }
   .hm.tool { font: 12.5px/1.4 "SF Mono", Menlo, Consolas, monospace; color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -299,31 +300,65 @@ $('#line').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isCom
 
 // --- 记录: the conversation's saved messages (a window on the computer only gives its current screen), read
 // again every 4 s while shown, kept at the bottom unless you scrolled up.
-let view = 'term', histId = null, histTimer = null, histSig = '';
+// A record can be ~100 MB, so it comes in pieces: the newest one (from where it starts, read again every 4 s,
+// growing) and, as you scroll to the top, each piece before it, put above without moving what you're reading.
+let view = 'term', histId = null, histTimer = null, histSig = '', histFrom = null, histOldest = null, histBusy = false;
 function setView(v) {
   view = v;
   $('#term').classList.toggle('hist', v === 'hist');
   document.querySelectorAll('#seg button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
   clearInterval(histTimer);
-  if (v === 'hist') { loadHist(true); histTimer = setInterval(() => { if (document.visibilityState === 'visible') loadHist(); }, 4000); }
+  if (v === 'hist') { loadHist(histFrom == null); histTimer = setInterval(() => { if (document.visibilityState === 'visible') loadHist(); }, 4000); }
   else if (term) { if (kind === 'pc') sizeFont(term.cols); else claim(); } // shown again: measure again
 }
 $('#seg').onclick = (e) => { const b = e.target.closest('[data-v]'); if (b) setView(b.dataset.v); };
+const hmHtml = (items) => items.map((m) => `<div class="hm ${m.role}">${m.role === 'tool' || m.role === 'note' ? esc(m.text) : md(m.text)}</div>`).join('');
+async function histGet(id, q) {
+  const r = await (await fetch(`/api/history?id=${encodeURIComponent(id)}${q}`)).json();
+  if (r.err) throw new Error(r.err);
+  return r;
+}
 async function loadHist(first) {
   const id = histId;
   if (!id) return;
-  let r;
-  try { r = await (await fetch('/api/history?id=' + encodeURIComponent(id))).json(); } catch { return; }
-  if (id !== histId || view !== 'hist') return; // closed or another one opened meanwhile
   const el = $('#hist');
-  if (r.err) { el.innerHTML = `<div class="empty">${esc(r.err)}</div>`; return; }
+  let r;
+  try { r = await histGet(id, first ? '' : `&from=${histFrom}`); }
+  catch (e) { if (id === histId && first) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  if (id !== histId || view !== 'hist') return; // closed or another one opened meanwhile
+  if (first) {
+    histFrom = histOldest = r.start; histSig = '';
+    el.innerHTML = '<div class="col"><div id="hTop" class="hm note"></div><div id="hOld"></div><div id="hNew"></div></div>';
+  }
   const sig = `${r.items.length}:${r.items.at(-1)?.text.length ?? 0}`;
-  if (sig === histSig && !first) return;
-  histSig = sig;
-  const atEnd = first || el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  el.innerHTML = `<div class="col">${r.items.length ? r.items.map((m) => `<div class="hm ${m.role}">${m.role === 'tool' || m.role === 'note' ? esc(m.text) : md(m.text)}</div>`).join('') : '<div class="empty">还没有记录</div>'}</div>`;
-  if (atEnd) el.scrollTop = el.scrollHeight;
+  if (sig !== histSig) {
+    histSig = sig;
+    const atEnd = first || el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    $('#hNew').innerHTML = hmHtml(r.items);
+    if (atEnd) el.scrollTop = el.scrollHeight;
+  }
+  topNote();
+  if (el.scrollTop < 300) loadOlder(); // too little to scroll yet: fill from before
 }
+function topNote() {
+  const t = $('#hTop');
+  if (t) t.textContent = histOldest > 0 ? '往上划，加载更早的记录' : $('#hOld').innerHTML || $('#hNew').innerHTML ? '对话开头' : '还没有记录';
+}
+async function loadOlder() {
+  if (histBusy || !histOldest || view !== 'hist') return;
+  histBusy = true;
+  const id = histId, el = $('#hist');
+  try {
+    const r = await histGet(id, `&end=${histOldest}`);
+    if (id !== histId || !$('#hOld')) return;
+    const h = el.scrollHeight;
+    $('#hOld').insertAdjacentHTML('afterbegin', hmHtml(r.items));
+    histOldest = r.start; topNote();
+    el.scrollTop += el.scrollHeight - h; // what you were reading stays where it was
+  } catch {} finally { histBusy = false; }
+  if (el.scrollTop < 300 && histOldest > 0) loadOlder();
+}
+$('#hist').addEventListener('scroll', (e) => { if (e.target.scrollTop < 300) loadOlder(); });
 // enough Markdown for Claude's replies: code blocks, tables (kept monospace), inline code, bold, headings
 function md(t) {
   return esc(t).split(/```[^\n]*\n?/).map((p, i) => i % 2 ? `<pre>${p.replace(/\n$/, '')}</pre>`
@@ -339,7 +374,7 @@ async function openTerm(body, title, sub) {
   $('#termTitle').textContent = title; $('#termSub').textContent = sub; $('#gone').style.display = 'none';
   $('#term').classList.add('on'); $('#screen').innerHTML = '';
   mine = ptySize = null;
-  histId = body.id ?? null; histSig = ''; $('#hist').innerHTML = ''; // a brand-new one has no record yet
+  histId = body.id ?? null; histSig = ''; histFrom = histOldest = null; $('#hist').innerHTML = ''; // a brand-new one has no record yet
   $('#seg').style.display = histId ? '' : 'none'; setView('term');
   term = new Terminal({ fontSize: FONT, lineHeight: 1.12, theme: THEME, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
     fontFamily: '"SF Mono", Menlo, "Cascadia Mono", Consolas, "PingFang SC", "Microsoft YaHei", monospace' });
@@ -352,25 +387,62 @@ async function openTerm(body, title, sub) {
   if (matchMedia('(pointer: fine)').matches) try { const gl = new WebglAddon.WebglAddon(); gl.onContextLoss(() => gl.dispose()); term.loadAddon(gl); } catch {}
   fit.fit();
   term.onData(input);
+  openBody = body; ended = false; fails = 0;
   try { ({ key, kind } = await post('/api/open', { ...body, cols: term.cols, rows: term.rows })); } catch (e) { toast(e.message); return closeTerm(); }
-  es = new EventSource('/api/term?key=' + encodeURIComponent(key));
-  es.addEventListener('data', (e) => term.write(JSON.parse(e.data)));
-  es.addEventListener('size', (e) => {
-    const s = JSON.parse(e.data);
-    if (!s.w) return;
-    if (kind === 'pc') { term.resize(s.w, s.h); sizeFont(s.w); return; }
-    ptySize = s;
-    if (mine && s.w === mine.cols && s.h === mine.rows) { if (term.cols !== s.w || term.rows !== s.h) { term.options.fontSize = FONT; fit.fit(); } return; }
-    if (mine) { term.resize(s.w, s.h); sizeFont(s.w); } // another screen took it: show that size, scaled
-  });
-  es.addEventListener('gone', () => { $('#gone').style.display = 'block'; });
-  if (kind === 'pty') claim(); // opening it here: this screen's size
+  connect();
   if (matchMedia('(pointer: fine)').matches) term.focus(); // a phone would pop its keyboard over the screen
 }
-function closeTerm() { clearInterval(histTimer); es?.close(); es = null; term?.dispose(); term = null; key = null; $('#term').classList.remove('on', 'hist'); view = 'term'; load(); }
+// The live stream. It is opened again when it goes quiet (a computer waking up, a phone back from the
+// background, a network change: a browser never notices a dead connection itself; the server pings every
+// 15 s) or is refused (the server restarted, or a window's reader stopped after 30 s unwatched). Again means
+// opening the conversation again for a fresh key, only while it still runs: one that ended isn't started anew.
+// Each connect has a number: one overtaken by a newer connect, or by closing the terminal, drops out.
+let openBody = null, lastSeen = 0, ended = false, gen = 0, fails = 0;
+const end = () => { ended = true; $('#gone').style.display = 'block'; };
+async function connect(again) {
+  const me = ++gen;
+  es?.close(); es = null;
+  if (!term || ended) return;
+  if (again && openBody.id) {
+    let r;
+    try { r = await post('/api/open', { id: openBody.id, live: true, cols: term.cols, rows: term.rows }); }
+    catch (e) { if (me === gen) end(); return; }
+    if (me !== gen || !term) return;
+    ({ key, kind } = r);
+  }
+  lastSeen = Date.now();
+  const s = es = new EventSource('/api/term?key=' + encodeURIComponent(key));
+  const on = (ev, fn) => s.addEventListener(ev, (e) => { if (es !== s) return; lastSeen = Date.now(); fn(e); });
+  // every (re)connection, the browser's own retries too, starts with everything sent again: a conversation's
+  // output so far, or a window's kept lines and screen, so the screen is cleared first
+  s.onopen = () => { if (es === s) { term.reset(); fails = 0; } };
+  on('ping', () => {});
+  on('data', (e) => term.write(JSON.parse(e.data)));
+  on('size', (e) => {
+    const z = JSON.parse(e.data);
+    if (!z.w) return;
+    if (kind === 'pc') { term.resize(z.w, z.h); sizeFont(z.w); return; }
+    ptySize = z;
+    if (mine && z.w === mine.cols && z.h === mine.rows) { if (term.cols !== z.w || term.rows !== z.h) { term.options.fontSize = FONT; fit.fit(); } return; }
+    if (mine) { term.resize(z.w, z.h); sizeFont(z.w); } // another screen took it: show that size, scaled
+  });
+  on('gone', end);
+  s.onerror = () => { // CLOSED: refused (the browser retries the rest itself)
+    if (es !== s || s.readyState !== EventSource.CLOSED || ended) return;
+    if (!openBody.id || ++fails > 5) return end(); // a brand-new one can't be found again by id; or it keeps failing
+    setTimeout(() => { if (es === s) connect(true); }, 1500);
+  };
+  if (kind === 'pty') { mine = null; claim(); } // this screen's size
+}
+const stale = (ms) => term && !ended && Date.now() - lastSeen > ms;
+setInterval(() => { if (stale(45000)) connect(true); }, 10000);
+function closeTerm() { gen++; clearInterval(histTimer); es?.close(); es = null; term?.dispose(); term = null; key = null; ended = false; fails = 0; $('#term').classList.remove('on', 'hist'); view = 'term'; load(); }
 window.addEventListener('resize', () => { if (!term || !key) return; if (kind === 'pc') sizeFont(term.cols); else claim(); });
 // back to this screen (switched apps, picked the phone up): it takes the size again
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && key) claim(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !key) return;
+  if (stale(25000)) connect(true); else claim(); // back after a while: the stream likely died meanwhile
+});
 window.addEventListener('focus', () => { if (key) claim(); });
 
 document.querySelectorAll('nav button').forEach((b) => (b.onclick = () => { tab = b.dataset.tab; history.replaceState(null, '', '#' + tab); if (tab === 'tokens') tokens = null; render(); }));

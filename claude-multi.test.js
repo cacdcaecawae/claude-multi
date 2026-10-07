@@ -147,7 +147,7 @@ console.log('tokens ok');
     u('Summary of earlier work', { isCompactSummary: true }),
     a([{ type: 'text', text: '测试通过。' }]),
   ].map((x) => JSON.stringify(x)).join('\n') + '\n');
-  assert.deepEqual(history(f).map((x) => `${x.role}:${x.text}`),
+  assert.deepEqual(history(f).items.map((x) => `${x.role}:${x.text}`),
     ['user:/rename 新名字', 'user:修一下 bug', 'claude:好的。', 'tool:Bash  Run tests', 'note:更早的内容已压缩', 'claude:测试通过。']);
   fs.rmSync(f);
   console.log('history ok');

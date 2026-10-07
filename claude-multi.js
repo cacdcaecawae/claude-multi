@@ -750,11 +750,19 @@ function unreadNotes(list, notes = readNotes(60), marks = readMarks()) {
 
 // A conversation's record as readable messages, for the page's 记录 view (a window here only shows its
 // current screen): what you said, Claude's replies, one line per tool call. Tool output, thinking and
-// Claude's own bookkeeping (reminders, background-task notices) are left out. The last 16 MB, last 600 items.
-function history(file, max = 600) {
+// Claude's own bookkeeping (reminders, background-task notices) are left out. Read in pieces, as byte ranges of
+// the file that start at a line: no range given, the last 16 MB; {end}, the 16 MB before end (scrolling back);
+// {from}, from there to the end (the newest piece, read again as it grows). start comes back for the next ask.
+function history(file, { from, end } = {}) {
   const fd = fs.openSync(file, 'r'), size = fs.fstatSync(fd).size;
-  const lines = slice(fd, Math.max(0, size - 16777216), 16777216).split('\n');
+  let a, b;
+  if (from != null) { a = Math.min(+from, size); b = size; }
+  else { b = end != null ? Math.min(+end, size) : size; a = Math.max(0, b - 16777216); }
+  const buf = Buffer.alloc(b - a);
+  fs.readSync(fd, buf, 0, b - a, a);
   fs.closeSync(fd);
+  const skip = a === 0 || from != null ? 0 : buf.indexOf(10) + 1; // a piece cut mid-line starts at its next line
+  const lines = buf.toString('utf8', skip).split('\n');
   const out = [];
   const add = (role, text, at) => {
     text = String(text ?? '').trim();
@@ -788,7 +796,7 @@ function history(file, max = 600) {
       }
     }
   }
-  return out.slice(-max);
+  return { items: out, start: a + skip };
 }
 
 async function web() {
@@ -826,15 +834,21 @@ async function web() {
     if (terms.has(key) && !terms.get(key).gone) return terms.get(key);
     const proc = require('child_process').spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
       path.join(ROOT, 'console-bridge.ps1'), String(pid)], { windowsHide: true });
-    const t = { kind: 'pc', key, pid, proc, clients: new Set(), frame: null, w: 0, h: 0 };
+    const t = { kind: 'pc', key, pid, proc, clients: new Set(), frame: null, w: 0, h: 0, hist: [] }; // hist: lines scrolled off, colored
     let line = '';
     proc.stdout.on('data', (d) => {
       line += d;
       for (let k; (k = line.indexOf('\n')) >= 0; line = line.slice(k + 1)) {
         let m; try { m = JSON.parse(line.slice(0, k)); } catch { continue; }
         if (m.gone) { t.gone = true; send(t, 'gone', {}); continue; }
-        // lines scrolled off the window's top: the page scrolls its screen as far, so they go to its history
-        if (m.s) { if (t.h) send(t, 'data', `\x1b[${t.h};1H` + '\n'.repeat(m.s)); continue; }
+        // lines scrolled off the window's top: kept here (the last 5000, for whoever opens it later or comes
+        // back), and an open page scrolls its screen as far, so they go to its history
+        if (m.s) {
+          if (t.frame) t.hist.push(...t.frame.replace(/^\x1b\[H/, '').split('\r\n').slice(0, m.s));
+          if (t.hist.length > 5000) t.hist.splice(0, t.hist.length - 5000);
+          if (t.h) send(t, 'data', `\x1b[${t.h};1H` + '\n'.repeat(m.s));
+          continue;
+        }
         if (m.w !== t.w || m.h !== t.h) { t.w = m.w; t.h = m.h; send(t, 'size', { w: m.w, h: m.h }); }
         t.frame = m.f; send(t, 'data', m.f);
       }
@@ -860,7 +874,7 @@ async function web() {
     'GET /api/history': (q) => { // asked every 4 s while shown: the cached list gives the file, read fresh below
       const s = sessions().find((x) => x.id === q.get('id'));
       if (!s) throw new Error('找不到这个对话');
-      return { items: history(s.file) };
+      return history(s.file, { from: q.get('from') ?? undefined, end: q.get('end') ?? undefined });
     },
     'POST /api/read': (q, b) => { // {id} one conversation's notifications, {all: true} every one; the island drops them too
       const id = b.all ? '*' : /^[\w-]{1,80}$/.test(b.id ?? '') ? b.id : null;
@@ -885,6 +899,7 @@ async function web() {
         const s = sessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
         if (s.pid) { const t = where(s) ?? mirror(s.pid); return { key: t.key, kind: t.kind }; }
+        if (b.live) throw new Error('这个对话已经不在运行了'); // the page reconnecting: an ended one isn't started anew
         const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
         copyTo(s, p);
         return { key: startPty(p, s.cwd, ['--resume', s.id], cols, rows).key, kind: 'pty' };
@@ -929,13 +944,15 @@ async function web() {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
         t.clients.add(res);
         res.write(`event: size\ndata: ${JSON.stringify({ w: t.w, h: t.h, kind: t.kind })}\n\n`);
-        const past = t.kind === 'pty' ? t.buf : t.frame;
+        // a window's kept lines first, then pushed off the screen (a newline per row) so the frame doesn't cover them
+        const past = t.kind === 'pty' ? t.buf : (t.hist.length ? t.hist.join('\r\n') + '\r\n'.repeat(t.h) : '') + (t.frame ?? '');
         if (past) res.write(`event: data\ndata: ${JSON.stringify(past)}\n\n`);
         if (t.gone) res.write('event: gone\ndata: {}\n\n');
-        const beat = setInterval(() => res.write(': \n\n'), 20000);
+        const beat = setInterval(() => res.write('event: ping\ndata: {}\n\n'), 15000); // a named event: the page sees it and knows the stream lives
         req.on('close', () => {
           clearInterval(beat); t.clients.delete(res);
-          if (t.kind === 'pc') setTimeout(() => { if (!t.clients.size) t.proc.kill(); }, 30000); // nobody watching
+          // nobody watching: the reader stays 20 min, still keeping what scrolls by, for when you come back
+          if (t.kind === 'pc') setTimeout(() => { if (!t.clients.size) t.proc.kill(); }, 1200000);
         });
         return;
       }
