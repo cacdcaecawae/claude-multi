@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>Claude 多账号</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<style>
+  :root { --bg: #000; --card: #161618; --card2: #1f1f22; --line: rgba(255,255,255,.08); --fg: #fff; --fg2: rgba(255,255,255,.62);
+    --fg3: rgba(255,255,255,.38); --green: #30d158; --orange: #ff9f0a; --red: #ff453a; --blue: #0a84ff; --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  body { padding: env(safe-area-inset-top) 0 0; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  main { padding: 14px 16px 96px; max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 6px 0 2px; }
+  .sub { color: var(--fg3); font-size: 13px; margin-bottom: 16px; }
+  h2 { font-size: 13px; font-weight: 600; color: var(--fg2); margin: 22px 4px 8px; display: flex; justify-content: space-between; align-items: center; }
+  .card { background: var(--card); border-radius: 16px; padding: 14px 16px; margin-bottom: 10px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--card); border-radius: 14px; margin-bottom: 8px; width: 100%; text-align: left; }
+  .row:active { background: var(--card2); }
+  .row .main { flex: 1; min-width: 0; }
+  .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m { font-size: 12.5px; color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .chip { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 8px; white-space: nowrap; }
+  .chip.pc { background: rgba(48,209,88,.16); color: var(--green); }
+  .chip.web { background: rgba(10,132,255,.18); color: #64b5ff; }
+  .dot { width: 30px; height: 30px; border-radius: 15px; display: grid; place-items: center; flex: none; font-size: 14px; }
+  .dot.done { background: rgba(48,209,88,.18); color: var(--green); }
+  .dot.ask { background: rgba(255,159,10,.18); color: var(--orange); }
+  .btn { background: rgba(255,255,255,.1); border-radius: 12px; padding: 8px 14px; font-size: 14px; font-weight: 600; }
+  .btn.primary { background: #fff; color: #000; }
+  .btn:disabled { opacity: .4; }
+  .bar { height: 6px; background: rgba(255,255,255,.08); border-radius: 3px; overflow: hidden; flex: 1; }
+  .bar > i { display: block; height: 100%; border-radius: 3px; }
+  .win { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--fg2); margin-top: 8px; }
+  .win b { width: 40px; text-align: right; color: var(--fg); }
+  .win span:first-child { width: 42px; }
+  .win span:last-child { width: 84px; text-align: right; color: var(--fg3); }
+  .rec { color: var(--green); font-size: 12px; font-weight: 600; background: rgba(48,209,88,.14); padding: 2px 8px; border-radius: 8px; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { background: var(--card); border-radius: 16px; padding: 12px 14px; }
+  .tile .k { font-size: 12px; color: var(--fg2); } .tile .v { font-size: 22px; font-weight: 700; margin-top: 2px; } .tile .u { font-size: 13px; color: var(--fg2); font-weight: 600; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 130px; padding-top: 6px; }
+  .bars > div { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; height: 100%; }
+  .bars i { display: block; border-radius: 3px 3px 0 0; }
+  .ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--fg3); margin-top: 6px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--fg2); margin-top: 8px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 4px; margin-right: 5px; }
+  nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: rgba(18,18,20,.92); backdrop-filter: blur(20px);
+    border-top: 1px solid var(--line); padding: 6px 0 calc(6px + env(safe-area-inset-bottom)); z-index: 5; }
+  nav button { flex: 1; padding: 6px 0; font-size: 12px; color: var(--fg3); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  nav button.on { color: var(--fg); }
+  nav svg { width: 22px; height: 22px; }
+  .badge { background: var(--orange); color: #000; font-size: 11px; font-weight: 700; border-radius: 8px; padding: 0 6px; margin-left: 6px; }
+  .empty { color: var(--fg3); text-align: center; padding: 24px 0; font-size: 14px; }
+  .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: flex-end; z-index: 20; }
+  .sheet.on { display: flex; }
+  .sheet .in { background: #1c1c1e; border-radius: 20px 20px 0 0; width: 100%; max-width: 720px; margin: 0 auto; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); max-height: 85vh; overflow: auto; }
+  .opts { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px; }
+  .opt { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.08); font-size: 14px; border: 1px solid transparent; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opt.on { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
+  input[type=text], textarea { width: 100%; background: rgba(255,255,255,.08); border: 0; border-radius: 12px; color: var(--fg); font: inherit; padding: 10px 12px; outline: none; }
+  #term { position: fixed; inset: 0; background: #0c0c0c; z-index: 10; display: none; flex-direction: column; padding-top: env(safe-area-inset-top); }
+  #term.on { display: flex; }
+  #termHead { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  #termHead .main { flex: 1; min-width: 0; }
+  #screen { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+  #keys { display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; border-top: 1px solid var(--line); scrollbar-width: none; }
+  #keys button { flex: none; background: rgba(255,255,255,.1); border-radius: 9px; padding: 7px 11px; font-size: 13px; font-weight: 600; }
+  #send { display: flex; gap: 8px; padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
+  #send textarea { flex: 1; resize: none; height: 40px; max-height: 120px; }
+  #gone { display: none; background: rgba(255,69,58,.15); color: #ff8a80; font-size: 13px; padding: 6px 12px; }
+  /* a computer's browser: the real keyboard types straight into the terminal, so no key row or input box */
+  @media (pointer: fine) { #keys, #send { display: none; } #screen { padding-bottom: 8px; } }
+  .toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: #2c2c2e; padding: 10px 16px; border-radius: 12px; font-size: 14px;
+    z-index: 30; max-width: 90vw; white-space: pre-wrap; display: none; }
+</style>
+</head>
+<body>
+<main id="view"></main>
+<nav>
+  <button data-tab="chats" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H8l-4 4z"/></svg>对话</button>
+  <button data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>额度</button>
+  <button data-tab="tokens"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 19V11M10 19V6M15 19v-9M20 19v-5"/></svg>用量</button>
+</nav>
+
+<div id="term">
+  <div id="termHead">
+    <button id="back" class="btn" aria-label="返回">‹</button>
+    <div class="main"><div class="t" id="termTitle"></div><div class="m" id="termSub"></div></div>
+  </div>
+  <div id="gone">这个终端已经结束</div>
+  <div id="screen"></div>
+  <div id="keys"></div>
+  <div id="send"><textarea id="line" placeholder="输入，按发送" enterkeyhint="send"></textarea><button class="btn primary" id="go">发送</button></div>
+</div>
+
+<div class="sheet" id="sheet"><div class="in" id="sheetIn"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const ACCT = ['var(--a1)', 'var(--a2)', 'var(--a3)', 'var(--a4)'];
+const post = async (url, body) => {
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+  const j = await r.json(); if (!r.ok) throw new Error(j.err || r.status); return j;
+};
+const toast = (t, ms = 2600) => { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = 'none'), ms); };
+const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
+const fmtTok = (n) => n >= 1e8 ? `${(n / 1e8).toFixed(2)} 亿` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString()} 万` : Math.round(n).toLocaleString();
+const usd = (u) => '$' + (u >= 1000 ? Math.round(u).toLocaleString() : u.toFixed(2));
+
+let tab = ['chats', 'usage', 'tokens'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'chats', state = null, tokens = null;
+// Like the island: continue on the conversation's own account while it still gives an hour of work, else the pick.
+const acctFor = (s) => { const a = state?.usage?.accounts?.[s.acct]; return a && a.runway >= 1 ? s.acct + 1 : (state?.usage?.rec ?? s.acct) + 1; };
+
+async function load(fresh) {
+  try { state = await (await fetch('/api/state' + (fresh ? '?fresh=1' : ''))).json(); if (state.err) throw new Error(state.err); }
+  catch (e) { $('#view').innerHTML = `<h1>连不上</h1><div class="sub">${esc(e.message)}</div>`; return; }
+  render();
+}
+function render() {
+  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  ({ chats: renderChats, usage: renderUsage, tokens: renderTokens })[tab]();
+}
+
+function renderChats() {
+  const notes = state.notes ?? []; // unread only: the server drops what you've read anywhere or answered since
+  const run = state.sessions.filter((s) => s.pid), rest = state.sessions.filter((s) => !s.pid).slice(0, 40);
+  const row = (s) => `<button class="row" data-open="${esc(s.id)}"><div class="main"><div class="t">${esc(s.title)}</div>
+    <div class="m">${esc(s.cwd.split(/[\\/]/).pop())} · 账号 ${s.acct + 1}${s.prompt ? ' · ' + esc(s.prompt) : ''}</div></div>
+    ${s.pid ? `<span class="chip ${s.where}">${s.where === 'web' ? '手机上' : '电脑上'}</span>` : `<span class="m">${ago(s.at)}</span>`}</button>`;
+  $('#view').innerHTML = `<h1>对话</h1><div class="sub">${esc(state.me)} · 电脑上的 Claude</div>
+    <button class="btn primary" id="newBtn" style="width:100%;padding:12px">＋ 新对话</button>
+    ${notes.length ? `<h2><span>提示<span class="badge">${notes.length}</span></span><button class="m" id="readAll">全部已读</button></h2>
+      ${notes.map((n) => `<button class="row" ${n.id ? `data-open="${esc(n.id)}"` : ''}>
+        <div class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</div>
+        <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
+        <span class="m">${ago(n.at)}</span></button>`).join('')}` : ''}
+    ${run.length ? `<h2>运行中</h2>${run.map(row).join('')}` : ''}
+    <h2>最近</h2>${rest.length ? rest.map(row).join('') : '<div class="empty">还没有对话</div>'}`;
+  $('#newBtn').onclick = newSheet;
+  const ra = $('#readAll'); if (ra) ra.onclick = () => post('/api/read', { all: true }).then(() => load(), (e) => toast(e.message));
+  document.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => {
+    const s = state.sessions.find((x) => x.id === b.dataset.open);
+    if (!s) return toast('这个对话已经不在列表里了');
+    if (notes.some((n) => n.id === s.id)) post('/api/read', { id: s.id }).catch(() => {}); // opened it: its notification is done
+    openTerm({ id: s.id, acct: acctFor(s) }, s.title, `${s.cwd} · ${s.pid ? (s.where === 'web' ? '在手机上运行' : '电脑窗口里的那个终端') : '用账号 ' + acctFor(s) + ' 继续'}`);
+  }));
+}
+
+function renderUsage() {
+  const u = state.usage;
+  $('#view').innerHTML = `<h1>额度</h1><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : '都到上限了，最早 ' + esc(u.ready) + ' 后恢复'}</div>
+    ${u.accounts.map((a, i) => `<div class="card"><div style="display:flex;align-items:center;gap:8px">
+      <span style="width:9px;height:9px;border-radius:5px;background:${ACCT[i % 4]}"></span><b>账号 ${i + 1}</b>
+      <span class="m" style="flex:1">${esc(a.label)}</span>${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
+      ${a.err ? `<div class="m" style="color:var(--orange);margin-top:8px">${esc(a.err)}</div>` : `
+      <div class="m" style="margin-top:6px">可连续用 ${a.runway} 小时</div>
+      ${a.windows.map((w) => `<div class="win"><span>${w.k === 'five_hour' ? '5 小时' : w.k === 'seven_day' ? '7 天' : esc(w.k)}</span>
+        <div class="bar"><i style="width:${Math.min(100, w.pct)}%;background:${w.pct >= 80 ? 'var(--red)' : w.pct >= 50 ? 'var(--orange)' : 'var(--green)'}"></i></div>
+        <b>${w.pct}%</b><span>${esc(w.reset)}后</span></div>`).join('')}`}</div>`).join('')}
+    <div style="display:flex;gap:10px;margin-top:6px"><button class="btn" id="refresh" style="flex:1">刷新</button><button class="btn" id="warm" style="flex:1">预热</button></div>
+    <div class="m" style="margin-top:10px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div>`;
+  $('#refresh').onclick = () => load(true);
+  $('#warm').onclick = async (e) => { e.target.disabled = true; e.target.textContent = '预热中…'; try { toast((await post('/api/warmup')).out, 6000); } catch (x) { toast(x.message); } load(true); };
+}
+
+async function renderTokens() {
+  if (!tokens) { $('#view').innerHTML = '<h1>用量</h1><div class="sub">统计中…</div>'; try { tokens = await (await fetch('/api/tokens')).json(); } catch (e) { return toast(e.message); } }
+  const t = tokens, n = t.accounts.length, map = Object.fromEntries(t.days.map((d) => [d.d, d]));
+  const all = (d) => d ? d.i + d.o + d.cw + d.cr : 0;
+  const key = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  const days = [...Array(14)].map((_, k) => { const dt = new Date(); dt.setDate(dt.getDate() - 13 + k); return { dt, d: map[key(dt)] }; });
+  const week = days.slice(-7), sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
+  const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
+  $('#view').innerHTML = `<h1>用量</h1><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
+    <div class="tiles">
+      <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">约 ${usd(t.usd)}</div></div>
+      <div class="tile"><div class="k">今天</div><div class="v">${fmtTok(all(today))}</div><div class="u">约 ${usd(today?.usd ?? 0)}</div></div>
+      <div class="tile"><div class="k">近 7 天</div><div class="v">${fmtTok(sum(week, (x) => all(x.d)))}</div><div class="u">约 ${usd(sum(week, (x) => x.d?.usd ?? 0))}</div></div>
+      <div class="tile"><div class="k">日均</div><div class="v">${fmtTok(t.total / active)}</div><div class="u">约 ${usd(t.usd / active)}</div></div>
+    </div>
+    <h2>近 14 天</h2><div class="card"><div class="bars">${days.map((x) => `<div title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
+      ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${ACCT[i % 4]}"></i>` : '').join('')}</div>`).join('')}</div>
+      <div class="ticks"><span>${days[0].dt.getMonth() + 1}/${days[0].dt.getDate()}</span><span>今天</span></div>
+      <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${ACCT[i % 4]}"></i>账号 ${i + 1}</span>`).join('')}</div></div>
+    <h2>按账号</h2>${t.accounts.map((a, i) => `<div class="card" style="display:flex;align-items:center;gap:10px">
+      <span style="width:9px;height:9px;border-radius:5px;background:${ACCT[i % 4]}"></span><div class="main" style="flex:1;min-width:0"><b>账号 ${i + 1}</b>
+      <div class="m">${esc(a.label)}</div></div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">约 ${usd(a.usd)}</div></div></div>`).join('')}`;
+}
+
+function newSheet() {
+  const u = state.usage, dirs = u.projects ?? [];
+  let acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? '';
+  const draw = () => {
+    $('#sheetIn').innerHTML = `<b style="font-size:17px">新对话</b>
+      <div class="m" style="margin-top:12px">账号</div><div class="opts">${u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
+        账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`).join('')}</div>
+      <div class="m">文件夹</div><div class="opts">${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}">${esc(d.split(/[\\/]/).pop())}</button>`).join('')}</div>
+      <input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径">
+      <div style="display:flex;gap:10px;margin-top:14px"><button class="btn" id="cancel" style="flex:1">取消</button><button class="btn primary" id="start" style="flex:2">开始</button></div>`;
+    document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
+    document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { dir = b.dataset.d; draw(); }));
+    $('#dirIn').oninput = (e) => (dir = e.target.value.trim());
+    $('#cancel').onclick = () => $('#sheet').classList.remove('on');
+    $('#start').onclick = () => { $('#sheet').classList.remove('on'); openTerm({ dir, acct }, dir.split(/[\\/]/).pop() || '新对话', `${dir} · 账号 ${acct}`); };
+  };
+  draw(); $('#sheet').classList.add('on');
+}
+$('#sheet').onclick = (e) => { if (e.target.id === 'sheet') e.target.classList.remove('on'); };
+
+// --- the terminal: a conversation started or continued here runs at the phone's size; one open in a window
+// on the computer keeps that window's size, and the font shrinks to fit it.
+let term = null, fit = null, es = null, key = null, kind = null;
+const KEYS = [['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['←', '\x1b[D'], ['→', '\x1b[C'], ['^C', '\x03'], ['⏎', '\r'], ['⌫', '\x7f']];
+$('#keys').innerHTML = KEYS.map(([l], i) => `<button data-k="${i}">${l}</button>`).join('');
+$('#keys').onclick = (e) => { const b = e.target.closest('[data-k]'); if (b) input(KEYS[+b.dataset.k][1]); };
+const input = (data) => key && post('/api/input', { key, data }).catch((e) => toast(e.message));
+$('#go').onclick = () => { const v = $('#line').value; if (!v) return; input(v.replace(/\n/g, '\r') + '\r'); $('#line').value = ''; };
+$('#back').onclick = closeTerm;
+function sizeFont(cols) { // a window on the computer: shrink the font until its width fits the phone
+  const w = $('#screen').clientWidth - 8;
+  term.options.fontSize = Math.max(5, Math.min(14, Math.floor(w / (cols * 0.6))));
+}
+async function openTerm(body, title, sub) {
+  $('#termTitle').textContent = title; $('#termSub').textContent = sub; $('#gone').style.display = 'none';
+  $('#term').classList.add('on'); $('#screen').innerHTML = '';
+  term = new Terminal({ fontSize: 13, fontFamily: 'Menlo, Consolas, "Cascadia Mono", monospace', theme: { background: '#0c0c0c' }, cursorBlink: true, scrollback: 3000 });
+  fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open($('#screen')); fit.fit();
+  term.onData(input);
+  try { ({ key, kind } = await post('/api/open', { ...body, cols: term.cols, rows: term.rows })); } catch (e) { toast(e.message); return closeTerm(); }
+  es = new EventSource('/api/term?key=' + encodeURIComponent(key));
+  es.addEventListener('data', (e) => term.write(JSON.parse(e.data)));
+  es.addEventListener('size', (e) => {
+    const s = JSON.parse(e.data);
+    if (kind === 'pc' && s.w) { term.resize(s.w, s.h); sizeFont(s.w); }
+    else { fit.fit(); post('/api/resize', { key, cols: term.cols, rows: term.rows }); }
+  });
+  es.addEventListener('gone', () => { $('#gone').style.display = 'block'; });
+  if (matchMedia('(pointer: fine)').matches) term.focus(); // a phone would pop its keyboard over the screen
+}
+function closeTerm() { es?.close(); es = null; term?.dispose(); term = null; key = null; $('#term').classList.remove('on'); load(); }
+window.addEventListener('resize', () => { if (!term || !key) return; if (kind === 'pc') sizeFont(term.cols); else { fit.fit(); post('/api/resize', { key, cols: term.cols, rows: term.rows }); } });
+
+document.querySelectorAll('nav button').forEach((b) => (b.onclick = () => { tab = b.dataset.tab; history.replaceState(null, '', '#' + tab); if (tab === 'tokens') tokens = null; render(); }));
+load();
+setInterval(() => { if (!term && document.visibilityState === 'visible' && tab !== 'tokens') load(); }, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "name": "claude-multi",
+  "private": true,
+  "dependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.15"
+  }
+}

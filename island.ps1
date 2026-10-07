@@ -205,6 +205,9 @@ try { $got = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $go
 if (-not $got) { exit }
 $pidFile = "$PSCommandPath.pid" # lets `claude-multi notify` skip starting us when we already run
 Set-Content -Path $pidFile -Value $PID
+# the phone page (claude-multi web) rides along, hidden and on its own: it outlives an island restart, and a
+# second start finds its port taken and quits
+Start-Process node -ArgumentList "`"$PSScriptRoot\claude-multi.js`" web" -WindowStyle Hidden
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 Add-Type -Name U -Namespace Native -MemberDefinition @'
@@ -434,6 +437,7 @@ function Refresh {
   if ($script:loading) { return }
   $script:loading = $true
   $Status.Text = '刷新中…'
+  Load-Unread # the same unread list as the web page (also the first thing at start)
   Run-Node 'usage --json' {
     param($out)
     $script:loading = $false
@@ -589,13 +593,29 @@ function Drop-Seen {
   if (-not ($Alerts.Children.Count + $History.Children.Count)) { return }
   $t = Front-Tab
   if (-not $t) { return }
-  foreach ($list in $Alerts, $History) { foreach ($el in @($list.Children)) { if ($el.Uid -eq $t) { $list.Children.Remove($el) } } }
+  foreach ($list in $Alerts, $History) { foreach ($el in @($list.Children)) { if ($el.Uid -eq $t) { $list.Children.Remove($el); Mark-Read $el.DataContext } } }
   if (-not $Alerts.Children.Count) { $Alerts.Visibility = 'Collapsed' }
   Update-Badge
 }
 function Add-Alert($n) {
+  if ((Bare $n.title) -and (Bare $n.title) -eq (Front-Tab)) { Mark-Read $n.id; return } # finished while you were watching it
+  $el = New-Alert $n (Get-Date)
+  # the latest per conversation, like the web page: a newer one replaces what was waiting
+  if ($n.id) { foreach ($list in $Alerts, $History) { foreach ($old in @($list.Children)) { if ($old.DataContext -eq $n.id) { $list.Children.Remove($old) } } } }
+  $Alerts.Children.Insert(0, $el)
+  while ($Alerts.Children.Count -gt 3) { To-History $Alerts.Children[3] } # pushed out unread
+  Update-Badge
+  $Alerts.Visibility = 'Visible'
+  if ($script:hidden) { Slide $false } # notifications always come down from the edge
+  $ask = $n.kind -eq 'ask'
+  $until = (Get-Date).AddSeconds($(if ($ask) { 15 } else { 8 }))
+  if ($until -gt $script:alertUntil) { $script:alertUntil = $until }
+  if ($ask) { [Media.SystemSounds]::Exclamation.Play() } else { [Media.SystemSounds]::Asterisk.Play() }
+  Pop
+}
+# One notification's card; a click goes to its terminal tab and marks it read everywhere.
+function New-Alert($n, [datetime]$t) {
   $seen = Bare $n.title
-  if ($seen -and $seen -eq (Front-Tab)) { return } # finished while you were watching it
   $ask = $n.kind -eq 'ask'
   # phone-style: tinted round icon (check = done, lock = wants permission), project as the title
   $c = if ($ask) { 'FF9F0A' } else { '30D158' }
@@ -606,27 +626,38 @@ function Add-Alert($n) {
     "<TextBlock Text='$icon' FontFamily='Segoe MDL2 Assets' FontSize='13' Foreground='#$c' HorizontalAlignment='Center' VerticalAlignment='Center'/></Border>" +
     "<StackPanel Grid.Column='1' VerticalAlignment='Center'><TextBlock Text='$(Esc $title)' MaxWidth='460' HorizontalAlignment='Left' FontSize='13' FontWeight='SemiBold' TextTrimming='CharacterEllipsis'/>" +
     "<TextBlock Text='$(Esc $n.msg)' MaxWidth='460' HorizontalAlignment='Left' FontSize='12' Foreground='#B3FFFFFF' TextWrapping='Wrap' Margin='0,2,0,0'/></StackPanel>" +
-    "<TextBlock Grid.Column='2' Text='$(Get-Date -Format 'HH:mm')' FontSize='11' Foreground='#8CFFFFFF' Margin='12,2,0,0'/></Grid>")
+    "<TextBlock Grid.Column='2' Text='$(if ($t.Date -eq (Get-Date).Date) { $t.ToString('HH:mm') } else { $t.ToString('M/d HH:mm') })' FontSize='11' Foreground='#8CFFFFFF' Margin='12,2,0,0'/></Grid>")
   $el.Background = 'Transparent' # clickable across its whole width
   $el.Tag = $n.pid
+  $el.DataContext = $n.id # the conversation: read marks are shared with the web page
   $el.Uid = if ($n.info) { 'info' } else { $seen }
   $el.Add_MouseLeftButtonUp({
     param($s, $e)
     $e.Handled = $true
     if ($s.Tag) { Focus-Claude $s.Tag }
+    Mark-Read $s.DataContext
     $s.Parent.Children.Remove($s) # read: gone, whether it was showing or waiting in the unread list
     if ($Alerts.Children.Count -eq 0) { $Alerts.Visibility = 'Collapsed' }
     Update-Badge
   })
-  $Alerts.Children.Insert(0, $el)
-  while ($Alerts.Children.Count -gt 3) { To-History $Alerts.Children[3] } # pushed out unread
-  Update-Badge
-  $Alerts.Visibility = 'Visible'
-  if ($script:hidden) { Slide $false } # notifications always come down from the edge
-  $until = (Get-Date).AddSeconds($(if ($ask) { 15 } else { 8 }))
-  if ($until -gt $script:alertUntil) { $script:alertUntil = $until }
-  if ($ask) { [Media.SystemSounds]::Exclamation.Play() } else { [Media.SystemSounds]::Asterisk.Play() }
-  Pop
+  $el
+}
+# The unread list is the web page's own (claude-multi notes: shared read marks, the latest per
+# conversation, gone once you've answered in it): loaded at start, so a restart keeps it, and matched
+# again with every usage refresh. Cards still popping stay as they are.
+function Load-Unread {
+  Run-Node 'notes' {
+    param($out)
+    try { $list = ConvertFrom-Json $out } catch { return } # not @(): PS 5.1 already hands back a JSON array as one item
+    $want = @{}; foreach ($n in $list) { if ($n.id) { $want[$n.id] = 1 } }
+    foreach ($el in @($History.Children)) { if ($el.DataContext -and -not $want[$el.DataContext]) { $History.Children.Remove($el) } }
+    $have = @{}; foreach ($l in $Alerts, $History) { foreach ($el in $l.Children) { if ($el.DataContext) { $have[$el.DataContext] = 1 } } }
+    for ($k = $list.Count - 1; $k -ge 0; $k--) { # oldest first: the newest ends on top
+      $n = $list[$k]
+      if ($n.id -and -not $have[$n.id]) { $History.Children.Insert(0, (New-Alert $n ([DateTimeOffset]::FromUnixTimeMilliseconds([long]$n.at).LocalDateTime))) }
+    }
+    Update-Badge
+  }
 }
 # Notifications nobody clicked aren't dropped: they wait, newest first, in the panel's unread list
 # (last 10), counted by an orange badge on the pill and an orange rim on the hidden handle.
@@ -650,6 +681,15 @@ function Clear-Alerts {
   $Alerts.Visibility = 'Collapsed'
   Update-Badge
 }
+# Read marks shared with the web page (claude-multi.js readMarks): one line {id, at} per dismissal.
+function Mark-Read($id) {
+  if ($id) { try { [IO.File]::AppendAllText("$root\notes-read.jsonl", "{`"id`":`"$id`",`"at`":$([DateTimeOffset]::Now.ToUnixTimeMilliseconds())}`n") } catch {} }
+}
+function Drop-Read($id) { # '*' = all of them
+  foreach ($list in $Alerts, $History) { foreach ($el in @($list.Children)) { if ($el.DataContext -and ($id -eq '*' -or $el.DataContext -eq $id)) { $list.Children.Remove($el) } } }
+  if (-not $Alerts.Children.Count) { $Alerts.Visibility = 'Collapsed' }
+  Update-Badge
+}
 # ponytail: polls inbox\ every 300 ms; FileSystemWatcher would need a second runspace to touch the UI
 function Check-Inbox {
   foreach ($f in [IO.Directory]::GetFiles($inbox, '*.json')) {
@@ -657,6 +697,7 @@ function Check-Inbox {
     try { $n = [IO.File]::ReadAllText($f, [Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
     $age = (Get-Date) - [IO.File]::GetLastWriteTime($f)
     try { [IO.File]::Delete($f) } catch { continue }
+    if ($n -and $n.kind -eq 'read') { Drop-Read $n.id; continue } # read on the web page
     if ($n -and $n.kind -eq 'chats' -and $n.tokens) { Open-Tokens; continue } # claude-multi chats tokens
     if ($n -and $n.kind -eq 'chats') { $script:folder = if ($n.arrange) { '*' } else { '' }; $script:arranging = [bool]$n.arrange; Open-Chats; Load-Chats; continue } # claude-multi chats
     if ($n -and $age.TotalMinutes -lt 2) { Add-Alert $n } # older ones were for an island that wasn't running
@@ -1495,7 +1536,8 @@ function Save-Name($ed) {
     return
   }
   $ed.Tag.t.Text = $name # right away; the reload confirms it
-  Run-Node "rename $($s.id) `"$($name -replace '"', '\"')`"" { Load-Chats }
+  # Windows argument quoting: backslashes before a " and at the very end double, so "C:\tmp\" stays itself
+  Run-Node "rename $($s.id) `"$($name -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1')`"" { Load-Chats }
 }
 function Add-Chat($s) {
   $n = Resume-Account $s
@@ -1580,7 +1622,7 @@ $BtnRefresh.Add_Click({ Refresh })
 $BtnChats.Add_Click({ Collapse; if ($script:folder -eq '#tokens') { $script:folder = '' }; Open-Chats; Load-Chats }) # the list, not the token page
 $BtnTokens.Add_Click({ Collapse; Open-Tokens })
 $BtnBack.Add_Click({ Show-Rows })
-$BtnClearHist.Add_Click({ $History.Children.Clear(); Update-Badge })
+$BtnClearHist.Add_Click({ foreach ($el in @($History.Children)) { Mark-Read $el.DataContext }; $History.Children.Clear(); Update-Badge })
 $BtnQuit.Add_Click({ $win.Close() })
 $BtnWarm.Add_Click({
   $BtnWarm.IsEnabled = $false; $Status.Text = '预热中…'

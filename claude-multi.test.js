@@ -93,6 +93,17 @@ fs.rmSync(fa); // Claude Code's 30-day cleanup: the replies stay counted (the co
 assert.equal(tokenStats(roots, cacheF).total, 27);
 fs.rmSync(require('path').join(B, 'copy.jsonl'));
 assert.equal(tokenStats(roots, cacheF).total, 27);
+// a resume copies a record into the other account: its replies stay with the account that made them
+const cacheC = require('path').join(tmp, 'c.json'), fb = require('path').join(B, 'orig.jsonl');
+fs.writeFileSync(fb, reply('msg_5', atH(12), 0, 4, 0, 0, 'claude-opus-5-5'));
+const until = Date.now() + 30; while (Date.now() < until); // a later birth time for the copy
+fs.copyFileSync(fb, require('path').join(A, 'copy.jsonl')); // account a is listed first
+t = tokenStats(roots, cacheC);
+assert.equal(t.accounts[0].total, 0); assert.equal(t.accounts[1].total, 4);
+// rewritten shorter (a compaction tool trimming it): what was counted stays counted
+fs.writeFileSync(fb, reply('msg_6', atH(13), 0, 1, 0, 0, 'claude-opus-5'));
+assert.equal(tokenStats(roots, cacheC).total, 5);
+fs.rmSync(require('path').join(A, 'copy.jsonl')); fs.rmSync(fb);
 // the first cache format (no model, no write kind): a deleted file's replies keep counting, as 1-h writes at Opus 5.5
 const old = require('path').join(tmp, 'old.json');
 fs.writeFileSync(old, JSON.stringify({ [require('path').join(tmp, 'a', 'p', 'gone.jsonl')]: { size: 9, recs: [['msg_9:r', '2026-09-29', 1, 0, 1, 0]] } }));
@@ -100,3 +111,22 @@ t = tokenStats(roots, old);
 assert.equal(t.total, 2); near(t.usd, (1 + 1 * 2) * 4 / 1e6);
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('tokens ok');
+
+// Notifications on the web page: the latest per conversation, gone once read anywhere or answered since.
+{
+  const { unreadNotes } = require('./claude-multi');
+  const dir = fs.mkdtempSync(require('path').join(require('os').tmpdir(), 'cm-note-')), T = Date.parse('2026-10-07T08:00:00Z');
+  const conv = (said) => { const f = require('path').join(dir, `${said}.jsonl`); fs.writeFileSync(f, [
+    { type: 'user', timestamp: new Date(T + said).toISOString(), message: { content: 'hi' } },
+    { type: 'user', timestamp: new Date(T + 9e6).toISOString(), message: { content: '<task-notification>\n<task-id>x</task-id>' } }, // not you
+  ].map((x) => JSON.stringify(x)).join('\n') + '\n'); return f; };
+  const list = [{ id: 'a', file: conv(1000) }, { id: 'b', file: conv(5e6) }, { id: 'c', file: conv(0) }];
+  const notes = [{ id: 'a', at: T + 3e6 }, { id: 'b', at: T + 3e6 }, { id: 'c', at: T + 3e6 }, { id: 'a', at: T + 2e6 }]; // newest first
+  const ids = (marks) => unreadNotes(list, notes, new Map(marks)).map((n) => `${n.id}@${n.at - T}`).join(' ');
+  assert.equal(ids([]), 'a@3000000 c@3000000');            // b: you wrote in it after; a: only its latest
+  assert.equal(ids([['a', T + 4e6]]), 'c@3000000');          // a read (island, another browser)
+  assert.equal(ids([['*', T + 4e6]]), '');                   // all read
+  assert.equal(ids([['*', T + 1e6]]), 'a@3000000 c@3000000'); // an older "all read" doesn't hide newer ones
+  fs.rmSync(dir, { recursive: true });
+  console.log('notes ok');
+}

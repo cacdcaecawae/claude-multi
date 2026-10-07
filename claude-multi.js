@@ -329,15 +329,24 @@ const field = (s, key, lastOne) => { // raw "key":"value" scan of a transcript s
   try { return v ? JSON.parse(`"${v}"`) : null; } catch { return null; }
 };
 
+// Start times (Windows FILETIME, as sessions/<pid>.json's procStart) of these pids; null if PowerShell failed.
+function procStarts(pids) {
+  if (!pids.length) return new Map();
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
+    + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'], { encoding: 'utf8', windowsHide: true });
+  if (r.status !== 0) return null;
+  return new Map(r.stdout.trim().split(/\r?\n/).filter(Boolean).map((l) => l.split(' ')));
+}
+
 function listSessions(reg) {
   const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
-  const live = new Map(), found = new Map();
+  const live = new Map(), found = new Map(), alive = [];
   for (const [acct, dir] of reg.profiles.map((p, i) => [i, p.configDir])) {
     for (const f of ls(path.join(dir, 'sessions'))) {
       try {
         const j = JSON.parse(fs.readFileSync(path.join(dir, 'sessions', f), 'utf8'));
         process.kill(j.pid, 0); // throws once that Claude has exited
-        live.set(j.sessionId, j.pid);
+        alive.push(j);
       } catch {}
     }
     for (const folder of ls(path.join(dir, 'projects'))) {
@@ -348,6 +357,10 @@ function listSessions(reg) {
       }
     }
   }
+  // a Claude that didn't exit cleanly leaves its file, and Windows soon gives its pid to another program:
+  // running means that pid also started when Claude wrote down (without PowerShell, the pid alone)
+  const starts = procStarts(alive.map((j) => j.pid));
+  for (const j of alive) if (!starts || !j.procStart || starts.get(String(j.pid)) === String(j.procStart)) live.set(j.sessionId, j.pid);
   const tmp = os.tmpdir().toLowerCase(), out = [];
   for (const s of found.values()) {
     const fd = fs.openSync(s.file, 'r'), size = fs.fstatSync(fd).size;
@@ -418,16 +431,19 @@ function resume(id, n) {
   if (s.pid) { console.log(`这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
   const p = reg.profiles[Number(n) - 1] ?? reg.profiles[s.acct];
   if (!p) { console.log('请指定账号编号：claude-multi resume <对话 id> <账号编号>'); process.exit(1); }
-  const dst = path.join(p.configDir, 'projects', path.basename(path.dirname(s.file)));
-  if (path.resolve(dst).toLowerCase() !== path.resolve(path.dirname(s.file)).toLowerCase()) {
-    fs.mkdirSync(dst, { recursive: true });
-    fs.copyFileSync(s.file, path.join(dst, `${id}.jsonl`));
-    const side = s.file.slice(0, -6);
-    if (fs.existsSync(side)) fs.cpSync(side, path.join(dst, id), { recursive: true });
-    log('session_copied', { profile_id: p.id, session_id: id });
-  }
+  copyTo(s, p);
   process.chdir(s.cwd);
   start(p, ['--resume', id], 'resume');
+}
+// Before account p continues conversation s: its newest record (and side folder) into p's config dir.
+function copyTo(s, p) {
+  const dst = path.join(p.configDir, 'projects', path.basename(path.dirname(s.file)));
+  if (path.resolve(dst).toLowerCase() === path.resolve(path.dirname(s.file)).toLowerCase()) return;
+  fs.mkdirSync(dst, { recursive: true });
+  fs.copyFileSync(s.file, path.join(dst, `${s.id}.jsonl`));
+  const side = s.file.slice(0, -6);
+  if (fs.existsSync(side)) fs.cpSync(side, path.join(dst, s.id), { recursive: true });
+  log('session_copied', { profile_id: p.id, session_id: s.id });
 }
 
 // delete ID: a conversation that isn't running goes to the Recycle Bin: its transcript in every account
@@ -517,9 +533,12 @@ function notify(kind) {
   const f = path.join(INBOX, `${Date.now()}-${process.pid}`);
   // the folder the conversation was opened in: the hook's cwd is wherever Claude last cd'd (a .build inside it, say)
   const dir = home || j.cwd;
-  fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind, project: dir ? path.basename(dir) : '', msg, title,
+  fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind, project: dir ? path.basename(dir) : '', msg, title, id: j.session_id ?? null,
     pid: Number(process.env.CLAUDE_PID) || null })); // Claude's own pid: lets a click find its terminal window
   fs.renameSync(`${f}.tmp`, `${f}.json`);
+  // and for the phone page, which lists the latest ones (the file is trimmed to its last 200 now and then)
+  fs.appendFileSync(NOTES, JSON.stringify({ at: Date.now(), kind, project: dir ? path.basename(dir) : '', msg, title, id: j.session_id ?? null }) + '\n');
+  try { if (fs.statSync(NOTES).size > 262144) fs.writeFileSync(NOTES, readNotes(200).reverse().map((x) => JSON.stringify(x)).join('\n') + '\n'); } catch {}
   island();
 }
 
@@ -543,6 +562,27 @@ function island() {
     + `'-NoProfile -STA -ExecutionPolicy Bypass -File "${ISLAND}"'`], { stdio: 'ignore', windowsHide: true });
 }
 
+const WINDOWS = [['five_hour', '5 小时'], ['seven_day', '7 天'], ['seven_day_opus', 'Opus 7 天'], ['seven_day_sonnet', 'Sonnet 7 天']];
+const readyAt = (u) => Math.max(0, ...WINDOWS.map(([k]) => u[k])
+  .filter((w) => w && w.utilization >= 100 && w.resets_at).map((w) => +new Date(w.resets_at)));
+// Every account's usage and the pick. json is what the island and the web page read.
+async function usageState(reg = load()) {
+  const res = await Promise.all(reg.profiles.map(fetchUsage));
+  const ok = res.map((r, i) => ({ ...r, i })).filter((r) => r.u);
+  const open = ok.filter((r) => runway(r.u) > 0);
+  const rec = open.length ? pickOpen(open) : [...ok].sort((a, b) => readyAt(a.u) - readyAt(b.u))[0];
+  // One column per window. Model windows get a column only once some account used them.
+  const cols = WINDOWS.filter(([k]) => !k.startsWith('seven_day_') || ok.some((r) => r.u[k]?.utilization));
+  const json = { rec: rec?.i ?? null, open: open.length > 0,
+    ready: !open.length && rec ? until(readyAt(rec.u)) : null,
+    accounts: reg.profiles.map((p, i) => ({ label: p.label, err: res[i].err ?? null,
+      runway: res[i].u ? Math.round(runway(res[i].u) * 10) / 10 : null,
+      windows: cols.filter(([k]) => res[i].u?.[k]).map(([k]) => ({ k, pct: Math.round(res[i].u[k].utilization),
+        reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })) })),
+    projects: recentProjects(reg) };
+  return { res, ok, open, rec, cols, json };
+}
+
 async function usage(args) {
   const reg = load();
   if (!reg.profiles.length) return console.log('没有已保存账号，请先运行 claude-multi new。');
@@ -550,26 +590,8 @@ async function usage(args) {
     const n = Math.round(Math.min(100, pct) / 10);
     return c(pct >= 80 ? 31 : pct >= 50 ? 33 : 32, '█'.repeat(n)) + c(2, '░'.repeat(10 - n));
   };
-  const WINDOWS = [['five_hour', '5 小时'], ['seven_day', '7 天'], ['seven_day_opus', 'Opus 7 天'], ['seven_day_sonnet', 'Sonnet 7 天']];
-  const readyAt = (u) => Math.max(0, ...WINDOWS.map(([k]) => u[k])
-    .filter((w) => w && w.utilization >= 100 && w.resets_at).map((w) => +new Date(w.resets_at)));
-
-  const res = await Promise.all(reg.profiles.map(fetchUsage));
-  const ok = res.map((r, i) => ({ ...r, i })).filter((r) => r.u);
-  const open = ok.filter((r) => runway(r.u) > 0);
-  const rec = open.length ? pickOpen(open) : [...ok].sort((a, b) => readyAt(a.u) - readyAt(b.u))[0];
-
-  // One row per account, one column per window. Model windows get a column only once some account used them.
-  const cols = WINDOWS.filter(([k]) => !k.startsWith('seven_day_') || ok.some((r) => r.u[k]?.utilization));
-  if (args.includes('--json')) { // what the island reads; same numbers as the table below
-    return console.log(JSON.stringify({ rec: rec?.i ?? null, open: open.length > 0,
-      ready: !open.length && rec ? until(readyAt(rec.u)) : null,
-      accounts: reg.profiles.map((p, i) => ({ label: p.label, err: res[i].err ?? null,
-        runway: res[i].u ? Math.round(runway(res[i].u) * 10) / 10 : null,
-        windows: cols.filter(([k]) => res[i].u?.[k]).map(([k]) => ({ k, pct: Math.round(res[i].u[k].utilization),
-          reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })) })),
-      projects: recentProjects(reg) }));
-  }
+  const { res, ok, open, rec, cols, json } = await usageState(reg);
+  if (args.includes('--json')) return console.log(JSON.stringify(json)); // same numbers as the table below
   const lw = Math.max(...reg.profiles.map((p) => width(p.label)));
   const pw = Math.max(...reg.profiles.map((p) => width(p.subscriptionType ?? '')));
   const cell = (w) => (w ? `${bar(w.utilization)} ${String(Math.round(w.utilization)).padStart(3)}%  `
@@ -599,6 +621,220 @@ async function usage(args) {
   start(p, args, 'usage_recommended');
 }
 
+// --- web: the phone page --------------------------------------------------------------------------
+// claude-multi web: a page for the phone with what the island shows (usage, conversations, notifications,
+// tokens) and the conversations themselves, as real terminals: one started or continued from the page runs
+// in a pseudo-terminal here (node-pty) sized to the phone; one already open in a terminal window on this
+// computer is mirrored by console-bridge.ps1 (its screen, typing into it), so both sides use the same one.
+// Listens on 127.0.0.1 only. `tailscale serve` publishes it to the tailnet over HTTPS and names the visitor
+// in Tailscale-User-Login; only this machine's own Tailscale user gets in, as the page runs Claude here.
+const NOTES = path.join(ROOT, 'notes.jsonl');
+const WEB_PORT = 7788;
+const TAILSCALE = 'C:\\Program Files\\Tailscale\\tailscale.exe';
+
+function tailscaleMe() {
+  const r = spawnSync(fs.existsSync(TAILSCALE) ? TAILSCALE : 'tailscale', ['status', '--json'], { encoding: 'utf8', windowsHide: true });
+  try { const j = JSON.parse(r.stdout); return { login: j.User[j.Self.UserID].LoginName, host: j.Self.DNSName.replace(/\.$/, '') }; } catch { return null; }
+}
+function readNotes(n = 30) {
+  try {
+    const fd = fs.openSync(NOTES, 'r'), size = fs.fstatSync(fd).size, t = slice(fd, Math.max(0, size - 65536), 65536);
+    fs.closeSync(fd);
+    return t.split('\n').slice(-n - 1).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).reverse();
+  } catch { return []; }
+}
+
+// Read marks, shared by the island and every browser: a line {id, at} = that conversation's notifications
+// up to at are done; id '*' = all of them. The island appends its own (you went to the tab, clicked, cleared).
+const READ = path.join(ROOT, 'notes-read.jsonl');
+function readMarks() {
+  const m = new Map();
+  try { for (const l of fs.readFileSync(READ, 'utf8').split('\n')) { try { const j = JSON.parse(l); if (j.at > (m.get(j.id) ?? 0)) m.set(j.id, j.at); } catch {} } } catch {}
+  return m;
+}
+function markRead(id) {
+  fs.appendFileSync(READ, JSON.stringify({ id, at: Date.now() }) + '\n');
+  try { if (fs.statSync(READ).size > 65536) fs.writeFileSync(READ, [...readMarks()].map(([i, at]) => JSON.stringify({ id: i, at })).join('\n') + '\n'); } catch {}
+}
+// When you last said something in a conversation (a prompt, a slash command), not counting what Claude
+// hands itself as a prompt (a background task's or a teammate's message). Cached until the file changes.
+const saidCache = new Map();
+function lastSaid(file) {
+  try {
+    const mt = fs.statSync(file).mtimeMs, c = saidCache.get(file);
+    if (c?.mt === mt) return c.at;
+    const fd = fs.openSync(file, 'r'), size = fs.fstatSync(fd).size;
+    const lines = slice(fd, Math.max(0, size - 4194304), 4194304).split('\n');
+    fs.closeSync(fd);
+    let at = 0;
+    for (let i = lines.length - 1; i >= 0 && !at; i--) {
+      if (!lines[i].includes('"type":"user"')) continue;
+      try {
+        const j = JSON.parse(lines[i]), m = j.message?.content;
+        if (j.type !== 'user' || j.isMeta || j.isCompactSummary) continue;
+        const t = typeof m === 'string' ? m : Array.isArray(m) ? m.find((x) => x.type === 'text')?.text : null;
+        if (t && !/^<(task-notification|teammate-message)/.test(t.trimStart())) at = Date.parse(j.timestamp) || 0;
+      } catch {}
+    }
+    saidCache.set(file, { mt, at });
+    return at;
+  } catch { return 0; }
+}
+// The notifications still waiting for you: the latest per conversation, unless it was marked read (here,
+// in the island, on another device) or you've said something in that conversation since.
+function unreadNotes(list, notes = readNotes(60), marks = readMarks()) {
+  const all = marks.get('*') ?? 0, files = new Map(list.map((s) => [s.id, s.file])), seen = new Set();
+  return notes.filter((n) => {
+    const k = n.id ?? n.at;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return n.at > all && n.at > (marks.get(n.id) ?? 0) && !(files.has(n.id) && lastSaid(files.get(n.id)) > n.at);
+  }).slice(0, 10);
+}
+
+async function web() {
+  const http = require('http'), pty = require('@lydell/node-pty');
+  const me = tailscaleMe();
+  if (!me) { console.log('读不到 Tailscale 的登录信息：先在这台电脑上登录 Tailscale。'); process.exit(1); }
+  const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
+  const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
+  let usageCache = null, usageAt = 0, sessCache = null, sessAt = 0;
+
+  const send = (t, ev, data) => { for (const res of t.clients) res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); };
+  const sessions = () => {
+    if (!sessCache || Date.now() - sessAt > 3000) { sessCache = listSessions(load()); sessAt = Date.now(); }
+    return sessCache;
+  };
+  // a conversation started or continued here: claude in a pseudo-terminal, its output kept (last 256 KB) for
+  // whoever opens it later
+  function startPty(p, cwd, args, cols = 100, rows = 30) {
+    const key = `p${Date.now().toString(36)}`;
+    const proc = pty.spawn(claudeExe, args, { name: 'xterm-256color', cols, rows, cwd, env: childEnv(p.configDir) });
+    const t = { kind: 'pty', key, pid: proc.pid, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd };
+    proc.onData((d) => { t.buf = (t.buf + d).slice(-262144); send(t, 'data', d); });
+    proc.onExit(() => { t.gone = true; send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
+    terms.set(key, t);
+    log('web_session', { profile_id: p.id, cwd, args: args.join(' ') });
+    return t;
+  }
+  // a conversation open in a terminal window here: its screen through the console bridge, while anyone watches
+  function mirror(pid) {
+    const key = `w${pid}`;
+    if (terms.has(key) && !terms.get(key).gone) return terms.get(key);
+    const proc = require('child_process').spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+      path.join(ROOT, 'console-bridge.ps1'), String(pid)], { windowsHide: true });
+    const t = { kind: 'pc', key, pid, proc, clients: new Set(), frame: null, w: 0, h: 0 };
+    let line = '';
+    proc.stdout.on('data', (d) => {
+      line += d;
+      for (let k; (k = line.indexOf('\n')) >= 0; line = line.slice(k + 1)) {
+        let m; try { m = JSON.parse(line.slice(0, k)); } catch { continue; }
+        if (m.gone) { t.gone = true; send(t, 'gone', {}); continue; }
+        if (m.w !== t.w || m.h !== t.h) { t.w = m.w; t.h = m.h; send(t, 'size', { w: m.w, h: m.h }); }
+        t.frame = m.f; send(t, 'data', m.f);
+      }
+    });
+    proc.on('exit', () => { t.gone = true; send(t, 'gone', {}); terms.delete(key); });
+    terms.set(key, t);
+    return t;
+  }
+  const where = (s) => [...terms.values()].find((t) => !t.gone && t.pid === s.pid); // ours, or a window here
+
+  const api = {
+    'GET /api/state': async (q) => {
+      if (!usageCache || Date.now() - usageAt > 60000 || q.has('fresh')) { usageCache = (await usageState()).json; usageAt = Date.now(); }
+      const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc' }));
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: me.login };
+    },
+    'GET /api/tokens': () => tokenStats(),
+    'POST /api/read': (q, b) => { // {id} one conversation's notifications, {all: true} every one; the island drops them too
+      const id = b.all ? '*' : /^[\w-]{1,80}$/.test(b.id ?? '') ? b.id : null;
+      if (!id) throw new Error('缺少对话 id');
+      markRead(id);
+      fs.mkdirSync(INBOX, { recursive: true });
+      const f = path.join(INBOX, `${Date.now()}-read`);
+      fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'read', id }));
+      fs.renameSync(`${f}.tmp`, `${f}.json`);
+      return {};
+    },
+    'POST /api/warmup': () => new Promise((ok) => { // not spawnSync: the terminals keep streaming meanwhile
+      require('child_process').execFile(process.execPath, [__filename, 'warmup'], { env: { ...process.env, NO_COLOR: '1' }, windowsHide: true },
+        (e, stdout) => { usageCache = null; ok({ out: String(stdout || e?.message || '').trim() }); });
+    }),
+    // open a conversation's terminal: {id, acct?} continues one (its window here if it runs in one),
+    // {dir, acct} starts one. acct is 1-based; the page proposes it like the island does.
+    'POST /api/open': (q, b) => {
+      const reg = load(), cols = Math.max(40, Math.min(300, b.cols | 0 || 100)), rows = Math.max(10, Math.min(200, b.rows | 0 || 30));
+      if (b.id) {
+        sessCache = null;
+        const s = sessions().find((x) => x.id === b.id);
+        if (!s) throw new Error('找不到这个对话');
+        if (s.pid) { const t = where(s) ?? mirror(s.pid); return { key: t.key, kind: t.kind }; }
+        const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
+        copyTo(s, p);
+        return { key: startPty(p, s.cwd, ['--resume', s.id], cols, rows).key, kind: 'pty' };
+      }
+      const p = reg.profiles[b.acct - 1];
+      if (!p) throw new Error('没有这个账号');
+      if (!b.dir || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
+      sessCache = null;
+      return { key: startPty(p, b.dir, [], cols, rows).key, kind: 'pty' };
+    },
+    'POST /api/input': (q, b) => {
+      const t = terms.get(b.key);
+      if (!t || t.gone) throw new Error('这个终端已经结束');
+      if (t.kind === 'pty') t.proc.write(String(b.data)); else t.proc.stdin.write(JSON.stringify({ k: String(b.data) }) + '\n');
+      return {};
+    },
+    'POST /api/resize': (q, b) => { // phone-sized for our own terminals; a window here keeps its own size
+      const t = terms.get(b.key);
+      if (t?.kind === 'pty' && !t.gone && b.cols > 0 && b.rows > 0) { t.proc.resize(Math.min(300, b.cols | 0), Math.min(200, b.rows | 0)); t.w = b.cols | 0; t.h = b.rows | 0; }
+      return {};
+    },
+  };
+
+  const server = http.createServer(async (req, res) => {
+    const out = (code, body, type = 'application/json; charset=utf-8') => {
+      res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' });
+      res.end(typeof body === 'string' ? body : JSON.stringify(body));
+    };
+    try {
+      if (req.headers['tailscale-user-login'] !== me.login) return out(403, { err: `只有 ${me.login} 能打开` });
+      const url = new URL(req.url, 'http://x');
+      if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
+      if (req.method === 'GET' && url.pathname === '/api/term') { // the terminal's output, as server-sent events
+        const t = terms.get(url.searchParams.get('key'));
+        if (!t) return out(404, { err: '这个终端已经结束' });
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
+        t.clients.add(res);
+        res.write(`event: size\ndata: ${JSON.stringify({ w: t.w, h: t.h, kind: t.kind })}\n\n`);
+        const past = t.kind === 'pty' ? t.buf : t.frame;
+        if (past) res.write(`event: data\ndata: ${JSON.stringify(past)}\n\n`);
+        if (t.gone) res.write('event: gone\ndata: {}\n\n');
+        const beat = setInterval(() => res.write(': \n\n'), 20000);
+        req.on('close', () => {
+          clearInterval(beat); t.clients.delete(res);
+          if (t.kind === 'pc') setTimeout(() => { if (!t.clients.size) t.proc.kill(); }, 30000); // nobody watching
+        });
+        return;
+      }
+      const fn = api[`${req.method} ${url.pathname}`];
+      if (!fn) return out(404, { err: '没有这个地址' });
+      let body = {};
+      if (req.method === 'POST') {
+        // only from our own page: JSON from the same origin (another site's page can't send that cross-origin)
+        if (!/^application\/json/.test(req.headers['content-type'] ?? '')) return out(415, { err: '只收 JSON' });
+        if (req.headers.origin && new URL(req.headers.origin).host !== me.host) return out(403, { err: '来源不对' });
+        let raw = ''; for await (const ch of req) { raw += ch; if (raw.length > 1 << 20) return out(413, { err: '太大' }); }
+        body = JSON.parse(raw || '{}');
+      }
+      out(200, await fn(url.searchParams, body));
+    } catch (e) { out(500, { err: e.message }); }
+  });
+  server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
+  server.listen(WEB_PORT, '127.0.0.1', () => console.log(`手机页面：https://${me.host}/  （只有 ${me.login} 能打开）`));
+}
+
 // Claude Code's status line: the account (bold, in its own color), model and effort, the conversation's folder
 // (and where it works now, when that's elsewhere), context used. Claude Code draws the ANSI colors.
 // Identity comes from this process's own CLAUDE_CONFIG_DIR, never from the global "active".
@@ -626,7 +862,9 @@ function replyCost([, , i, o, w5, w1, r, model, fast]) {
 }
 function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-cache.json')) {
   let cache = { v: 2, files: {} };
-  try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch {}
+  try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch (e) {
+    if (e.code !== 'ENOENT') try { fs.copyFileSync(cacheFile, `${cacheFile}.bad`); } catch {} // unreadable: keep it for a hand rescue
+  }
   if (cache.v !== 2) { // the first format had no model or cache-write kind: read the records again; for
     const files = {};  // deleted ones keep the counts, with the commonest kind (1 h) and price (Opus 5.5)
     for (const [f, c] of Object.entries(cache)) if (c?.recs && !fs.existsSync(f)) files[f] = { size: c.size, recs: c.recs.map(([k, d, i, o, w, r]) => [k, d, i, o, 0, w, r, '', 0]) };
@@ -643,29 +881,42 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
     return out;
   };
   const next = {}, best = new Map();
-  const count = (c, ri) => { for (const x of c.recs) { const b = best.get(x[0]); if (!b || sum(x) > sum(b.x)) best.set(x[0], { x, ri }); } };
+  // A reply found in several files counts at its largest; on a tie, in the oldest file: a resume copies the
+  // whole record into the other account (a newer file), and the replies belong to the account that made them.
+  const count = (c, ri) => {
+    for (const x of c.recs) {
+      const b = best.get(x[0]);
+      if (!b || sum(x) > sum(b.x) || (sum(x) === sum(b.x) && (c.born ?? Infinity) < b.born)) best.set(x[0], { x, ri, born: c.born ?? Infinity });
+    }
+  };
   roots.forEach((r, ri) => {
     for (const f of walk(r.dir)) {
-      const size = fs.statSync(f).size;
-      let c = cache.files[f];
-      if (!c || size < c.size) c = { size: 0, recs: [] }; // new, or rewritten shorter: read it all again
+      const st = fs.statSync(f), size = st.size;
+      let c = cache.files[f] ?? { size: 0, recs: [] };
+      c.born ??= st.birthtimeMs;
+      if (size < c.size) c.size = 0; // rewritten shorter: read it all again, keeping what it had
       if (size > c.size) {
-        const buf = Buffer.alloc(size - c.size), fd = fs.openSync(f, 'r');
-        fs.readSync(fd, buf, 0, buf.length, c.size);
-        fs.closeSync(fd);
-        const end = buf.lastIndexOf(10) + 1; // a line still being written waits for the next run
-        const at = new Map(c.recs.map((x, i) => [x[0], i]));
-        for (const l of buf.toString('utf8', 0, end).split('\n')) {
-          if (!l.includes('"type":"assistant"') || !l.includes('"usage":')) continue;
-          const id = l.match(/"id":"(msg_[^"]+)"/)?.[1], ts = l.match(/"timestamp":"([^"]+)"/)?.[1];
-          if (!id || !ts) continue;
-          const u = l.slice(l.indexOf('"usage":')), w = num(u, 'cache_creation_input_tokens'), w1 = Math.min(w, num(u, 'ephemeral_1h_input_tokens'));
-          const x = [`${id}:${l.match(/"requestId":"([^"]+)"/)?.[1] ?? ''}`, day(ts), num(u, 'input_tokens'), num(u, 'output_tokens'),
-            w - w1, w1, num(u, 'cache_read_input_tokens'), l.match(/"model":"([^"]+)"/)?.[1] ?? '', +/"speed":"fast"/.test(u)];
-          const i = at.get(x[0]);
-          if (i === undefined) { at.set(x[0], c.recs.length); c.recs.push(x); } else if (sum(x) > sum(c.recs[i])) c.recs[i] = x;
+        const fd = fs.openSync(f, 'r'), at = new Map(c.recs.map((x, i) => [x[0], i]));
+        // in pieces: one string can't pass ~512 MB; a piece ends at its last full line, a line still being
+        // written waits for the next run, and a line longer than a piece gets a bigger piece
+        for (let step = 32 << 20; c.size < size;) {
+          const buf = Buffer.alloc(Math.min(step, size - c.size));
+          fs.readSync(fd, buf, 0, buf.length, c.size);
+          const end = buf.lastIndexOf(10) + 1;
+          if (!end) { if (c.size + buf.length >= size) break; step *= 2; continue; }
+          for (const l of buf.toString('utf8', 0, end).split('\n')) {
+            if (!l.includes('"type":"assistant"') || !l.includes('"usage":')) continue;
+            const id = l.match(/"id":"(msg_[^"]+)"/)?.[1], ts = l.match(/"timestamp":"([^"]+)"/)?.[1];
+            if (!id || !ts) continue;
+            const u = l.slice(l.indexOf('"usage":')), w = num(u, 'cache_creation_input_tokens'), w1 = Math.min(w, num(u, 'ephemeral_1h_input_tokens'));
+            const x = [`${id}:${l.match(/"requestId":"([^"]+)"/)?.[1] ?? ''}`, day(ts), num(u, 'input_tokens'), num(u, 'output_tokens'),
+              w - w1, w1, num(u, 'cache_read_input_tokens'), l.match(/"model":"([^"]+)"/)?.[1] ?? '', +/"speed":"fast"/.test(u)];
+            const i = at.get(x[0]);
+            if (i === undefined) { at.set(x[0], c.recs.length); c.recs.push(x); } else if (sum(x) > sum(c.recs[i])) c.recs[i] = x;
+          }
+          c.size += end;
         }
-        c.size += end;
+        fs.closeSync(fd);
       }
       next[f] = c;
       count(c, ri);
@@ -679,7 +930,11 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
     next[f] = c;
     count(c, ri);
   }
-  fs.writeFileSync(cacheFile, JSON.stringify({ v: 2, files: next }));
+  // whole or not at all: this cache is the only record left of deleted transcripts, so a cut-off write must
+  // never replace it (two runs at once: the later rename wins, each file whole)
+  const tmp = `${cacheFile}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({ v: 2, files: next }));
+  try { fs.renameSync(tmp, cacheFile); } catch { fs.rmSync(tmp, { force: true }); } // held open by another run: it saves
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0 });
   const add = (t, x, usd) => { t.i += x[2]; t.o += x[3]; t.cw += x[4] + x[5]; t.cr += x[6]; t.usd += usd; };
@@ -713,7 +968,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats };
+module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -723,10 +978,15 @@ if (require.main === module) {
   else if (cmd === 'usage') usage(process.argv.slice(3));
   else if (cmd === 'warmup') warmup();
   else if (cmd === 'notify') notify(process.argv[3]);
+  else if (cmd === 'notes') { // the unread notifications, for the island: the same list the web page shows
+    const list = listSessions(load()), pid = new Map(list.map((x) => [x.id, x.pid]));
+    console.log(JSON.stringify(unreadNotes(list).map((n) => ({ ...n, pid: pid.get(n.id) ?? null }))));
+  }
   else if (cmd === 'island') island();
   else if (cmd === 'chats') chats(process.argv[3]);
   else if (cmd === 'resume') resume(process.argv[3], process.argv[4]);
   else if (cmd === 'delete') del(process.argv[3]);
+  else if (cmd === 'web') web();
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));
   else if (cmd === 'wt-bind') wtBind();
   else if (cmd === 'sessions') {
