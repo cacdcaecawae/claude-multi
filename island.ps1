@@ -360,7 +360,7 @@ $win = X @"
  </Grid>
 </Window>
 "@
-foreach ($n in 'Root', 'Island', 'Scale', 'Pill', 'Pin', 'PinIcon', 'PillName', 'PillAccts', 'HistTitle', 'Alerts', 'Panel',
+foreach ($n in 'Island', 'Scale', 'Pill', 'Pin', 'PinIcon', 'PillName', 'PillAccts', 'HistTitle', 'Alerts', 'Panel',
   'Status', 'BtnChats', 'BtnTokens', 'BtnRefresh', 'BtnWarm', 'BtnQuit', 'Rows', 'ProjView', 'BtnBack', 'ProjTitle', 'ProjList',
   'BadgeBox', 'Badge', 'HistoryBox', 'History', 'BtnClearHist') {
   Set-Variable -Name $n -Value $win.FindName($n)
@@ -643,12 +643,16 @@ function New-Alert($n, [datetime]$t) {
   $el.Add_MouseLeftButtonUp({
     param($s, $e)
     $e.Handled = $true
-    if ($s.Tag -and $s.DataContext -and (Web-Pids) -contains $s.Tag) { Open-WebChat $s.DataContext $env:USERPROFILE }
-    elseif ($s.Tag) { Focus-Claude $s.Tag }
-    Mark-Read $s.DataContext
-    $s.Parent.Children.Remove($s) # read: gone, whether it was showing or waiting in the unread list
-    if ($Alerts.Children.Count -eq 0) { $Alerts.Visibility = 'Collapsed' }
-    Update-Badge
+    try {
+      # read first: whatever happens next, it's done (gone, whether it was showing or in the unread list)
+      Mark-Read $s.DataContext
+      $s.Parent.Children.Remove($s)
+      if ($Alerts.Children.Count -eq 0) { $Alerts.Visibility = 'Collapsed' }
+      Update-Badge
+      # its Claude now, found by the conversation: closed and opened again, it's another process; closed, none
+      $p = if ($s.DataContext) { Live-Pid $s.DataContext } else { [int]$s.Tag }
+      if ($p -and (Web-Pids) -contains $p) { Open-WebChat $s.DataContext $env:USERPROFILE } elseif ($p) { Focus-Claude $p }
+    } catch { Log-Error "click $($s.DataContext): $_" }
   })
   $el
 }
@@ -693,7 +697,23 @@ function Clear-Alerts {
 }
 # Read marks shared with the web page (claude-multi.js readMarks): one line {id, at} per dismissal.
 function Mark-Read($id) {
-  if ($id) { try { [IO.File]::AppendAllText("$root\notes-read.jsonl", "{`"id`":`"$id`",`"at`":$([DateTimeOffset]::Now.ToUnixTimeMilliseconds())}`n") } catch {} }
+  if (-not $id) { return }
+  try { [IO.File]::AppendAllText("$root\notes-read.jsonl", "{`"id`":`"$id`",`"at`":$([DateTimeOffset]::Now.ToUnixTimeMilliseconds())}`n") }
+  catch { Log-Error "mark read $id`: $_" }
+}
+# what went wrong where nobody sees it (a click's handler, a write): island-errors.log, next to the island
+function Log-Error([string]$m) { try { [IO.File]::AppendAllText("$root\island-errors.log", "$(Get-Date -Format 'MM-dd HH:mm:ss') $m`r`n") } catch {} }
+# The Claude running a conversation now, by its session files (each account's, and the plain ~\.claude's), 0 if
+# none. Its pid must also have started when Claude wrote down: one that didn't exit cleanly leaves its file, and
+# Windows soon gives the pid to another program (as claude-multi.js listSessions checks).
+function Live-Pid([string]$id) {
+  foreach ($f in @(Get-ChildItem "$root\accounts\*\sessions\*.json", "$env:USERPROFILE\.claude\sessions\*.json" -ErrorAction SilentlyContinue)) {
+    try { $j = [IO.File]::ReadAllText($f.FullName, [Text.Encoding]::UTF8) | ConvertFrom-Json } catch { continue }
+    if ($j.sessionId -ne $id) { continue }
+    $p = Get-Process -Id $j.pid -ErrorAction SilentlyContinue
+    if ($p -and (-not $j.procStart -or "$($p.StartTime.ToFileTimeUtc())" -eq "$($j.procStart)")) { return [int]$j.pid }
+  }
+  0
 }
 function Drop-Read($id) { # '*' = all of them
   foreach ($list in $Alerts, $History) { foreach ($el in @($list.Children)) { if ($el.DataContext -and ($id -eq '*' -or $el.DataContext -eq $id)) { $list.Children.Remove($el) } } }
@@ -1685,7 +1705,8 @@ $BtnWarm.Add_Click({
     Refresh
   }
 })
-$Root.Add_MouseEnter({ Show-PinButton $true; if ($script:hidden) { Slide $false } }) # instant; the timer catches a still cursor
+# not a $Root: names are case-blind, and it replaced $root (our folder), so read marks and finding a Claude by its conversation silently failed
+$win.FindName('Root').Add_MouseEnter({ Show-PinButton $true; if ($script:hidden) { Slide $false } }) # instant; the timer catches a still cursor
 function Show-PinButton([bool]$on) { $Pin.Opacity = [int]$on; $Pin.IsHitTestVisible = $on }
 $Pin.Add_MouseLeftButtonUp({
   param($s, $e)

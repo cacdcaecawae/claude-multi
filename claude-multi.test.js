@@ -21,9 +21,11 @@ console.log('ok');
 // stop saving its transcript. Settings-style variables pass through.
 const { childEnv } = require('./claude-multi');
 process.env.CLAUDE_CODE_CHILD_SESSION = '1'; process.env.CLAUDE_PID = '123'; process.env.CLAUDE_CODE_GIT_BASH_PATH = 'x';
+process.env.NO_COLOR = '1'; // what a Claude gives its tools: a Claude started from there would be black and white
 const env = childEnv('D:/acct');
 assert.equal(env.CLAUDE_CODE_CHILD_SESSION, undefined);
 assert.equal(env.CLAUDE_PID, undefined);
+assert.equal(env.NO_COLOR, undefined);
 assert.equal(env.CLAUDE_CODE_GIT_BASH_PATH, 'x');
 assert.equal(env.CLAUDE_CONFIG_DIR, 'D:/acct');
 console.log('env ok');
@@ -180,4 +182,22 @@ console.log('tokens ok');
   assert.equal(none.skip, 2);
   assert.deepEqual(plain(none), [EARLIER, '❯ 第三个问题', MARK]);
   console.log('lead ok');
+}
+
+// The quota: a read that failed for a while (network, rate limit, server) keeps the account's last good one for
+// 30 min, a window reset since then counting as fresh; a failure you have to act on (logged out) shows.
+{
+  const { keepLast } = require('./claude-multi');
+  const now = Date.parse('2026-10-07T12:00:00Z'), P = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const u = { five_hour: { utilization: 97, resets_at: '2026-10-07T11:30:00Z' }, seven_day: { utilization: 50, resets_at: '2026-10-10T00:00:00Z' } };
+  const cache = { a: { at: now - 600000, u }, b: { at: now - 3600000, u }, c: { at: now - 600000, u } };
+  const out = keepLast(P, [{ err: '网络错误：fetch failed', temp: true }, { err: '网络错误：fetch failed', temp: true }, { err: 'token 已过期' }], cache, now);
+  assert.equal(out[0].u.five_hour.utilization, 0);  // reset at 11:30, half an hour ago
+  assert.equal(out[0].u.seven_day.utilization, 50); // still running
+  assert.equal(out[1].err, '网络错误：fetch failed'); // its last good one is an hour old
+  assert.equal(out[2].err, 'token 已过期');          // not a passing failure
+  const fresh = { five_hour: { utilization: 10, resets_at: null } };
+  keepLast([{ id: 'b' }], [{ u: fresh }], cache, now);
+  assert.deepEqual(cache.b, { at: now, u: fresh }); // a good read is kept for next time
+  console.log('quota ok');
 }

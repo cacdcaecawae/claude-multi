@@ -65,9 +65,10 @@ function ensureLinks(dir) {
 // What a running Claude hands everything it starts (its Bash tool, its hooks, so the island and the
 // terminals the island opens). A Claude inheriting them takes itself for that one's sub-session: it
 // stops saving its transcript and reports to the parent. claude-multi only starts top-level sessions.
+// NO_COLOR too: set for its tools' plain output, it turned every Claude the island opened black and white.
 const SESSION_ENV = ['CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_EXECPATH',
   'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ATTENDED',
-  'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN'];
+  'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'NO_COLOR'];
 
 function childEnv(dir) {
   const env = { ...process.env, CLAUDE_CONFIG_DIR: dir };
@@ -225,14 +226,34 @@ async function fetchUsage(p) {
   try { c = JSON.parse(fs.readFileSync(path.join(p.configDir, '.credentials.json'), 'utf8')).claudeAiOauth; } catch {}
   if (!c?.accessToken) return { err: '未找到登录凭据' };
   if (c.expiresAt && c.expiresAt < Date.now()) return { err: 'token 已过期，用 claude-multi 启动一次该账号即可刷新' };
-  try {
-    const r = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      headers: { Authorization: `Bearer ${c.accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' },
-      signal: AbortSignal.timeout(10000) });
-    if (r.status === 429) return { err: '用量接口限流，稍后再试' };
-    if (!r.ok) return { err: `用量接口返回 HTTP ${r.status}` };
-    return { u: await r.json() };
-  } catch (e) { return { err: `网络错误：${e.message}` }; }
+  // temp: a failure that passes by itself (the network, rate limit, the server), see keepLast; a dropped
+  // connection is tried once more first
+  for (let k = 0; ; k++) {
+    try {
+      const r = await fetch('https://api.anthropic.com/api/oauth/usage', {
+        headers: { Authorization: `Bearer ${c.accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' },
+        signal: AbortSignal.timeout(10000) });
+      if (r.status === 429) return { err: '用量接口限流，稍后再试', temp: true };
+      if (!r.ok) return { err: `用量接口返回 HTTP ${r.status}`, temp: r.status >= 500 };
+      return { u: await r.json() };
+    } catch (e) {
+      if (k) return { err: `网络错误：${e.message}`, temp: true };
+      await new Promise((ok) => setTimeout(ok, 1000));
+    }
+  }
+}
+
+// A read that failed for a while (temp) gives the account's last good one, up to 30 min old, so a blip doesn't
+// blank the island and the page: windows reset since then count as fresh. cache: {profile id: {at, u}}, updated.
+const USAGE_CACHE = path.join(ROOT, 'usage-cache.json');
+function keepLast(profiles, res, cache, now = Date.now()) {
+  return res.map((r, i) => {
+    const id = profiles[i].id, old = cache[id];
+    if (r.u) { cache[id] = { at: now, u: r.u }; return r; }
+    if (!r.temp || !old || now - old.at > 1800000) return r;
+    return { u: Object.fromEntries(Object.entries(old.u).map(([k, w]) =>
+      [k, w?.resets_at && Date.parse(w.resets_at) < now ? { ...w, utilization: 0, resets_at: null } : w])) };
+  });
 }
 
 // Which account to start a session on. 5h allowance is plentiful across accounts, so for it only
@@ -623,7 +644,10 @@ const readyAt = (u) => Math.max(0, ...WINDOWS.map(([k]) => u[k])
   .filter((w) => w && w.utilization >= 100 && w.resets_at).map((w) => +new Date(w.resets_at)));
 // Every account's usage and the pick. json is what the island and the web page read.
 async function usageState(reg = load()) {
-  const res = await Promise.all(reg.profiles.map(fetchUsage));
+  let cache = {};
+  try { cache = JSON.parse(fs.readFileSync(USAGE_CACHE, 'utf8')); } catch {}
+  const res = keepLast(reg.profiles, await Promise.all(reg.profiles.map(fetchUsage)), cache);
+  try { fs.writeFileSync(USAGE_CACHE, JSON.stringify(cache)); } catch {}
   const ok = res.map((r, i) => ({ ...r, i })).filter((r) => r.u);
   const open = ok.filter((r) => runway(r.u) > 0);
   const rec = open.length ? pickOpen(open) : [...ok].sort((a, b) => readyAt(a.u) - readyAt(b.u))[0];
@@ -1195,7 +1219,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead };
+module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead, keepLast };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
