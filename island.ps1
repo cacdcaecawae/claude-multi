@@ -629,12 +629,14 @@ function New-Alert($n, [datetime]$t) {
   # phone-style: tinted round icon (check = done, lock = wants permission), project as the title
   $c = if ($ask) { 'FF9F0A' } else { '30D158' }
   $icon = if ($ask) { '&#xE72E;' } else { '&#xE73E;' } # Segoe MDL2 Lock / CheckMark
-  $title = if ($n.project) { $n.project } else { 'Claude' }
+  # the conversation's name on top, as on the web page: the folder alone ("ly" for all opened in the home folder) can't tell them apart
+  $title = if ($n.title) { $n.title } elseif ($n.project) { $n.project } else { 'Claude' }
+  $sub = if ($n.title -and $n.project) { "$($n.project) · $($n.msg)" } else { $n.msg }
   $el = X ("<Grid $ns Margin='0,10,0,2' MinWidth='360'><Grid.ColumnDefinitions><ColumnDefinition Width='40'/><ColumnDefinition/><ColumnDefinition Width='Auto'/></Grid.ColumnDefinitions>" +
     "<Border Width='30' Height='30' CornerRadius='15' Background='#33$c' VerticalAlignment='Top' HorizontalAlignment='Left' Margin='0,1,0,0'>" +
     "<TextBlock Text='$icon' FontFamily='Segoe MDL2 Assets' FontSize='13' Foreground='#$c' HorizontalAlignment='Center' VerticalAlignment='Center'/></Border>" +
     "<StackPanel Grid.Column='1' VerticalAlignment='Center'><TextBlock Text='$(Esc $title)' MaxWidth='460' HorizontalAlignment='Left' FontSize='13' FontWeight='SemiBold' TextTrimming='CharacterEllipsis'/>" +
-    "<TextBlock Text='$(Esc $n.msg)' MaxWidth='460' HorizontalAlignment='Left' FontSize='12' Foreground='#B3FFFFFF' TextWrapping='Wrap' Margin='0,2,0,0'/></StackPanel>" +
+    "<TextBlock Text='$(Esc $sub)' MaxWidth='460' HorizontalAlignment='Left' FontSize='12' Foreground='#B3FFFFFF' TextWrapping='Wrap' Margin='0,2,0,0'/></StackPanel>" +
     "<TextBlock Grid.Column='2' Text='$(if ($t.Date -eq (Get-Date).Date) { $t.ToString('HH:mm') } else { $t.ToString('M/d HH:mm') })' FontSize='11' Foreground='#8CFFFFFF' Margin='12,2,0,0'/></Grid>")
   $el.Background = 'Transparent' # clickable across its whole width
   $el.Tag = $n.pid
