@@ -11,7 +11,7 @@
 <link rel="icon" type="image/png" sizes="64x64" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAACXBIWXMAAAsTAAALEwEAmpwYAAAD/0lEQVR4nO1bTU8TQRhe4aL+AvkQRQpR6gGCxUgpH4LGQAnhY2cKHDwoXvCCyAwkJosI8Qu9+ZGg4k38FwIaxA+u7HAxIibIycSLcGDMWyCpdLfdbbc7W7pv8iQk7Gae55n3fWcm3ZEkN9wwHFyWsxlFNYyiRyrF8ypFvxhFm4xiLgZoEziEuRA8wQZxADhKVsdKv3xIpXhIJXhdnFhjCBtCEAHOlohXiYxUgldFCzNtBEErSyTUmbBwLkkHGMUjKsVbosUkng14ixF0jytKljnxipLFKH4rWoBlIGjalAmMorvCSVueDWjMcM0zBxC23gC8tUxRR/xuT9CKaLIpM4Hg1Z9K8LB+6hM0LJpk6k1ARFM8l+XsdFjnLTBgTXOztDwo14omZ5sJVK7WSv/HmWMAeqjR/dFH0cTsA/qgYQBez5gMIGhNowTwRsYYQPHfaAOoeGJ2wjVgbzAHzIqbAdQtAZ5WPeBdXyt/gur4eIufjzSfsxUwJow909dqrwEqxXyyq4HXeT08N+eIIwBcXnQ1pN6Axf4O3namVLhgPbT7vGGOKTFgsb+D+0uLhIuMB+BoxARTBqgUO3rm96LD57XWgMnQeeGizOJld6N1BtTGaHj5uTn8Wk0Zn+pp5FM9Dby3ppznOcCAutMeawyY6WuNKf51T7TTYAb8b+/zBUfzeXPTRd4TQnHR0nSJl3g8vKiwUBOFxwt4nsYYkYBlOmkDnqJ63QFg5vXeuxoo/+/Z4qIT/MvCHP/ze80wvn6a4431tTxQdVYTvopyTaN38QzXJ2/AaLBKdwCYab33oBwinx0iN0yJ38XY7Vu6BgBOlhTr8htr8SdvwJ2gPyEDXnWLNwB2iyktgd6act0BrgTKokrg88KsuRJYiF0ClRVlMUvguRUlMHu9Vberw+BaWQDpr/WOmSYYjNcEj8VvgrHOCaaWwboYyyAIhYYHKQ+Av/fVMsgoDh80RAsyC8hCS7fC7T6vcFFG0Wn1Vpil0WGo+pTH+sMQizDByZkAM29EfMIGsB3AQQOajGjBuwAu0IDNaEjKABaxRMI+ATYcAxcqbQWMCVtd4JAId0sMYGkM14C9wRwwK24GULcEuLgeQDL853E10z+QUCmeF03MNhD8XisDJoQTsw/3o3vAIA44gJgtWCK4SvtDSQo3QMQTTPmHknpfjqsEEdEEUw80IOnFN+XyQZXi7/t29in6EfcqzRIJdabzLRF98aAp1BZT/G6oBI2LJmw90Khk6soMQdP7aPbfmL83JGXwpanIgGsm6XiLZLuZG6z5eAGrA6N4ENZQxwsHjgTfBM6S1cEVJQsuG8D39vDJ+c5g4k6RBG9sT0qYywN1GPmTSnc3pMyLfx+TG2wU/pDTAAAAAElFTkSuQmCC">
 <link rel="apple-touch-icon" href="/icon-180.png">
 <meta name="apple-mobile-web-app-title" content="Claude 多账号">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.css">
+<link rel="stylesheet" href="/lib/@xterm/xterm/css/xterm.css?6.0.0">
 <style>
   :root { --bg: #000; --card: #161618; --card2: #1f1f22; --line: rgba(255,255,255,.08); --fg: #fff; --fg2: rgba(255,255,255,.62);
     --fg3: rgba(255,255,255,.38); --green: #30d158; --orange: #ff9f0a; --red: #ff453a; --blue: #0a84ff; --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; }
@@ -70,6 +70,10 @@
   .opt { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.08); font-size: 14px; border: 1px solid transparent; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .opt.on { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
   input[type=text], textarea { width: 100%; background: rgba(255,255,255,.08); border: 0; border-radius: 12px; color: var(--fg); font: inherit; padding: 10px 12px; outline: none; }
+  /* 16px at least: under that, an iPhone zooms the page in on typing and doesn't zoom back out (the terminal's
+     hidden input box is a textarea too) */
+  input, textarea { font-size: 16px !important; }
+  html:has(#term.on) { overflow: hidden; } /* the list behind the terminal doesn't scroll */
   #term { position: fixed; inset: 0; background: #0b0b0d; z-index: 10; display: none; flex-direction: column; padding-top: env(safe-area-inset-top); }
   #term.on { display: flex; }
   #termHead { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
@@ -92,12 +96,33 @@
   .hm pre, .hm .mono { font: 12.5px/1.45 "SF Mono", Menlo, Consolas, monospace; background: rgba(255,255,255,.06); border-radius: 8px; padding: 8px 10px; overflow-x: auto; white-space: pre; margin: 4px 0; }
   .hm code { font: .9em "SF Mono", Menlo, Consolas, monospace; background: rgba(255,255,255,.08); border-radius: 4px; padding: 1px 4px; }
   .hm .h { font-size: 15.5px; }
+  /* a turn: your message a little apart from the one before; Claude's tool calls in a row folded into one line
+     (tap to see each); the end of the answer marked */
+  .hm.user { margin-top: 14px; }
+  details.tools summary { cursor: pointer; list-style: none; font-size: 13px; color: var(--fg3); }
+  details.tools summary::-webkit-details-marker { display: none; }
+  details.tools summary::before { content: '▸ '; } details.tools[open] summary::before { content: '▾ '; }
+  details.tools > div { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px 16px; }
+  .hm.done { font-size: 12.5px; color: var(--green); }
+  /* under the messages, live: what you sent (faded until the record has it), Claude at work, a menu to pick from */
+  #live { display: contents; }
+  .hm.user.pending { opacity: .5; }
+  .busy { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--orange); }
+  .busy i { width: 8px; height: 8px; border-radius: 4px; background: var(--orange); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  #go.stop { background: var(--red); color: #fff; }
+  .ask .row2 button { font-size: 12.5px; padding: 4px 10px; border-radius: 8px; background: rgba(255,255,255,.1); }
+  .ask { background: var(--card); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .ask .q { white-space: pre-wrap; font-size: 13.5px; color: var(--fg2); padding: 2px 4px 4px; }
+  .ask .pick { text-align: left; padding: 9px 12px; border-radius: 10px; background: rgba(255,255,255,.08); font-size: 14px; }
+  .ask .pick.on { background: rgba(10,132,255,.3); }
+  .ask .row2 { display: flex; gap: 8px; justify-content: flex-end; }
   #screen { flex: 1; min-height: 0; overflow: auto; background: #0b0b0d; }
   #screen .xterm { padding: 6px 2px 4px 10px; background: #0b0b0d; } /* on the terminal itself: the fit add-on subtracts it */
   #keys { display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; border-top: 1px solid var(--line); scrollbar-width: none; }
   #keys button { flex: none; background: rgba(255,255,255,.1); border-radius: 9px; padding: 7px 11px; font-size: 13px; font-weight: 600; }
   #send { display: flex; gap: 8px; padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
-  #send textarea { flex: 1; resize: none; height: 40px; max-height: 120px; }
+  #send textarea { flex: 1; resize: none; height: 44px; max-height: 120px; }
   #gone { display: none; background: rgba(255,69,58,.15); color: #ff8a80; font-size: 13px; padding: 6px 12px; }
   /* a computer's browser: the real keyboard types straight into the terminal, so no key row or input box */
   @media (pointer: fine) { #keys, #send { display: none; } }
@@ -118,9 +143,9 @@
   <div id="termHead">
     <button id="back" class="btn" aria-label="返回">‹</button>
     <div class="main"><div class="t" id="termTitle"></div><div class="m" id="termSub"></div></div>
-    <div class="seg" id="seg"><button data-v="term" class="on">终端</button><button data-v="hist">记录</button></div>
+    <div class="seg" id="seg"><button data-v="hist" class="on">对话</button><button data-v="term">终端</button></div>
   </div>
-  <div id="gone">这个终端已经结束</div>
+  <div id="gone">这个对话已经结束</div>
   <div id="screen"></div>
   <div id="hist"></div>
   <div id="keys"></div>
@@ -130,11 +155,11 @@
 <div class="sheet" id="sheet"><div class="in" id="sheetIn"></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/lib/addon-fit.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-unicode11@0.9.0/lib/addon-unicode11.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.19.0/lib/addon-webgl.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.12.0/lib/addon-web-links.min.js"></script>
+<script src="/lib/@xterm/xterm/lib/xterm.js?6.0.0"></script>
+<script src="/lib/@xterm/addon-fit/lib/addon-fit.js?0.11.0"></script>
+<script src="/lib/@xterm/addon-unicode11/lib/addon-unicode11.js?0.9.0"></script>
+<script src="/lib/@xterm/addon-webgl/lib/addon-webgl.js?0.19.0"></script>
+<script src="/lib/@xterm/addon-web-links/lib/addon-web-links.js?0.12.0"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -202,7 +227,7 @@ function renderChats() {
     if (notes.some((n) => n.id === s.id)) post('/api/read', { id: s.id }).catch(() => {}); // opened it: its notification is done
     const acct = s.pid ? s.acct + 1 : await pickAcct(s); // a running one stays where it runs
     if (!acct) return;
-    openTerm({ id: s.id, acct }, s.title, `${s.cwd} · ${s.pid ? (s.where === 'web' ? '在网页上运行' : '和电脑上的窗口同步：两边一样，可以直接打字（大小跟电脑窗口）') : '用账号 ' + acct + ' 继续'}`);
+    openTerm({ id: s.id, acct }, s.title, `${s.cwd} · ${s.pid ? (s.where === 'web' ? '在网页上运行' : '在电脑窗口里运行') : '用账号 ' + acct + ' 继续'}`);
   }));
 }
 
@@ -272,7 +297,7 @@ $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') e.target.classList.r
 // computer, a second browser) scales its font to fit. One open in a window on the computer keeps that
 // window's size, and the font shrinks to fit it.
 let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve();
-const FONT = matchMedia('(pointer: fine)').matches ? 14 : 13;
+const FINE = matchMedia('(pointer: fine)').matches, FONT = FINE ? 14 : 13; // FINE: a computer's mouse and keyboard
 const THEME = { background: '#0b0b0d', foreground: '#e8e8ea', cursor: '#ffffff', cursorAccent: '#0b0b0d', selectionBackground: 'rgba(100,181,255,.35)',
   black: '#1c1c1f', red: '#ff6961', green: '#30d158', yellow: '#ffd60a', blue: '#4ea1ff', magenta: '#d48cff', cyan: '#5ad8e6', white: '#d1d1d6',
   brightBlack: '#6e6e73', brightRed: '#ff8a80', brightGreen: '#5ee07f', brightYellow: '#ffe35a', brightBlue: '#82bcff', brightMagenta: '#e2a8ff', brightCyan: '#8fe7f0', brightWhite: '#ffffff' };
@@ -285,80 +310,160 @@ const input = (data) => {
   const k = key, takeBack = kind === 'pty' && ptySize && mine && (ptySize.w !== mine.cols || ptySize.h !== mine.rows);
   q = q.then(() => (takeBack ? claim() : null)).then(() => post('/api/input', { key: k, data })).catch((e) => toast(e.message));
 };
-function claim() { // this screen's size for the conversation
-  if (!term || kind !== 'pty') return Promise.resolve();
+function claim() { // this screen's size for the conversation, while its terminal is shown here
+  if (!term || kind !== 'pty' || view !== 'term') return Promise.resolve();
   term.options.fontSize = FONT; fit.fit();
   mine = { cols: term.cols, rows: term.rows }; ptySize = { w: mine.cols, h: mine.rows };
   return post('/api/resize', { key, ...mine }).catch(() => {});
 }
+// while Claude works and nothing's typed, 发送 is 停止 (Esc to Claude); typing makes it 发送 again: a message
+// sent then waits for Claude to take it in
+let busyNow = false;
+function goMode() {
+  const stop = view === 'hist' && busyNow && !$('#line').value.trim();
+  $('#go').textContent = stop ? '停止' : '发送'; $('#go').classList.toggle('stop', stop);
+}
+$('#line').addEventListener('input', goMode);
 $('#go').onclick = () => {
-  const v = $('#line').value; if (!v) return;
+  if ($('#go').classList.contains('stop')) return input('\x1b');
+  const v = $('#line').value.trim(); if (!v) return;
   input(v.replace(/\n/g, '\r') + '\r'); $('#line').value = '';
-  if (view === 'hist') setTimeout(() => loadHist(), 1500);
+  // each line goes to Claude as its own message (Enter sends), so each shows as one
+  if (view === 'hist') { for (const l of v.split('\n')) if (l.trim()) sent.push({ text: l.trim(), at: Date.now() }); drawLive(true); }
+  goMode();
 };
-$('#line').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#go').click(); } }; // Shift+Enter: a new line
+$('#line').onkeydown = (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if ($('#line').value.trim()) $('#go').click(); } // only sends; Shift+Enter: a new line
+  if (e.key === 'Escape' && busyNow) input('\x1b'); // as in Claude: Esc stops it
+};
 
-// --- 记录: the conversation's saved messages (a window on the computer only gives its current screen), read
-// again every 4 s while shown, kept at the bottom unless you scrolled up.
-// A record can be ~100 MB, so it comes in pieces: the newest one (from where it starts, read again every 4 s,
-// growing) and, as you scroll to the top, each piece before it, put above without moving what you're reading.
-let view = 'term', histId = null, histTimer = null, histSig = '', histFrom = null, histOldest = null, histBusy = false;
+// --- 对话: every conversation shown as messages, from its record. Claude writes each message there once it's
+// done, as its terminal shows it, so it's read every second while shown: only what was added since. A record
+// can be ~100 MB: the newest piece first and, as you scroll to the top, each piece before it, put above
+// without moving what you're reading. The terminal runs underneath, hidden: what the record doesn't have comes
+// off its screen (Claude at work, a menu waiting for your pick), and 「终端」 shows it as it is.
+let view = 'hist', histId = null, histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
+let sent = [], liveHtml = '', liveT = 0; // sent: your messages not in the record yet (sent while Claude works, they wait)
 function setView(v) {
   view = v;
   $('#term').classList.toggle('hist', v === 'hist');
   document.querySelectorAll('#seg button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
-  clearInterval(histTimer);
-  if (v === 'hist') { loadHist(histFrom == null); histTimer = setInterval(() => { if (document.visibilityState === 'visible') loadHist(); }, 4000); }
-  else if (term) { if (kind === 'pc') sizeFont(term.cols); else claim(); } // shown again: measure again
+  clearInterval(histTimer); goMode();
+  if (v === 'hist') { loadHist(); histTimer = setInterval(() => { if (document.visibilityState === 'visible') loadHist(); }, 1000); }
+  else if (term) { if (kind === 'pc') sizeFont(); else claim(); if (FINE) term.focus(); } // shown: measure again
 }
 $('#seg').onclick = (e) => { const b = e.target.closest('[data-v]'); if (b) setView(b.dataset.v); };
-const hmHtml = (items) => items.map((m) => `<div class="hm ${m.role}">${m.role === 'tool' || m.role === 'note' ? esc(m.text) : md(m.text)}</div>`).join('');
-async function histGet(id, q) {
-  const r = await (await fetch(`/api/history?id=${encodeURIComponent(id)}${q}`)).json();
+// Messages into a box. Tool calls in a row fold into one line saying what they were, "6 个操作：命令 3、读文件 2…"
+// (tap to see each); a turn over ends with how long it took.
+const KIND = { Bash: '命令', PowerShell: '命令', Read: '读文件', Edit: '改文件', Write: '改文件', NotebookEdit: '改文件', Grep: '搜索', Glob: '搜索',
+  WebSearch: '查网页', WebFetch: '查网页', Agent: '子任务' };
+const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${Math.floor(s / 3600)} 小时 ${Math.floor(s / 60) % 60} 分`; };
+function addItems(box, items) {
+  for (const m of items) {
+    if (m.role !== 'tool') {
+      box.insertAdjacentHTML('beforeend', m.role === 'done' ? `<div class="hm done">✓ 回复完成 · 用时 ${dur(+m.text)}</div>`
+        : `<div class="hm ${m.role}">${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
+      continue;
+    }
+    let g = box.lastElementChild;
+    if (!g?.matches('details.tools')) { box.insertAdjacentHTML('beforeend', '<details class="tools"><summary></summary><div></div></details>'); g = box.lastElementChild; }
+    const list = g.lastElementChild, n = {};
+    list.insertAdjacentHTML('beforeend', `<div class="hm tool" data-k="${KIND[m.text.split(/\s/)[0]] ?? '其他'}">${esc(m.text)}</div>`);
+    for (const t of list.children) n[t.dataset.k] = (n[t.dataset.k] ?? 0) + 1;
+    g.firstElementChild.textContent = `${list.children.length} 个操作：${Object.entries(n).map(([k, v]) => `${k} ${v}`).join('、')}`;
+  }
+}
+async function histGet(q) { // by the terminal's key once it's open (a new conversation has no id), else the id
+  const r = await (await fetch(`/api/history?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(histId ?? '')}${q}`)).json();
   if (r.err) throw new Error(r.err);
   return r;
 }
-async function loadHist(first) {
-  const id = histId;
-  if (!id) return;
-  const el = $('#hist');
-  let r;
-  try { r = await histGet(id, first ? '' : `&from=${histFrom}`); }
-  catch (e) { if (id === histId && first) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
-  if (id !== histId || view !== 'hist') return; // closed or another one opened meanwhile
-  if (first) {
-    histFrom = histOldest = r.start; histSig = '';
-    el.innerHTML = '<div class="col"><div id="hTop" class="hm note"></div><div id="hOld"></div><div id="hNew"></div></div>';
-  }
-  const sig = `${r.items.length}:${r.items.at(-1)?.text.length ?? 0}`;
-  if (sig !== histSig) {
-    histSig = sig;
-    const atEnd = first || el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    $('#hNew').innerHTML = hmHtml(r.items);
-    if (atEnd) el.scrollTop = el.scrollHeight;
-  }
-  topNote();
-  if (el.scrollTop < 300) loadOlder(); // too little to scroll yet: fill from before
+async function loadHist() {
+  if (histNow || (!key && !histId)) return;
+  histNow = true;
+  const g = histGen, first = histEnd == null, el = $('#hist');
+  try {
+    const r = await histGet(first ? '' : `&from=${histEnd}`);
+    if (g !== histGen) return; // closed, or another one opened meanwhile
+    histId ??= r.id; // a new one: which conversation it became, for marking its notifications read
+    if (first) { histOldest = r.start; el.innerHTML = '<div class="col"><div id="hTop" class="hm note"></div><div id="hOld"></div><div id="hNew"></div><div id="live"></div></div>'; }
+    histEnd = r.end;
+    if (r.items.length) {
+      const atEnd = first || el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      addItems($('#hNew'), r.items);
+      for (const m of r.items) { const i = m.role === 'user' ? sent.findIndex((s) => s.text === m.text) : -1; if (i >= 0) sent.splice(i, 1); }
+      if (atEnd) el.scrollTop = el.scrollHeight;
+    }
+    drawLive(first);
+    topNote();
+    if (first && el.scrollTop < 300) loadOlder(); // too little to scroll yet: fill from before
+  } catch (e) { if (g === histGen && first) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  finally { if (g === histGen) histNow = false; }
 }
 function topNote() {
   const t = $('#hTop');
-  if (t) t.textContent = histOldest > 0 ? '往上划，加载更早的记录' : $('#hOld').innerHTML || $('#hNew').innerHTML ? '对话开头' : '还没有记录';
+  if (t) t.textContent = histOldest > 0 ? '往上划，加载更早的记录' : $('#hOld').innerHTML || $('#hNew').innerHTML ? '对话开头' : '还没有消息，在下面发一条开始';
 }
 async function loadOlder() {
   if (histBusy || !histOldest || view !== 'hist') return;
   histBusy = true;
-  const id = histId, el = $('#hist');
+  const g = histGen, el = $('#hist');
   try {
-    const r = await histGet(id, `&end=${histOldest}`);
-    if (id !== histId || !$('#hOld')) return;
+    const r = await histGet(`&end=${histOldest}`);
+    if (g !== histGen || !$('#hOld')) return;
     const h = el.scrollHeight;
-    $('#hOld').insertAdjacentHTML('afterbegin', hmHtml(r.items));
+    const tmp = document.createElement('div'); addItems(tmp, r.items); $('#hOld').prepend(...tmp.childNodes);
     histOldest = r.start; topNote();
     el.scrollTop += el.scrollHeight - h; // what you were reading stays where it was
   } catch {} finally { histBusy = false; }
-  if (el.scrollTop < 300 && histOldest > 0) loadOlder();
+  if (g === histGen && el.scrollTop < 300 && histOldest > 0) loadOlder();
 }
 $('#hist').addEventListener('scroll', (e) => { if (e.target.scrollTop < 300) loadOlder(); });
+// Off the terminal's screen. Claude at work shows a spinner row, "✻ Gallivanting… (37s · ↓ 2.9k tokens)"; a
+// menu (its question, a permission) numbered options with ❯ at the current one: the options counted from it
+// up and down, nearest first, so a numbered list in the text above isn't taken for them.
+function screen() {
+  const b = term.buffer.active, rows = [];
+  for (let i = 0; i < term.rows; i++) rows.push((b.getLine(b.baseY + i)?.translateToString(true) ?? '').replace(/^\s*│|│\s*$/g, '')); // a boxed menu too
+  const busy = rows.map((r) => /^\s*[✻✶✽✢✳·*]\s+(\S.*?…)\s*(?:\((.*)\))?\s*$/.exec(r)).filter(Boolean).pop();
+  const opt = (i) => /^\s*(?:❯\s*)?(\d+)\.\s+(.*\S)/.exec(rows[i]), cur = rows.findIndex((r) => /^\s*❯\s*\d+\.\s/.test(r));
+  let menu = null;
+  if (cur >= 0) {
+    const c = +opt(cur)[1], at = new Map([[c, cur]]);
+    for (let i = cur - 1, n = c - 1; i >= 0 && n >= 1; i--) if (+opt(i)?.[1] === n) at.set(n--, i);
+    for (let i = cur + 1, n = c + 1; i < rows.length; i++) if (+opt(i)?.[1] === n) at.set(n++, i);
+    const top = at.get(1);
+    if (at.size >= 2 && top != null) menu = { cur: c, opts: [...at].sort((x, y) => x[0] - y[0]).map(([n, i]) => ({ n, label: opt(i)[2] })),
+      ask: rows.slice(Math.max(0, top - 6), top).map((r) => r.replace(/[│╭╮╰╯─]/g, '').trim()).filter(Boolean).join('\n') };
+  }
+  return { busy, menu };
+}
+function drawLive(toEnd) {
+  const el = $('#live');
+  if (!el) return;
+  sent = sent.filter((s) => Date.now() - s.at < 600000); // ponytail: one the record never shows (some slash commands) goes after 10 min
+  const { busy, menu } = term && !ended ? screen() : {}, took = busy && /(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0];
+  const h = sent.map((s) => `<div class="hm user pending">${esc(s.text)}</div>`).join('') + (menu
+    ? `<div class="ask">${menu.ask ? `<div class="q">${esc(menu.ask)}</div>` : ''}${menu.opts.map((o) =>
+      `<button class="pick${o.n === menu.cur ? ' on' : ''}" data-pick="${o.n}">${o.n}. ${esc(o.label)}</button>`).join('')}
+      <div class="row2"><button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
+    : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : 'Claude 正在回复'}${took ? ' · ' + took : ''}</div>` : '');
+  busyNow = !!busy && !menu; goMode();
+  if (h === liveHtml && !toEnd) return;
+  const hist = $('#hist'), atEnd = toEnd || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
+  el.innerHTML = liveHtml = h;
+  if (atEnd) hist.scrollTop = hist.scrollHeight;
+}
+$('#hist').addEventListener('click', (e) => {
+  const p = e.target.closest('[data-pick]'), k = e.target.closest('[data-key]');
+  if (p) { // to that option with the arrow keys, then Enter: works for any of Claude's menus
+    const m = term && screen().menu;
+    if (!m) return;
+    const d = +p.dataset.pick - m.cur;
+    for (let i = 0; i < Math.abs(d); i++) input(d > 0 ? '\x1b[B' : '\x1b[A');
+    input('\r');
+  } else if (k) { if (k.dataset.key === 'term') setView('term'); else input('\x1b'); }
+});
 // enough Markdown for Claude's replies: code blocks, tables (kept monospace), inline code, bold, headings
 function md(t) {
   return esc(t).split(/```[^\n]*\n?/).map((p, i) => i % 2 ? `<pre>${p.replace(/\n$/, '')}</pre>`
@@ -366,16 +471,21 @@ function md(t) {
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>')).join('');
 }
 $('#back').onclick = closeTerm;
-function sizeFont(cols) { // a window on the computer: shrink the font until its width fits the phone
-  const w = $('#screen').clientWidth - 8;
-  term.options.fontSize = Math.max(5, Math.min(14, Math.floor(w / (cols * 0.6))));
+function sizeFont() { // a window of fixed size (the computer's, or another screen's): a font that shows all of it
+  const s = $('#screen'), x = s.querySelector('.xterm-screen');
+  for (let i = 0; i < 3 && x.offsetWidth; i++) { // measured as drawn; the padding and the terminal's scroll bar left out
+    const k = Math.min((s.clientWidth - 26) / x.offsetWidth, (s.clientHeight - 10) / x.offsetHeight);
+    const f = Math.max(5, Math.min(FONT, Math.floor(term.options.fontSize * k)));
+    if (f === term.options.fontSize) break;
+    term.options.fontSize = f;
+  }
 }
 async function openTerm(body, title, sub) {
   $('#termTitle').textContent = title; $('#termSub').textContent = sub; $('#gone').style.display = 'none';
   $('#term').classList.add('on'); $('#screen').innerHTML = '';
-  mine = ptySize = null;
-  histId = body.id ?? null; histSig = ''; histFrom = histOldest = null; $('#hist').innerHTML = ''; // a brand-new one has no record yet
-  $('#seg').style.display = histId ? '' : 'none'; setView('term');
+  mine = ptySize = key = null;
+  histId = body.id ?? null; histEnd = histOldest = null; histNow = false; histGen++; sent = []; liveHtml = ''; $('#hist').innerHTML = '';
+  setView('hist');
   term = new Terminal({ fontSize: FONT, lineHeight: 1.12, theme: THEME, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
     fontFamily: '"SF Mono", Menlo, "Cascadia Mono", Consolas, "PingFang SC", "Microsoft YaHei", monospace' });
   fit = new FitAddon.FitAddon(); term.loadAddon(fit);
@@ -386,11 +496,13 @@ async function openTerm(body, title, sub) {
   // mobile browsers drop its context when the page goes to the background
   if (matchMedia('(pointer: fine)').matches) try { const gl = new WebglAddon.WebglAddon(); gl.onContextLoss(() => gl.dispose()); term.loadAddon(gl); } catch {}
   fit.fit();
+  if (!$('#screen').clientWidth) term.resize(100, 40); // only the chat shown: room for a menu with its question
   term.onData(input);
+  term.onWriteParsed(() => { if (view === 'hist' && !liveT) liveT = setTimeout(() => { liveT = 0; drawLive(); }, 200); }); // its screen changed
   openBody = body; ended = false; fails = 0;
   try { ({ key, kind } = await post('/api/open', { ...body, cols: term.cols, rows: term.rows })); } catch (e) { toast(e.message); return closeTerm(); }
   connect();
-  if (matchMedia('(pointer: fine)').matches) term.focus(); // a phone would pop its keyboard over the screen
+  if (FINE) $('#line').focus(); // a phone would pop its keyboard over the screen
 }
 // The live stream. It is opened again when it goes quiet (a computer waking up, a phone back from the
 // background, a network change: a browser never notices a dead connection itself; the server pings every
@@ -421,10 +533,10 @@ async function connect(again) {
   on('size', (e) => {
     const z = JSON.parse(e.data);
     if (!z.w) return;
-    if (kind === 'pc') { term.resize(z.w, z.h); sizeFont(z.w); return; }
-    ptySize = z;
-    if (mine && z.w === mine.cols && z.h === mine.rows) { if (term.cols !== z.w || term.rows !== z.h) { term.options.fontSize = FONT; fit.fit(); } return; }
-    if (mine) { term.resize(z.w, z.h); sizeFont(z.w); } // another screen took it: show that size, scaled
+    if (kind === 'pty') ptySize = z;
+    if (kind === 'pty' && mine && z.w === mine.cols && z.h === mine.rows) { if (term.cols !== z.w || term.rows !== z.h) { term.options.fontSize = FONT; fit.fit(); } return; }
+    // a window's size; or another screen took it, or this one hasn't (only the chat shown): that size, scaled
+    term.resize(z.w, z.h); sizeFont();
   });
   on('gone', end);
   s.onerror = () => { // CLOSED: refused (the browser retries the rest itself)
@@ -436,8 +548,14 @@ async function connect(again) {
 }
 const stale = (ms) => term && !ended && Date.now() - lastSeen > ms;
 setInterval(() => { if (stale(45000)) connect(true); }, 10000);
-function closeTerm() { gen++; clearInterval(histTimer); es?.close(); es = null; term?.dispose(); term = null; key = null; ended = false; fails = 0; $('#term').classList.remove('on', 'hist'); view = 'term'; load(); }
-window.addEventListener('resize', () => { if (!term || !key) return; if (kind === 'pc') sizeFont(term.cols); else claim(); });
+// back to the list: what this conversation notified while you were in it, you've seen (the island drops it too)
+function closeTerm() {
+  const id = histId;
+  gen++; histGen++; clearInterval(histTimer); es?.close(); es = null; term?.dispose(); term = null; key = null; histId = null;
+  ended = false; fails = 0; sent = []; busyNow = false; $('#term').classList.remove('on', 'hist');
+  (id ? post('/api/read', { id }).catch(() => {}) : Promise.resolve()).then(() => load());
+}
+window.addEventListener('resize', () => { if (!term || !key) return; if (kind === 'pc') sizeFont(); else claim(); });
 // back to this screen (switched apps, picked the phone up): it takes the size again
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !key) return;

@@ -443,7 +443,8 @@ function resume(id, n) {
 // the other side scales to it. Closing this tab leaves the conversation running there.
 async function attach(id) {
   const base = `http://127.0.0.1:${WEB_PORT}`;
-  const headers = { 'tailscale-user-login': tailscaleMe()?.login ?? '', 'content-type': 'application/json' };
+  // on this computer: unpacked (the service gzips for the phone)
+  const headers = { 'tailscale-user-login': tailscaleMe()?.login ?? '', 'content-type': 'application/json', 'accept-encoding': 'identity' };
   const post = async (p, body) => {
     const r = await fetch(base + p, { method: 'POST', headers, body: JSON.stringify(body) });
     const j = await r.json();
@@ -762,20 +763,25 @@ function history(file, { from, end } = {}) {
   fs.readSync(fd, buf, 0, b - a, a);
   fs.closeSync(fd);
   const skip = a === 0 || from != null ? 0 : buf.indexOf(10) + 1; // a piece cut mid-line starts at its next line
-  const lines = buf.toString('utf8', skip).split('\n');
+  const last = buf.lastIndexOf(10); // a line still being written waits for the next read (from: end)
+  const lines = last < skip ? [] : buf.toString('utf8', skip, last + 1).split('\n');
   const out = [];
   const add = (role, text, at) => {
     text = String(text ?? '').trim();
     if (text) out.push({ role, text: text.length > 20000 ? text.slice(0, 20000) + '…' : text, at });
   };
   for (const l of lines) {
-    if (!l.includes('"type":"user"') && !l.includes('"type":"assistant"')) continue;
+    if (!l.includes('"type":"user"') && !l.includes('"type":"assistant"') && !l.includes('"queued_command"') && !l.includes('"turn_duration"')) continue;
     if (l.includes('"type":"tool_result"')) continue; // tool output, often huge (screenshots): not shown, not parsed
     let j;
     try { j = JSON.parse(l); } catch { continue; }
     if (j.isMeta || j.isSidechain) continue;
     const at = Date.parse(j.timestamp) || 0, c = j.message?.content;
-    if (j.type === 'user') {
+    if (j.type === 'attachment') { // what you sent while Claude was at work, where it took it in
+      if (j.attachment?.type === 'queued_command' && j.attachment.origin?.kind === 'human') add('user', j.attachment.prompt, at);
+    } else if (j.type === 'system') { // Claude's turn over: how long it took, in ms
+      if (j.subtype === 'turn_duration' && j.durationMs > 0) add('done', String(j.durationMs), at);
+    } else if (j.type === 'user') {
       if (j.isCompactSummary) { add('note', '更早的内容已压缩', at); continue; }
       for (const p of typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : []) {
         if (p.type === 'image') add('user', '[图片]', at);
@@ -796,7 +802,34 @@ function history(file, { from, end } = {}) {
       }
     }
   }
-  return { items: out, start: a + skip };
+  return { items: out, start: a + skip, end: last < skip ? a + skip : a + last + 1 };
+}
+
+// The start of a window's history: the reader keeps only what scrolls by from where it began (the screen then),
+// and the window's own history can't be read. So that it starts at a question of yours, the record fills in
+// what came between the question and the first message the lines show (a row starting ❯ or ●, found by its
+// first words), drawn the way Claude Code draws a conversation. skip: the lines before that message.
+function lead(items, lines, more = false) { // more: the record goes back further than items
+  const key = (t) => String(t).split('\n')[0].replace(/[\s*`#>]/g, '').slice(0, 16);
+  let cut = -1, skip = 0;
+  for (let r = 0; r < lines.length && cut < 0; r++) {
+    const m = /^[❯●]\s+(.*)/.exec(lines[r].replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')), k = m && key(m[1]);
+    if (!k || k.length < 4) continue;
+    for (let i = items.length - 1; i >= 0 && cut < 0; i--) if (items[i].role !== 'tool' && key(items[i].text) === k) { cut = i; skip = r; }
+  }
+  if (cut < 0) { cut = items.length; skip = lines.length; } // not found: from your latest question, no kept lines (the screen stays)
+  let start = cut; // the screen starts at a question: nothing before it
+  if (items[cut]?.role !== 'user') for (start = cut - 1; start > 0 && items[start].role !== 'user';) start--;
+  if (start < 0 || start >= cut) return { text: '', skip };
+  const draw = (it) => {
+    const t = it.text.replace(/\*\*([^*\n]+)\*\*/g, '\x1b[1m$1\x1b[22m').split('\n').join('\r\n  ');
+    return it.role === 'user' ? `\x1b[90m❯\x1b[39m ${t}` : it.role === 'claude' ? `● ${t}`
+      : it.role === 'tool' ? `\x1b[32m●\x1b[39m \x1b[90m${t}\x1b[39m` : it.role === 'done' ? '\x1b[90m✓ 回复完成\x1b[39m' : `\x1b[90m── ${t} ──\x1b[39m`;
+  };
+  const part = items.slice(start, cut); // a blank line between messages, tool calls in a row packed together
+  const body = part.map((it, i) => (i && (it.role !== 'tool' || part[i - 1].role !== 'tool') ? '\r\n' : '') + draw(it)).join('\r\n');
+  const text = [start > 0 || more ? '\x1b[90m── 更早的在「记录」里 ──\x1b[39m' : '', body, '\x1b[90m── 以上是对话记录，下面是电脑窗口里的画面 ──\x1b[39m'];
+  return { text: text.filter(Boolean).join('\r\n\r\n'), skip };
 }
 
 async function web() {
@@ -805,7 +838,7 @@ async function web() {
   if (!me) { console.log('读不到 Tailscale 的登录信息：先在这台电脑上登录 Tailscale。'); process.exit(1); }
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
-  let usageCache = null, usageAt = 0, sessCache = null, sessAt = 0;
+  let usageCache = null, usageAt = 0, usageBusy = false, sessCache = null, sessAt = 0;
 
   const send = (t, ev, data) => { for (const res of t.clients) res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); };
   const sessions = () => {
@@ -818,7 +851,7 @@ async function web() {
     const key = `p${Date.now().toString(36)}`;
     const proc = pty.spawn(claudeExe, args, { name: 'xterm-256color', cols, rows, cwd, env: childEnv(p.configDir) });
     // pid read live: node-pty only knows it once the pseudo-terminal is ready (it is 0 right after spawn)
-    const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd };
+    const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, dir: p.configDir };
     proc.onData((d) => {
       if (!t.listed && proc.pid) { t.listed = true; saveTerms(); }
       t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
@@ -834,13 +867,13 @@ async function web() {
     if (terms.has(key) && !terms.get(key).gone) return terms.get(key);
     const proc = require('child_process').spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
       path.join(ROOT, 'console-bridge.ps1'), String(pid)], { windowsHide: true });
-    const t = { kind: 'pc', key, pid, proc, clients: new Set(), frame: null, w: 0, h: 0, hist: [] }; // hist: lines scrolled off, colored
+    const t = { kind: 'pc', key, pid, proc, clients: new Set(), frame: null, w: 0, h: 0, hist: [], waiting: [] }; // hist: lines scrolled off, colored
     let line = '';
     proc.stdout.on('data', (d) => {
       line += d;
       for (let k; (k = line.indexOf('\n')) >= 0; line = line.slice(k + 1)) {
         let m; try { m = JSON.parse(line.slice(0, k)); } catch { continue; }
-        if (m.gone) { t.gone = true; send(t, 'gone', {}); continue; }
+        if (m.gone) { t.gone = true; send(t, 'gone', {}); t.waiting.splice(0).forEach((f) => f()); continue; }
         // lines scrolled off the window's top: kept here (the last 5000, for whoever opens it later or comes
         // back), and an open page scrolls its screen as far, so they go to its history
         if (m.s) {
@@ -850,31 +883,66 @@ async function web() {
           continue;
         }
         if (m.w !== t.w || m.h !== t.h) { t.w = m.w; t.h = m.h; send(t, 'size', { w: m.w, h: m.h }); }
+        // Claude drawing the whole screen anew (the conversation compacted, the window resized): nothing scrolled,
+        // so the kept lines have a hole. They're dropped, the record has it all; once it settles, open pages
+        // get everything again (ESC c clears theirs first).
+        if (t.frame) {
+          const plain = (x) => x.replace(/^\x1b\[H/, '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').split('\r\n'), now = new Set(plain(m.f));
+          if (plain(t.frame).slice(0, -8).filter((r) => r.trim() && !now.has(r)).length > Math.max(10, m.h / 3)) {
+            t.hist = [];
+            clearTimeout(t.redo); t.redo = setTimeout(() => send(t, 'data', '\x1bc' + replay(t)), 2000);
+          }
+        }
         t.frame = m.f; send(t, 'data', m.f);
+        t.waiting.splice(0).forEach((f) => f()); // pages that opened before the first frame
       }
     });
-    proc.on('exit', () => { t.gone = true; send(t, 'gone', {}); terms.delete(key); });
+    proc.on('exit', () => { t.gone = true; send(t, 'gone', {}); t.waiting.splice(0).forEach((f) => f()); terms.delete(key); });
     setTimeout(() => { if (!t.clients.size) proc.kill(); }, 30000); // opened but nobody came to watch: not left running
     terms.set(key, t);
     return t;
   }
   const where = (s) => [...terms.values()].find((t) => !t.gone && t.pid === s.pid); // ours, or a window here
+  // what a page gets first: our terminal's output; for a window here, the record before what its reader kept,
+  // the kept lines, then pushed off the screen (a newline per row) so the frame doesn't cover them, and the frame
+  function replay(t) {
+    if (t.kind === 'pty') return t.buf;
+    let l = { text: '', skip: 0 };
+    const rows = (t.frame ?? '').replace(/^\x1b\[H/, '').split('\r\n');
+    try { if (t.file && t.w) { const h = history(t.file); l = lead(h.items, [...t.hist, ...rows], h.start > 0); } } catch {}
+    const above = (l.text ? [l.text] : []).concat(t.hist.slice(l.skip)).join('\r\n');
+    return (above ? above + '\r\n'.repeat(t.h) : '') + (t.frame ?? '');
+  }
   // for the island and `claude-multi attach`: which running conversations are ours
   function saveTerms() {
     try { fs.writeFileSync(WEB_TERMS, JSON.stringify([...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid).map((t) => t.pid))); } catch {}
   }
 
   const api = {
+    // the quota as last read, at once: reading it again (each account's, over the network) takes a second or
+    // more, so one over a minute old is read again in the background, for the next look. ?fresh waits for it.
     'GET /api/state': async (q) => {
-      if (!usageCache || Date.now() - usageAt > 60000 || q.has('fresh')) { usageCache = (await usageState()).json; usageAt = Date.now(); }
+      if (!usageCache || q.has('fresh')) { usageCache = (await usageState()).json; usageAt = Date.now(); }
+      else if (Date.now() - usageAt > 60000 && !usageBusy) {
+        usageBusy = true;
+        usageState().then((r) => { usageCache = r.json; usageAt = Date.now(); }, () => {}).finally(() => { usageBusy = false; });
+      }
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc' }));
       return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: me.login };
     },
     'GET /api/tokens': () => tokenStats(),
-    'GET /api/history': (q) => { // asked every 4 s while shown: the cached list gives the file, read fresh below
-      const s = sessions().find((x) => x.id === q.get('id'));
-      if (!s) throw new Error('找不到这个对话');
-      return history(s.file, { from: q.get('from') ?? undefined, end: q.get('end') ?? undefined });
+    // asked every second while shown, mostly from where the last answer ended. By the open terminal's key: one
+    // started here has a record once Claude wrote the first message (its session file, named by its pid, says
+    // which conversation it is), until then none.
+    'GET /api/history': (q) => {
+      const t = terms.get(q.get('key') ?? '');
+      if (t?.dir && !t.file && t.pid) try {
+        const id = JSON.parse(fs.readFileSync(path.join(t.dir, 'sessions', `${t.pid}.json`), 'utf8')).sessionId;
+        for (const d of fs.readdirSync(path.join(t.dir, 'projects'))) if (fs.existsSync(path.join(t.dir, 'projects', d, `${id}.jsonl`))) t.file = path.join(t.dir, 'projects', d, `${id}.jsonl`);
+      } catch {}
+      const file = t?.file ?? sessions().find((x) => x.id === q.get('id'))?.file;
+      if (!file) { if (t) return { items: [], start: 0, end: 0 }; throw new Error('找不到这个对话'); }
+      return { ...history(file, { from: q.get('from') || undefined, end: q.get('end') || undefined }), id: path.basename(file, '.jsonl') };
     },
     'POST /api/read': (q, b) => { // {id} one conversation's notifications, {all: true} every one; the island drops them too
       const id = b.all ? '*' : /^[\w-]{1,80}$/.test(b.id ?? '') ? b.id : null;
@@ -898,7 +966,7 @@ async function web() {
         sessCache = null;
         const s = sessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
-        if (s.pid) { const t = where(s) ?? mirror(s.pid); return { key: t.key, kind: t.kind }; }
+        if (s.pid) { const t = where(s) ?? mirror(s.pid); t.file = s.file; return { key: t.key, kind: t.kind }; }
         if (b.live) throw new Error('这个对话已经不在运行了'); // the page reconnecting: an ended one isn't started anew
         const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
         copyTo(s, p);
@@ -927,30 +995,51 @@ async function web() {
     },
   };
 
+  const zlib = require('zlib');
   const server = http.createServer(async (req, res) => {
-    const out = (code, body, type = 'application/json; charset=utf-8') => {
-      res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' });
-      res.end(typeof body === 'string' ? body : JSON.stringify(body));
+    // gzipped when the browser takes it: a phone on mobile data comes through a relay abroad, slow, and the
+    // terminal's output packs to a fiftieth (a window's kept lines: ~330 KB, ~7 KB)
+    const gz = /\bgzip\b/.test(req.headers['accept-encoding'] ?? '');
+    const reply = (code, head, body) => {
+      const zip = gz && body.length > 1024;
+      res.writeHead(code, zip ? { ...head, 'content-encoding': 'gzip', vary: 'accept-encoding' } : head);
+      res.end(zip ? zlib.gzipSync(body) : body);
     };
+    const out = (code, body, type = 'application/json; charset=utf-8') =>
+      reply(code, { 'content-type': type, 'cache-control': 'no-store' }, Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)));
     try {
       if (req.headers['tailscale-user-login'] !== me.login) return out(403, { err: `只有 ${me.login} 能打开` });
       const url = new URL(req.url, 'http://x');
       if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
       const icon = { '/favicon.ico': ['island.ico', 'image/x-icon'], '/icon-180.png': ['icon-180.png', 'image/png'] }[url.pathname]; // the island's
       if (req.method === 'GET' && icon) { res.writeHead(200, { 'content-type': icon[1], 'cache-control': 'max-age=86400' }); return res.end(fs.readFileSync(path.join(ROOT, icon[0]))); }
+      // the terminal's files, from our node_modules: from the CDN abroad they took 7-8 s, and the page waits for
+      // them. Kept a year: the page asks with the version, ?6.0.0, so a new one is a new address.
+      const lib = /^\/lib\/(@xterm\/[\w-]+\/(?:lib|css)\/[\w.-]+\.(js|css))$/.exec(url.pathname);
+      if (req.method === 'GET' && lib) {
+        const type = lib[2] === 'css' ? 'text/css' : 'text/javascript';
+        return reply(200, { 'content-type': type, 'cache-control': 'max-age=31536000, immutable' }, fs.readFileSync(path.join(ROOT, 'node_modules', lib[1])));
+      }
       if (req.method === 'GET' && url.pathname === '/api/term') { // the terminal's output, as server-sent events
         const t = terms.get(url.searchParams.get('key'));
         if (!t) return out(404, { err: '这个终端已经结束' });
-        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
-        t.clients.add(res);
-        res.write(`event: size\ndata: ${JSON.stringify({ w: t.w, h: t.h, kind: t.kind })}\n\n`);
-        // a window's kept lines first, then pushed off the screen (a newline per row) so the frame doesn't cover them
-        const past = t.kind === 'pty' ? t.buf : (t.hist.length ? t.hist.join('\r\n') + '\r\n'.repeat(t.h) : '') + (t.frame ?? '');
-        if (past) res.write(`event: data\ndata: ${JSON.stringify(past)}\n\n`);
-        if (t.gone) res.write('event: gone\ndata: {}\n\n');
-        const beat = setInterval(() => res.write('event: ping\ndata: {}\n\n'), 15000); // a named event: the page sees it and knows the stream lives
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'x-accel-buffering': 'no', ...(gz && { 'content-encoding': 'gzip' }) });
+        const z = gz ? zlib.createGzip() : null; // gzipped too, each event sent on at once
+        if (z) { z.on('error', () => {}); z.pipe(res); } // a page gone mid-write: dropped, never the service down
+        const sse = z ? { write: (s) => { z.write(s); z.flush(zlib.constants.Z_SYNC_FLUSH); } } : res;
+        let closed = false;
+        const begin = () => { // a window's reader: once it has the first frame, the record before it is found from it
+          if (closed) return;
+          sse.write(`event: size\ndata: ${JSON.stringify({ w: t.w, h: t.h, kind: t.kind })}\n\n`);
+          const past = replay(t);
+          if (past) sse.write(`event: data\ndata: ${JSON.stringify(past)}\n\n`);
+          if (t.gone) sse.write('event: gone\ndata: {}\n\n');
+          t.clients.add(sse);
+        };
+        if (t.kind === 'pc' && !t.frame && !t.gone) t.waiting.push(begin); else begin();
+        const beat = setInterval(() => sse.write('event: ping\ndata: {}\n\n'), 15000); // a named event: the page sees it and knows the stream lives
         req.on('close', () => {
-          clearInterval(beat); t.clients.delete(res);
+          closed = true; clearInterval(beat); t.clients.delete(sse); z?.destroy();
           // nobody watching: the reader stays 20 min, still keeping what scrolls by, for when you come back
           if (t.kind === 'pc') setTimeout(() => { if (!t.clients.size) t.proc.kill(); }, 1200000);
         });
@@ -1106,7 +1195,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history };
+module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

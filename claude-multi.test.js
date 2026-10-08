@@ -146,9 +146,38 @@ console.log('tokens ok');
     u('<task-notification>\n<task-id>b1</task-id>'),
     u('Summary of earlier work', { isCompactSummary: true }),
     a([{ type: 'text', text: '测试通过。' }]),
+    // sent while Claude was at work; a background task's message delivered the same way isn't yours
+    { type: 'attachment', timestamp: T, attachment: { type: 'queued_command', prompt: '顺便看看日志', origin: { kind: 'human' } } },
+    { type: 'attachment', timestamp: T, attachment: { type: 'queued_command', prompt: '<task-notification>', origin: { kind: 'task' } } },
+    { type: 'system', subtype: 'turn_duration', durationMs: 7750, timestamp: T }, // Claude's turn over
   ].map((x) => JSON.stringify(x)).join('\n') + '\n');
-  assert.deepEqual(history(f).items.map((x) => `${x.role}:${x.text}`),
-    ['user:/rename 新名字', 'user:修一下 bug', 'claude:好的。', 'tool:Bash  Run tests', 'note:更早的内容已压缩', 'claude:测试通过。']);
+  const all = history(f);
+  assert.deepEqual(all.items.map((x) => `${x.role}:${x.text}`),
+    ['user:/rename 新名字', 'user:修一下 bug', 'claude:好的。', 'tool:Bash  Run tests', 'note:更早的内容已压缩', 'claude:测试通过。', 'user:顺便看看日志', 'done:7750']);
+  // read again from where it ended: only what was added, and a line still being written waits
+  fs.appendFileSync(f, JSON.stringify(a([{ type: 'text', text: '看完了。' }])) + '\n{"type":"assistant","mess');
+  const more = history(f, { from: all.end });
+  assert.deepEqual(more.items.map((x) => x.text), ['看完了。']);
+  assert.equal(history(f, { from: more.end }).items.length, 0);
   fs.rmSync(f);
   console.log('history ok');
+}
+
+// The 终端 of a window here starts at a question of yours: the record fills in from the question the first
+// message on the screen belongs to; the lines above that message are left out (the record has them).
+{
+  const { lead } = require('./claude-multi');
+  const items = [['user', '第一个问题'], ['claude', '第一个回答'], ['user', '第二个问题'], ['claude', '**第二个**回答'], ['user', '第三个问题']]
+    .map(([role, text]) => ({ role, text }));
+  const plain = (l) => l.text.replace(/\x1b\[[0-9;]*m/g, '').split('\r\n').filter(Boolean);
+  const MARK = '── 以上是对话记录，下面是电脑窗口里的画面 ──', EARLIER = '── 更早的在「记录」里 ──';
+  const l = lead(items, ['…第一个回答的结尾', '', '\x1b[1m● 第二个回答\x1b[0m']);
+  assert.equal(l.skip, 2);
+  assert.deepEqual(plain(l), [EARLIER, '❯ 第二个问题', MARK]);
+  assert.deepEqual(plain(lead(items, ['● 第一个回答'])), ['❯ 第一个问题', MARK]);  // the very first: no note
+  assert.equal(lead(items, ['…', '❯ 第二个问题']).text, '');                   // the screen starts at a question
+  const none = lead(items, ['● 认不出的', '● 两行']);                           // nothing on it found
+  assert.equal(none.skip, 2);
+  assert.deepEqual(plain(none), [EARLIER, '❯ 第三个问题', MARK]);
+  console.log('lead ok');
 }
