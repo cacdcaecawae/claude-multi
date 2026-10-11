@@ -201,3 +201,61 @@ console.log('tokens ok');
   assert.deepEqual(cache.b, { at: now, u: fresh }); // a good read is kept for next time
   console.log('quota ok');
 }
+// Notes (projects\<folder>\memory) shared by every account: a real one merged into ~/.claude's and made a junction to
+// it, the originals kept; a folder Claude is about to start in linked ahead; a second run changes nothing.
+{
+  const { shareMemory } = require('./claude-multi');
+  const fs = require('fs'), path = require('path'), os = require('os');
+  const t = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-mem-')), home = path.join(t, 'home'), a1 = path.join(t, 'a1'), a2 = path.join(t, 'a2'), bak = path.join(t, 'bak');
+  const put = (f, s, age) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, s); const at = Date.now() / 1000 - age; fs.utimesSync(f, at, at); };
+  const P = (d) => path.join(d, 'projects', 'P', 'memory');
+  put(path.join(P(home), 'MEMORY.md'), '- [A](a.md) — old hook\n- [K](k.md) — k\n', 300);
+  put(path.join(P(home), 'a.md'), 'a, old', 300);
+  put(path.join(P(home), 'k.md'), 'k', 300);
+  put(path.join(P(a1), 'MEMORY.md'), '- [A](a.md) — new hook\n- [B](b.md) — b\n', 10);
+  put(path.join(P(a1), 'a.md'), 'a, new', 10);
+  put(path.join(P(a1), 'b.md'), 'b', 10);
+  fs.mkdirSync(path.join(a2, 'projects', 'Q'), { recursive: true }); // used there, nothing remembered yet
+  const run = () => shareMemory([[a2, 'R']], [home, a1, a2], bak);
+  run();
+  const read = (f) => fs.readFileSync(f, 'utf8');
+  assert.equal(read(path.join(P(home), 'a.md')), 'a, new');                 // in both: the newest
+  assert.equal(read(path.join(P(home), 'k.md')), 'k');                      // only shared: stays
+  assert.equal(read(path.join(P(a1), 'b.md')), 'b');                        // read through the junction
+  assert.ok(fs.lstatSync(P(a1)).isSymbolicLink());
+  assert.equal(read(path.join(P(home), 'MEMORY.md')), '- [A](a.md) — new hook\n- [B](b.md) — b\n- [K](k.md) — k\n');
+  for (const f of ['Q', 'R']) assert.ok(fs.lstatSync(path.join(a2, 'projects', f, 'memory')).isSymbolicLink()); // linked ahead
+  const kept = path.join(bak, fs.readdirSync(bak)[0]);
+  assert.equal(read(path.join(kept, 'a1', 'P', 'a.md')), 'a, new');        // the account's original
+  assert.equal(read(path.join(kept, 'shared', 'P', 'a.md')), 'a, old');    // the shared one before the merge
+  run();
+  assert.equal(fs.readdirSync(bak).length, 1);                              // nothing left to merge
+  fs.rmSync(t, { recursive: true, force: true });
+  console.log('memory ok');
+}
+// MCP servers (`claude mcp add`, in each config's own .claude.json) kept as one set: added in any config, it reaches
+// the others as they start; removed in one, it goes everywhere; a config that never had it isn't taken for a removal;
+// everything else in the file stays.
+{
+  const { shareMcp } = require('./claude-multi');
+  const fs = require('fs'), path = require('path'), os = require('os');
+  const t = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-mcp-')), F = ['home', 'a1', 'a2'].map((n) => path.join(t, n, '.claude.json')), state = path.join(t, 'state.json');
+  const put = (i, j) => { fs.mkdirSync(path.dirname(F[i]), { recursive: true }); fs.writeFileSync(F[i], JSON.stringify(j)); };
+  const mcp = (i) => Object.keys(JSON.parse(fs.readFileSync(F[i], 'utf8')).mcpServers ?? {}).sort().join(',');
+  const start = (i) => shareMcp(path.dirname(F[i]), F, state);
+  put(0, { mcpServers: { chrome: { command: 'npx' } } }); put(1, { oauthAccount: { emailAddress: 'x' } }); put(2, { mcpServers: { git: { command: 'g' } } });
+  start(1);
+  assert.equal(mcp(1), 'chrome,git');                                            // from plain claude and from account 2
+  assert.equal(mcp(0), 'chrome,git');
+  assert.equal(JSON.parse(fs.readFileSync(F[1], 'utf8')).oauthAccount.emailAddress, 'x'); // the rest untouched
+  const j = JSON.parse(fs.readFileSync(F[0], 'utf8')); delete j.mcpServers.git; put(0, j); // removed in plain claude
+  start(2);
+  assert.equal(mcp(2), 'chrome');
+  start(1);
+  assert.equal(mcp(1), 'chrome');                                                // gone there too
+  put(2, { mcpServers: { chrome: { command: 'npx' } } }); fs.writeFileSync(F[1], '{"half'); // a file caught mid-write
+  start(2);
+  assert.equal(mcp(2), 'chrome');                                                // not taken for a removal
+  fs.rmSync(t, { recursive: true, force: true });
+  console.log('mcp ok');
+}

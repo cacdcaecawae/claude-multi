@@ -62,6 +62,79 @@ function ensureLinks(dir) {
   }
 }
 
+// The folder under projects\ where Claude keeps a working folder's records and notes: non-alphanumerics -> '-'.
+const projectFolder = (d) => d.replace(/[^a-zA-Z0-9]/g, '-');
+// What Claude remembers about a folder (projects\<folder>\memory) is kept per config dir, so a conversation continued
+// on another account forgot all of it. One copy for every account: ~/.claude's, the one plain claude reads too; each
+// account's is a junction to it. One still real (from before, or one Claude made meanwhile) is merged in first: notes
+// the shared copy lacks are added, a note in both keeps its newest version, the MEMORY.md indexes are joined, and the
+// originals (both sides) go to memory-backup\. extra: [config dir, folder] that Claude is about to start in.
+function shareMemory(extra = [], roots = [SHARED, ...load().profiles.map((p) => p.configDir)], backup = path.join(ROOT, 'memory-backup')) {
+  const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
+  const lines = (f) => fs.readFileSync(f, 'utf8').split(/\r?\n/).filter((l) => l.trim());
+  const note = (l) => /\]\(([^)]+)\)/.exec(l)?.[1] ?? l; // an index line's note file
+  const [home, ...accts] = roots, keep = path.join(backup, String(Date.now()));
+  for (const [d, f] of [...accts.flatMap((a) => ls(path.join(a, 'projects')).map((f) => [a, f])), ...extra]) {
+    const m = path.join(d, 'projects', f, 'memory'), to = path.join(home, 'projects', f, 'memory');
+    try {
+      const st = fs.lstatSync(m, { throwIfNoEntry: false });
+      if (st && (st.isSymbolicLink() || !st.isDirectory())) continue; // shared already
+      fs.mkdirSync(to, { recursive: true });
+      if (!st) fs.mkdirSync(path.dirname(m), { recursive: true });
+      else if (!ls(m).length) fs.rmdirSync(m);
+      else {
+        const was = path.join(keep, 'shared', f);
+        if (!fs.existsSync(was)) fs.cpSync(to, was, { recursive: true }); // the shared copy as it was, once
+        for (const n of ls(m)) {
+          const a = path.join(m, n), b = path.join(to, n);
+          if (!fs.statSync(a).isFile()) continue;
+          if (!fs.existsSync(b)) fs.copyFileSync(a, b);
+          else if (n === 'MEMORY.md') { // the newer index's lines, then the older one's for notes it doesn't list
+            const [nw, old] = fs.statSync(a).mtimeMs > fs.statSync(b).mtimeMs ? [a, b] : [b, a];
+            const out = lines(nw), have = new Set(out.map(note));
+            for (const l of lines(old)) if (!have.has(note(l))) { out.push(l); have.add(note(l)); }
+            fs.writeFileSync(b, out.join('\n') + '\n');
+          } else if (fs.statSync(a).mtimeMs > fs.statSync(b).mtimeMs) fs.copyFileSync(a, b);
+        }
+        fs.mkdirSync(path.join(keep, path.basename(d)), { recursive: true });
+        fs.renameSync(m, path.join(keep, path.basename(d), f));
+      }
+      fs.symlinkSync(to, m, 'junction');
+    } catch {} // ponytail: a note held open, or two starts at once: left as it is, the next start tries again
+  }
+}
+// MCP servers added with `claude mcp add` live in each config's own .claude.json (beside its login and state), so
+// one added in one account or in plain claude was missing in the others. Kept as one set: what was added, changed or
+// removed in any of them since it was last seen there (mcp-shared.json: the set, and each file as last seen) goes
+// into the set, which is written to ~/.claude.json and to the config about to start; the others get it when they start.
+function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profiles.map((p) => path.join(p.configDir, '.claude.json'))],
+  stateFile = path.join(ROOT, 'mcp-shared.json')) {
+  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const st = read(stateFile) ?? { set: {}, seen: {} }, set = st.set;
+  for (const f of files) {
+    const j = read(f), was = st.seen[f];
+    if (!j) continue; // missing, or caught mid-write: not a removal
+    const m = j.mcpServers ?? {};
+    for (const [k, v] of Object.entries(m)) if (!was || !same(v, was[k])) set[k] = v; // new there, or changed
+    if (was) for (const k of Object.keys(was)) if (!(k in m)) delete set[k];          // removed there
+    st.seen[f] = m;
+  }
+  for (const f of [files[0], path.join(dir, '.claude.json')]) {
+    const j = read(f);
+    if (!j) continue;
+    try {
+      if (!same(j.mcpServers ?? {}, set)) { // written only on a change: a Claude running there rewrites this file too
+        j.mcpServers = set;
+        fs.writeFileSync(`${f}.${process.pid}.tmp`, JSON.stringify(j, null, 2));
+        fs.renameSync(`${f}.${process.pid}.tmp`, f);
+      }
+      st.seen[f] = set;
+    } catch { fs.rmSync(`${f}.${process.pid}.tmp`, { force: true }); } // held open: the next start tries again
+  }
+  try { fs.writeFileSync(stateFile, JSON.stringify(st, null, 2)); } catch {}
+}
+
 // What a running Claude hands everything it starts (its Bash tool, its hooks, so the island and the
 // terminals the island opens). A Claude inheriting them takes itself for that one's sub-session: it
 // stops saving its transcript and reports to the parent. claude-multi only starts top-level sessions.
@@ -187,6 +260,8 @@ function start(p, args, source) {
     process.exit(1);
   }
   ensureLinks(p.configDir);
+  shareMemory([[p.configDir, projectFolder(process.cwd())]]);
+  shareMcp(p.configDir);
   const reg = update((r) => {
     r.active = p.id;
     const q = r.profiles.find((x) => x.id === p.id);
@@ -329,7 +404,7 @@ function recentProjects(reg, max = 8) {
     try { keys = Object.keys(JSON.parse(fs.readFileSync(cfg, 'utf8')).projects ?? {}); } catch {}
     for (const k of keys) {
       let t = 0;
-      try { t = fs.statSync(path.join(dir, k.replace(/[^a-zA-Z0-9]/g, '-'))).mtimeMs; } catch {}
+      try { t = fs.statSync(path.join(dir, projectFolder(k))).mtimeMs; } catch {}
       const p = path.resolve(k);
       if (t > (seen.get(p) ?? -1)) seen.set(p, t);
     }
@@ -873,6 +948,8 @@ async function web() {
   // whoever opens it later
   function startPty(p, cwd, args, cols = 100, rows = 30) {
     const key = `p${Date.now().toString(36)}`;
+    shareMemory([[p.configDir, projectFolder(cwd)]]);
+    shareMcp(p.configDir);
     const proc = pty.spawn(claudeExe, args, { name: 'xterm-256color', cols, rows, cwd, env: childEnv(p.configDir) });
     // pid read live: node-pty only knows it once the pseudo-terminal is ready (it is 0 right after spawn)
     const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, dir: p.configDir };
@@ -1219,7 +1296,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead, keepLast };
+module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead, keepLast, shareMemory, shareMcp };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
