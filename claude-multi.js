@@ -426,14 +426,20 @@ const field = (s, key, lastOne) => { // raw "key":"value" scan of a transcript s
 };
 
 // Start times (Windows FILETIME, as sessions/<pid>.json's procStart) of these pids; null if PowerShell failed.
+// The same pids within a minute: the last answer (PowerShell takes ~0.2 s, and the web service asks every few seconds).
+let startsSeen = { key: '', at: 0, map: null };
 function procStarts(pids) {
   if (!pids.length) return new Map();
+  const key = [...pids].sort().join(',');
+  if (startsSeen.key === key && Date.now() - startsSeen.at < 60000) return startsSeen.map;
   const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
     + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'], { encoding: 'utf8', windowsHide: true });
   if (r.status !== 0) return null;
-  return new Map(r.stdout.trim().split(/\r?\n/).filter(Boolean).map((l) => l.split(' ')));
+  startsSeen = { key, at: Date.now(), map: new Map(r.stdout.trim().split(/\r?\n/).filter(Boolean).map((l) => l.split(' '))) };
+  return startsSeen.map;
 }
 
+const readHeads = new Map(); // record file -> { at: its mtime, cwd, title, prompt }
 function listSessions(reg) {
   const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
   const live = new Map(), found = new Map(), alive = [];
@@ -461,17 +467,22 @@ function listSessions(reg) {
   try { webPids = new Set(JSON.parse(fs.readFileSync(WEB_TERMS, 'utf8'))); } catch {}
   const tmp = os.tmpdir().toLowerCase(), out = [];
   for (const s of found.values()) {
-    const fd = fs.openSync(s.file, 'r'), size = fs.fstatSync(fd).size;
-    const head = slice(fd, 0, 65536), tail = slice(fd, Math.max(0, size - 524288), 524288);
-    fs.closeSync(fd);
-    const cwd = field(head, 'cwd') ?? field(tail, 'cwd', true);
-    // the last thing you said, not a teammate's or a background task's message delivered as a prompt
-    const prompt = [...tail.matchAll(/"lastPrompt":"((?:[^"\\]|\\.)*)"/g)]
-      .map((m) => { try { return JSON.parse(`"${m[1]}"`); } catch { return ''; } })
-      .filter((p) => p && !/^(Another Claude session sent a message|<task-notification>)/.test(p)).pop() ?? null;
-    let named = null; // /rename's sidecar: holds the name even once its transcript line is out of the tail
-    try { named = JSON.parse(fs.readFileSync(path.join(s.file.slice(0, -6), 'custom-title.json'), 'utf8')).customTitle; } catch {}
-    const title = named || field(tail, 'customTitle', true) || field(tail, 'aiTitle', true) || field(head, 'aiTitle') || prompt;
+    let r = readHeads.get(s.file); // a record unchanged since the last look isn't read again (the web service asks every few seconds)
+    if (r?.at !== s.at) {
+      const fd = fs.openSync(s.file, 'r'), size = fs.fstatSync(fd).size;
+      const head = slice(fd, 0, 65536), tail = slice(fd, Math.max(0, size - 524288), 524288);
+      fs.closeSync(fd);
+      // the last thing you said, not a teammate's or a background task's message delivered as a prompt
+      const prompt = [...tail.matchAll(/"lastPrompt":"((?:[^"\\]|\\.)*)"/g)]
+        .map((m) => { try { return JSON.parse(`"${m[1]}"`); } catch { return ''; } })
+        .filter((p) => p && !/^(Another Claude session sent a message|<task-notification>)/.test(p)).pop() ?? null;
+      let named = null; // /rename's sidecar: holds the name even once its transcript line is out of the tail
+      try { named = JSON.parse(fs.readFileSync(path.join(s.file.slice(0, -6), 'custom-title.json'), 'utf8')).customTitle; } catch {}
+      r = { at: s.at, cwd: field(head, 'cwd') ?? field(tail, 'cwd', true), prompt,
+        title: named || field(tail, 'customTitle', true) || field(tail, 'aiTitle', true) || field(head, 'aiTitle') || prompt };
+      readHeads.set(s.file, r);
+    }
+    const { cwd, title, prompt } = r;
     if (!cwd || !title || cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)) continue; // nothing to go back to
     const pid = live.get(s.id) ?? null;
     out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, web: !!pid && webPids.has(pid),
@@ -722,7 +733,8 @@ async function usageState(reg = load()) {
   let cache = {};
   try { cache = JSON.parse(fs.readFileSync(USAGE_CACHE, 'utf8')); } catch {}
   const res = keepLast(reg.profiles, await Promise.all(reg.profiles.map(fetchUsage)), cache);
-  try { fs.writeFileSync(USAGE_CACHE, JSON.stringify(cache)); } catch {}
+  // whole or not at all: the island and the web service both write it, and a half-written one read would lose them all
+  try { fs.writeFileSync(`${USAGE_CACHE}.${process.pid}`, JSON.stringify(cache)); fs.renameSync(`${USAGE_CACHE}.${process.pid}`, USAGE_CACHE); } catch {}
   const ok = res.map((r, i) => ({ ...r, i })).filter((r) => r.u);
   const open = ok.filter((r) => runway(r.u) > 0);
   const rec = open.length ? pickOpen(open) : [...ok].sort((a, b) => readyAt(a.u) - readyAt(b.u))[0];
