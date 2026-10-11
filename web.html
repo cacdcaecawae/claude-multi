@@ -46,6 +46,9 @@
   .win b { width: 40px; text-align: right; color: var(--fg); }
   .win span:first-child { width: 42px; }
   .win span:last-child { width: 84px; text-align: right; color: var(--fg3); }
+  .renew { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg3); white-space: nowrap; }
+  .renew svg { width: 11px; height: 11px; margin-top: -2px; }
+  .renew.end { color: var(--orange); } /* renewal turned off: the day it ends */
   .rec { color: var(--green); font-size: 12px; font-weight: 600; background: rgba(48,209,88,.14); padding: 2px 8px; border-radius: 8px; }
   .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .tile { background: var(--card); border-radius: 16px; padding: 12px 14px; }
@@ -231,12 +234,26 @@ function renderChats() {
   }));
 }
 
+// the next renewal (guessed monthly), with how it's paid: the App Store, Google Play, or a card on claude.ai (Stripe).
+// The island draws the same three marks.
+const CARD = ['银行卡订阅', 'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM4 6v2h16V6zm0 5v7h16v-7z'];
+const PAY = {
+  apple_subscription: ['苹果订阅', 'M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701'],
+  google_play_subscription: ['Google Play 订阅', 'M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z'],
+  stripe_subscription: CARD, stripe_subscription_contracted: CARD,
+};
+const renew = (s) => {
+  if (!s) return '';
+  const [how, d] = PAY[s.billing] ?? [];
+  return `<span class="renew${s.canceled ? ' end' : ''}" title="${how ? how + '，' : ''}${s.canceled ? '已取消续订，' : ''}按月推算">`
+    + `${d ? `<svg viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="${d}"/></svg>` : ''}${+s.renew.slice(5, 7)}月${+s.renew.slice(8)}日${s.canceled ? '到期' : '续费'}</span>`;
+};
 function renderUsage() {
   const u = state.usage;
   $('#view').innerHTML = `<h1>额度</h1><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : '都到上限了，最早 ' + esc(u.ready) + ' 后恢复'}</div>
     ${u.accounts.map((a, i) => `<div class="card"><div style="display:flex;align-items:center;gap:8px">
       <span style="width:9px;height:9px;border-radius:5px;background:${ACCT[i % 4]}"></span><b>账号 ${i + 1}</b>
-      <span class="m" style="flex:1">${esc(a.label)}</span>${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
+      <span class="m" style="flex:1;min-width:0">${esc(a.label)}</span>${renew(a.sub)}${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
       ${a.err ? `<div class="m" style="color:var(--orange);margin-top:8px">${esc(a.err)}</div>` : `
       <div class="m" style="margin-top:6px">可连续用 ${a.runway} 小时</div>
       ${a.windows.map((w) => `<div class="win"><span>${w.k === 'five_hour' ? '5 小时' : w.k === 'seven_day' ? '7 天' : esc(w.k)}</span>

@@ -259,3 +259,16 @@ console.log('tokens ok');
   fs.rmSync(t, { recursive: true, force: true });
   console.log('mcp ok');
 }
+// The next renewal, guessed monthly on the day the subscription began.
+{
+  const { nextRenewal } = require('./claude-multi');
+  const d = (s) => new Date(`${s}T12:00:00`);
+  const next = (since, now) => { const x = nextRenewal(d(since), d(now)); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+  assert.equal(next('2026-07-07', '2026-10-11'), '2026-11-07'); // this month's has passed
+  assert.equal(next('2026-09-28', '2026-10-11'), '2026-10-28');
+  assert.equal(next('2026-07-07', '2026-10-07'), '2026-10-07'); // today
+  assert.equal(next('2026-10-09', '2026-10-09'), '2026-11-09'); // began today: next month
+  assert.equal(next('2026-01-31', '2026-02-10'), '2026-02-28'); // a day February lacks
+  assert.equal(next('2026-08-15', '2026-12-20'), '2027-01-15'); // into the next year
+  console.log('renewal ok');
+}

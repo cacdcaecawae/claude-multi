@@ -732,7 +732,8 @@ const readyAt = (u) => Math.max(0, ...WINDOWS.map(([k]) => u[k])
 async function usageState(reg = load()) {
   let cache = {};
   try { cache = JSON.parse(fs.readFileSync(USAGE_CACHE, 'utf8')); } catch {}
-  const res = keepLast(reg.profiles, await Promise.all(reg.profiles.map(fetchUsage)), cache);
+  const [got, states] = await Promise.all([Promise.all(reg.profiles.map(fetchUsage)), Promise.all(reg.profiles.map((p) => subState(p, cache)))]);
+  const res = keepLast(reg.profiles, got, cache);
   // whole or not at all: the island and the web service both write it, and a half-written one read would lose them all
   try { fs.writeFileSync(`${USAGE_CACHE}.${process.pid}`, JSON.stringify(cache)); fs.renameSync(`${USAGE_CACHE}.${process.pid}`, USAGE_CACHE); } catch {}
   const ok = res.map((r, i) => ({ ...r, i })).filter((r) => r.u);
@@ -745,9 +746,42 @@ async function usageState(reg = load()) {
     accounts: reg.profiles.map((p, i) => ({ label: p.label, err: res[i].err ?? null,
       runway: res[i].u ? Math.round(runway(res[i].u) * 10) / 10 : null,
       windows: cols.filter(([k]) => res[i].u?.[k]).map(([k]) => ({ k, pct: Math.round(res[i].u[k].utilization),
-        reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })) })),
+        reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })), sub: subscription(p, states[i]) })),
     projects: recentProjects(reg) };
   return { res, ok, open, rec, cols, json };
+}
+
+// The subscription as Claude Code keeps it from the account's profile (.claude.json oauthAccount): since when, how it's
+// paid (apple_subscription: through the App Store, stripe_subscription: a card on claude.ai, google_play_subscription),
+// and the next renewal, guessed: monthly, on the day it began; canceled (from subState): the day it ends instead.
+// ponytail: an annual plan would be guessed wrong; the profile doesn't say which, the store (or claude.ai) does
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function subscription(p, status = null) {
+  let o = null;
+  try { o = JSON.parse(fs.readFileSync(path.join(p.configDir, '.claude.json'), 'utf8')).oauthAccount; } catch {}
+  const since = new Date(o?.subscriptionCreatedAt ?? NaN);
+  return isNaN(since) ? null : { since: ymd(since), renew: ymd(nextRenewal(since)), billing: o.billingType ?? null, canceled: status === 'canceled' };
+}
+// Whether the subscription still renews: Claude Code's copy of the profile leaves that out, Anthropic's profile has it
+// (subscription_status, 'canceled' once renewal is turned off). Read every 6 h, kept in the quota cache.
+async function subState(p, cache, now = Date.now()) {
+  const k = `${p.id}:sub`;
+  if (now - (cache[k]?.at ?? 0) < 21600000) return cache[k].status;
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(p.configDir, '.credentials.json'), 'utf8')).claudeAiOauth;
+    const r = await fetch('https://api.anthropic.com/api/oauth/profile', {
+      headers: { Authorization: `Bearer ${c.accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' }, signal: AbortSignal.timeout(10000) });
+    if (r.ok) cache[k] = { at: now, status: (await r.json()).organization?.subscription_status ?? null };
+  } catch {} // the network or a stale login: the last one known, if any
+  return cache[k]?.status ?? null;
+}
+// The first monthly anniversary of since, today or later (a day the month lacks, like the 31st: its last day).
+function nextRenewal(since, now = new Date()) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()), first = new Date(since.getFullYear(), since.getMonth(), since.getDate());
+  for (let m = now.getMonth(); ; m++) {
+    const d = new Date(now.getFullYear(), m, Math.min(since.getDate(), new Date(now.getFullYear(), m + 1, 0).getDate()));
+    if (d >= today && d > first) return d;
+  }
 }
 
 async function usage(args) {
@@ -1308,7 +1342,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead, keepLast, shareMemory, shareMcp };
+module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
