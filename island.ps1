@@ -219,6 +219,9 @@ Add-Type -Name U -Namespace Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
 '@
 [void][Native.U]::SetProcessDPIAware() # sharp text on scaled screens
+# Drawn by the CPU: drawn by the GPU, a see-through window can stop showing after the screen sleeps or locks, while
+# it keeps running (the island vanished overnight that way). For a pill and a list, software drawing costs nothing.
+[Windows.Media.RenderOptions]::ProcessRenderMode = [Windows.Interop.RenderMode]::SoftwareOnly
 
 $root = Split-Path -Parent $PSCommandPath
 $js = Join-Path $root 'claude-multi.js'
