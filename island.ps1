@@ -447,7 +447,7 @@ function Refresh {
     param($out)
     $script:loading = $false
     $script:fetched = Get-Date
-    try { $script:data = $out | ConvertFrom-Json; Render; $Status.Text = $script:note + '更新于 ' + (Get-Date -Format 'HH:mm') }
+    try { $script:data = $out | ConvertFrom-Json; Render; Check-Limits; $Status.Text = $script:note + '更新于 ' + (Get-Date -Format 'HH:mm') }
     catch { $Status.Text = '用量读取失败'; if (-not $script:data) { $PillName.Text = 'Claude · 用量读取失败' } }
     $script:note = ''
   }
@@ -464,6 +464,20 @@ $PAY = @{
   apple_subscription = @('苹果订阅', 'M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701')
   google_play_subscription = @('Google Play 订阅', 'M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z')
   stripe_subscription = $BANK_CARD; stripe_subscription_contracted = $BANK_CARD
+}
+# An account at its limit while conversations run on it: one notice (per account, until it's off its limit again) that
+# they wait for the reset; a click opens the running ones, each with 换账号继续. Nothing switches by itself.
+$script:limitTold = @{}
+function Check-Limits {
+  $accs = @($script:data.accounts)
+  for ($i = 0; $i -lt $accs.Count; $i++) {
+    $full = @($accs[$i].windows | Where-Object { $_.pct -ge 100 })
+    if (-not $full.Count) { $script:limitTold.Remove($i); continue }
+    if (-not $accs[$i].running -or $script:limitTold[$i]) { continue }
+    $script:limitTold[$i] = 1
+    $when = if ($full[-1].reset) { "$($full[-1].reset)后自动继续" } else { '额度恢复后自动继续' } # the later window, when both are full
+    Add-Alert @{ kind = 'ask'; info = $true; action = 'running'; project = "账号 $($i + 1) 额度用完"; msg = "它上面 $($accs[$i].running) 个对话在等，$when · 点这里换账号继续" }
+  }
 }
 function Pct5($a) { $w = @($a.windows | Where-Object { $_.k -eq 'five_hour' })[0]; if ($w) { $w.pct } else { 0 } }
 function Render {
@@ -661,7 +675,7 @@ function New-Alert($n, [datetime]$t) {
     "<TextBlock Text='$(Esc $sub)' MaxWidth='460' HorizontalAlignment='Left' FontSize='12' Foreground='#B3FFFFFF' TextWrapping='Wrap' Margin='0,2,0,0'/></StackPanel>" +
     "<TextBlock Grid.Column='2' Text='$(if ($t.Date -eq (Get-Date).Date) { $t.ToString('HH:mm') } else { $t.ToString('M/d HH:mm') })' FontSize='11' Foreground='#8CFFFFFF' Margin='12,2,0,0'/></Grid>")
   $el.Background = 'Transparent' # clickable across its whole width
-  $el.Tag = $n.pid
+  $el.Tag = if ($n.action) { $n.action } else { $n.pid } # a notice with something to open (running: the running list)
   $el.DataContext = $n.id # the conversation: read marks are shared with the web page
   $el.Uid = if ($n.info) { 'info' } else { $seen }
   $el.Add_MouseLeftButtonUp({
@@ -673,6 +687,7 @@ function New-Alert($n, [datetime]$t) {
       $s.Parent.Children.Remove($s)
       if ($Alerts.Children.Count -eq 0) { $Alerts.Visibility = 'Collapsed' }
       Update-Badge
+      if ("$($s.Tag)" -eq 'running') { $script:folder = '*'; $script:arranging = $false; Open-Chats; Load-Chats; return }
       # its Claude now, found by the conversation: closed and opened again, it's another process; closed, none
       $p = if ($s.DataContext) { Live-Pid $s.DataContext } else { [int]$s.Tag }
       if ($p -and (Web-Pids) -contains $p) { Open-WebChat $s.DataContext $env:USERPROFILE } elseif ($p) { Focus-Claude $p }
@@ -1631,6 +1646,93 @@ function Save-Name($ed) {
   # Windows argument quoting: backslashes before a " and at the very end double, so "C:\tmp\" stays itself
   Run-Node "rename $($s.id) `"$($name -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1')`"" { Load-Chats }
 }
+# 换账号继续: you pick the account, and the rest as below. Not running: a new tab opens it with that account. Running:
+# claude-multi swap ends its Claude (once the answer is over, unless 立即换) and its own tab goes on with the account.
+function Switch-Chat($s) {
+  $c = Pick-Switch $s
+  if (-not $c) { return }
+  if (-not $s.pid) { Open-Terminal $s.cwd "resume $($s.id) $($c.n)$(if ($c.cont) { ' 继续' })"; return }
+  Say $(if ($s.busy -and -not $c.now) { "这一轮答完后，换到账号 $($c.n) 接着…" } else { "正在换到账号 $($c.n)…" })
+  Run-Node "swap $($s.id) $($c.n)$(if ($c.now) { ' --now' })$(if (-not $c.cont) { ' --no-continue' })" {
+    param($out)
+    $msg = "$out".Trim(); if (-not $msg) { $msg = '换账号时出错了' }
+    Add-Alert @{ kind = 'done'; info = $true; project = '换账号继续'; msg = $msg }
+    Load-Chats
+  }
+}
+# The dialog: which account (each with what it can still give; the conversation's own one not offered), while it
+# answers 答完再换 or 立即换, and whether 继续 is sent once there. @{ n; now; cont }, or $null when cancelled.
+function Chip-Xaml([int]$tag, [string]$text, [string]$note, [bool]$off) {
+  "<Border Tag='$tag' CornerRadius='10' Padding='12,6' Margin='0,0,8,8' BorderThickness='1' Cursor='Hand' IsEnabled='$(-not $off)' Opacity='$(if ($off) { 0.4 } else { 1 })'>" +
+  "<StackPanel Orientation='Horizontal'><TextBlock Text='$(Esc $text)' FontSize='13' FontWeight='SemiBold'/>" +
+  "$(if ($note) { "<TextBlock Text='$(Esc $note)' FontSize='12' Foreground='#8CFFFFFF' Margin='6,0,0,0'/>" })</StackPanel></Border>"
+}
+function Paint-Chips($panel, [int]$sel) {
+  foreach ($b in $panel.Children) {
+    $on = [int]$b.Tag -eq $sel
+    $b.Background = if ($on) { '#330A84FF' } else { '#14FFFFFF' }
+    $b.BorderBrush = if ($on) { '#B30A84FF' } else { '#1AFFFFFF' }
+  }
+}
+function Pick-Switch($s) {
+  $u = $script:data; $accs = @($u.accounts); $own = [int]$s.acct
+  if ($accs.Count -lt 2) { return $null }
+  $rec = if ($null -ne $u.rec) { [int]$u.rec } else { -1 }
+  $first = if ($rec -ge 0 -and $rec -ne $own) { $rec + 1 } else { ($own + 1) % $accs.Count + 1 }
+  $chips = @(for ($i = 0; $i -lt $accs.Count; $i++) {
+    $a = $accs[$i]
+    $note = if ($i -eq $own) { '当前' } elseif ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
+    if ($i -eq $rec -and $i -ne $own) { $note += ' · 推荐' }
+    Chip-Xaml ($i + 1) "账号 $($i + 1)" $note ($i -eq $own)
+  }) -join ''
+  $modes = if ($s.busy) { "<TextBlock Text='它正在回答' FontSize='12' Foreground='#8CFFFFFF' Margin='0,8,0,8'/><WrapPanel x:Name='Modes'>$(Chip-Xaml 0 '答完再换' '' $false)$(Chip-Xaml 1 '立即换' '' $false)</WrapPanel>" } else { '' }
+  $d = X @"
+<Window $ns Width="460" SizeToContent="Height" WindowStyle="None" AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize"
+  ShowInTaskbar="False" WindowStartupLocation="CenterOwner" Foreground="White" FontFamily="Segoe UI Variable Text, Microsoft YaHei UI" UseLayoutRounding="True">
+ <Window.Resources>$styles</Window.Resources>
+ <Grid Margin="16">
+  <Border Background="Black" CornerRadius="18"><Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270" Opacity="0.55"/></Border.Effect></Border>
+  <Border Background="#FA161618" CornerRadius="18" BorderBrush="#26FFFFFF" BorderThickness="1" Padding="22,20,22,18">
+   <StackPanel>
+    <TextBlock Text="换账号继续" FontSize="16" FontWeight="SemiBold"/>
+    <TextBlock Text="$(Esc $s.title)" FontSize="12" Foreground="#8CFFFFFF" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+    <TextBlock Text="换到" FontSize="12" Foreground="#8CFFFFFF" Margin="0,16,0,8"/>
+    <WrapPanel x:Name="Accs">$chips</WrapPanel>
+    $modes
+    <CheckBox x:Name="Cont" IsChecked="True" Foreground="#E6FFFFFF" FontSize="13" Margin="0,8,0,0" Content="换好后自动发「继续」"/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+     <Button x:Name="No" Style="{StaticResource Text}" FontSize="13" Margin="0,0,10,0" Padding="4,4" Content="取消"/>
+     <Button x:Name="Go" Style="{StaticResource Primary}" FontSize="13"/>
+    </StackPanel>
+   </StackPanel>
+  </Border>
+ </Grid>
+</Window>
+"@
+  $d.Tag = @{ n = $first; now = $false; ok = $false } # the handlers reach it through the dialog: no locals of ours
+  $d.FindName('Go').Content = "换到账号 $first"
+  $accPanel = $d.FindName('Accs'); Paint-Chips $accPanel $first
+  foreach ($chip in @($accPanel.Children)) {
+    $chip.Add_MouseLeftButtonDown({ param($x, $e) $e.Handled = $true }) # not the dialog's drag
+    $chip.Add_MouseLeftButtonUp({ param($x) $w = [Windows.Window]::GetWindow($x); $w.Tag.n = [int]$x.Tag; Paint-Chips $w.FindName('Accs') $w.Tag.n; $w.FindName('Go').Content = "换到账号 $($w.Tag.n)" })
+  }
+  $modePanel = $d.FindName('Modes')
+  if ($modePanel) {
+    Paint-Chips $modePanel 0
+    foreach ($chip in @($modePanel.Children)) {
+      $chip.Add_MouseLeftButtonDown({ param($x, $e) $e.Handled = $true })
+      $chip.Add_MouseLeftButtonUp({ param($x) $w = [Windows.Window]::GetWindow($x); $w.Tag.now = [int]$x.Tag -eq 1; Paint-Chips $w.FindName('Modes') ([int]$x.Tag) })
+    }
+  }
+  $d.FindName('Go').Add_Click({ param($x) $w = [Windows.Window]::GetWindow($x); $w.Tag.ok = $true; $w.Close() })
+  $d.FindName('No').Add_Click({ param($x) [Windows.Window]::GetWindow($x).Close() })
+  $d.Add_KeyDown({ param($x, $e) if ($e.Key -eq 'Escape') { $x.Close() } })
+  $d.Add_MouseLeftButtonDown({ param($x) $x.DragMove() })
+  if ($script:cw -and $script:cw.IsVisible) { $d.Owner = $script:cw } else { $d.WindowStartupLocation = 'CenterScreen' }
+  [void]$d.ShowDialog()
+  if (-not $d.Tag.ok) { return $null }
+  @{ n = $d.Tag.n; now = $d.Tag.now; cont = [bool]$d.FindName('Cont').IsChecked }
+}
 function Add-Chat($s) {
   $n = [int]$s.acct + 1 # its own account; a switch is only ever offered on click (Pick-Account)
   $mixed = $script:folder -eq '' -or $script:folder -eq '*' # rows from several folders say which one
@@ -1662,10 +1764,13 @@ function Add-Chat($s) {
     "<Button.Template><ControlTemplate TargetType='Button'><Border Background='#FF453A' CornerRadius='10' Padding='11,3'><ContentPresenter/></Border></ControlTemplate></Button.Template>" +
     "<TextBlock Text='确认删除' FontSize='12' FontWeight='SemiBold' Foreground='White'/></Button>" +
     "$(if (-not $s.pid) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Del' Content='&#xE74D;' ToolTip='删除'/></Border>" })" +
+    "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Sw' Content='&#xE8AB;' ToolTip='换账号继续'/></Border>" +
     "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,6,0'><Button x:Name='Ren' Content='&#xE70F;' ToolTip='改名'/></Border><Grid VerticalAlignment='Center'>" +
     "<ContentControl Style='{DynamicResource OffHover}' HorizontalAlignment='Right' VerticalAlignment='Center'>$rest</ContentControl>" +
     "<Border Style='{DynamicResource OnHover}' Background='$(if ($s.pid) { '#30D158' } else { '#E6FFFFFF' })' CornerRadius='10' Padding='11,3' HorizontalAlignment='Right'>" +
     "<TextBlock Text='$act' FontSize='12' FontWeight='SemiBold' Foreground='Black'/></Border></Grid></StackPanel></Grid>")
+  $sw = $b.Content.FindName('Sw'); $sw.Style = $script:cw.FindResource('Icon'); $sw.Tag = $s
+  $sw.Add_Click({ param($x, $e) $e.Handled = $true; Switch-Chat $x.Tag }) # not a click on the row
   $ren = $b.Content.FindName('Ren'); $ed = $b.Content.FindName('E')
   $ren.Style = $script:cw.FindResource('Icon')
   $ed.Tag = @{ s = $s; t = $b.Content.FindName('T') }

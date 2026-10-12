@@ -275,3 +275,28 @@ console.log('tokens ok');
   assert.equal(on('2026-10-28', '2026-11-02'), '11-28');
   console.log('renewal ok');
 }
+// 换账号继续: 答完再换 waits while the Claude is at work (busy, shell) and goes once it isn't; now goes at once. A
+// tab picks its switch request up once, by its Claude's pid.
+(async () => {
+  const { untilFree, takeSwitch } = require('./claude-multi');
+  const fs = require('fs'), path = require('path'), os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-sw-')), f = path.join(dir, 'sessions', `${process.pid}.json`);
+  fs.mkdirSync(path.dirname(f));
+  const status = (s) => fs.writeFileSync(f, JSON.stringify({ pid: process.pid, status: s }));
+  status('busy');
+  let t = Date.now();
+  setTimeout(() => status('shell'), 700); setTimeout(() => status('idle'), 1500);
+  await untilFree(dir, process.pid, false);
+  const waited = Date.now() - t;
+  assert.ok(waited >= 1400 && waited < 3500, `waited ${waited} ms`);       // through busy and shell, out at idle
+  status('busy'); t = Date.now(); await untilFree(dir, process.pid, true);
+  assert.ok(Date.now() - t < 200);                                        // now: at once
+  status('waiting'); t = Date.now(); await untilFree(dir, process.pid, false);
+  assert.ok(Date.now() - t < 200);                                        // waiting on you: nothing to cut
+  const sw = path.join(os.homedir(), '.claude-multi', 'switch');
+  fs.mkdirSync(sw, { recursive: true }); fs.writeFileSync(path.join(sw, '999999.json'), JSON.stringify({ id: 'x', n: 2, prompt: '继续' }));
+  assert.deepEqual(takeSwitch(999999), { id: 'x', n: 2, prompt: '继续' });
+  assert.equal(takeSwitch(999999), null);                                 // taken once
+  fs.rmSync(dir, { recursive: true, force: true });
+  console.log('switch ok');
+})();

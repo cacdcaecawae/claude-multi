@@ -126,6 +126,12 @@
   #keys button { flex: none; background: rgba(255,255,255,.1); border-radius: 9px; padding: 7px 11px; font-size: 13px; font-weight: 600; }
   #send { display: flex; gap: 8px; padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
   #send textarea { flex: 1; resize: none; height: 44px; max-height: 120px; }
+  .btn.icon { padding: 6px 8px; display: grid; place-items: center; flex: none; }
+  .btn.icon svg { width: 18px; height: 18px; }
+  .chk { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--fg2); margin-top: 4px; }
+  .chk input { width: 18px; height: 18px; accent-color: var(--blue); margin: 0; }
+  .opt small { color: var(--fg3); font-size: 12px; margin-left: 4px; }
+  .opt:disabled { opacity: .45; }
   #gone { display: none; background: rgba(255,69,58,.15); color: #ff8a80; font-size: 13px; padding: 6px 12px; }
   /* a computer's browser: the real keyboard types straight into the terminal, so no key row or input box */
   @media (pointer: fine) { #keys, #send { display: none; } }
@@ -146,6 +152,7 @@
   <div id="termHead">
     <button id="back" class="btn" aria-label="返回">‹</button>
     <div class="main"><div class="t" id="termTitle"></div><div class="m" id="termSub"></div></div>
+    <button id="swap" class="btn icon" aria-label="换账号继续" title="换账号继续"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/></svg></button>
     <div class="seg" id="seg"><button data-v="hist" class="on">对话</button><button data-v="term">终端</button></div>
   </div>
   <div id="gone">这个对话已经结束</div>
@@ -488,6 +495,57 @@ function md(t) {
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>')).join('');
 }
 $('#back').onclick = closeTerm;
+// 换账号继续: the open conversation goes on with the account picked here. While it answers, it can wait for the end of
+// the answer or stop now; "继续" is sent once it's there unless unticked. The service does it (/api/switch) and the page
+// follows: one running in the service comes back as event switched, one in a window on the computer as a new Claude in
+// the same tab, found by asking for the conversation until it runs under another key.
+let switching = 0; // the account it's going to, while it goes
+$('#swap').onclick = () => {
+  const s = state?.sessions.find((x) => x.id === histId), accts = state?.usage?.accounts ?? [], rec = state?.usage?.rec;
+  if (!histId || !s) return toast('这个对话还没有消息，不用换账号');
+  if (accts.length < 2) return toast('只有一个账号');
+  let acct = rec != null && rec !== s.acct ? rec + 1 : (s.acct + 1) % accts.length + 1, now = false, cont = true;
+  const draw = () => {
+    $('#sheetIn').innerHTML = `<b style="font-size:17px">换账号继续</b><div class="m" style="margin-top:4px">${esc(s.title)}</div>
+      <div class="m" style="margin-top:14px">换到</div><div class="opts">${accts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}"${i === s.acct ? ' disabled' : ''}>
+        账号 ${i + 1}<small>${i === s.acct ? '当前' : a.err ? '读不到额度' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满'}${rec === i && i !== s.acct ? ' · 推荐' : ''}</small></button>`).join('')}</div>
+      ${busyNow ? `<div class="m">它正在回答</div><div class="opts"><button class="opt ${now ? '' : 'on'}" data-now="">答完再换</button><button class="opt ${now ? 'on' : ''}" data-now="1">立即换</button></div>` : ''}
+      <label class="chk"><input type="checkbox" id="contIn"${cont ? ' checked' : ''}>换好后自动发「继续」</label>
+      <div style="display:flex;gap:10px;margin-top:16px"><button class="btn" id="cancel" style="flex:1">取消</button><button class="btn primary" id="swapGo" style="flex:2">换到账号 ${acct}</button></div>`;
+    document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
+    document.querySelectorAll('[data-now]').forEach((b) => (b.onclick = () => { now = !!b.dataset.now; draw(); }));
+    $('#contIn').onchange = (e) => (cont = e.target.checked);
+    $('#cancel').onclick = () => $('#sheet').classList.remove('on');
+    $('#swapGo').onclick = async () => {
+      $('#sheet').classList.remove('on');
+      try {
+        const r = await post('/api/switch', { id: histId, acct, now, cont, cols: term?.cols, rows: term?.rows });
+        switching = acct;
+        if (r.key) { ({ key, kind } = r); switched(); connect(); return; }
+        toast(busyNow && !now ? `这一轮答完后，换到账号 ${acct} 接着` : `正在换到账号 ${acct}…`, 4000);
+        if (r.window) follow();
+      } catch (e) { switching = 0; toast(e.message); }
+    };
+  };
+  draw(); $('#sheet').classList.add('on');
+};
+function switched() {
+  const s = state?.sessions.find((x) => x.id === histId);
+  $('#termSub').textContent = `${s?.cwd ?? ''} · 已换到账号 ${switching}`;
+  toast(`已换到账号 ${switching}`); switching = 0;
+}
+// one in a window: asked for again every 2 s, its old Claude still answering included, until it runs under another key
+async function follow() { // ends with the switch, or when the terminal closes (switching cleared)
+  const was = key;
+  while (switching && term) {
+    await new Promise((ok) => setTimeout(ok, 2000));
+    if (!switching || !term) return;
+    try {
+      const r = await post('/api/open', { id: histId, live: true, cols: term.cols, rows: term.rows });
+      if (r.key !== was) { ({ key, kind } = r); switched(); return connect(); }
+    } catch {} // between the two Claudes: none runs it for a moment
+  }
+}
 function sizeFont() { // a window of fixed size (the computer's, or another screen's): a font that shows all of it
   const s = $('#screen'), x = s.querySelector('.xterm-screen');
   for (let i = 0; i < 3 && x.offsetWidth; i++) { // measured as drawn; the padding and the terminal's scroll bar left out
@@ -500,7 +558,7 @@ function sizeFont() { // a window of fixed size (the computer's, or another scre
 async function openTerm(body, title, sub) {
   $('#termTitle').textContent = title; $('#termSub').textContent = sub; $('#gone').style.display = 'none';
   $('#term').classList.add('on'); $('#screen').innerHTML = '';
-  mine = ptySize = key = null;
+  mine = ptySize = key = null; switching = 0;
   histId = body.id ?? null; histEnd = histOldest = null; histNow = false; histGen++; sent = []; liveHtml = ''; $('#hist').innerHTML = '';
   setView('hist');
   term = new Terminal({ fontSize: FONT, lineHeight: 1.12, theme: THEME, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
@@ -555,7 +613,8 @@ async function connect(again) {
     // a window's size; or another screen took it, or this one hasn't (only the chat shown): that size, scaled
     term.resize(z.w, z.h); sizeFont();
   });
-  on('gone', end);
+  on('gone', () => { if (!switching || kind === 'pty') end(); }); // a window's old Claude gone while switching: follow() goes on
+  on('switched', (e) => { key = JSON.parse(e.data).key; kind = 'pty'; switched(); connect(); });
   s.onerror = () => { // CLOSED: refused (the browser retries the rest itself)
     if (es !== s || s.readyState !== EventSource.CLOSED || ended) return;
     if (!openBody.id || ++fails > 5) return end(); // a brand-new one can't be found again by id; or it keeps failing
@@ -569,7 +628,7 @@ setInterval(() => { if (stale(45000)) connect(true); }, 10000);
 function closeTerm() {
   const id = histId;
   gen++; histGen++; clearInterval(histTimer); es?.close(); es = null; term?.dispose(); term = null; key = null; histId = null;
-  ended = false; fails = 0; sent = []; busyNow = false; $('#term').classList.remove('on', 'hist');
+  ended = false; fails = 0; sent = []; busyNow = false; switching = 0; $('#term').classList.remove('on', 'hist');
   (id ? post('/api/read', { id }).catch(() => {}) : Promise.resolve()).then(() => load());
 }
 window.addEventListener('resize', () => { if (!term || !key) return; if (kind === 'pc') sizeFont(); else claim(); });

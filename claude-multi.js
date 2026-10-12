@@ -274,6 +274,8 @@ function start(p, args, source) {
   log('claude_started', { profile_id: p.id });
   const r = run(p.configDir, args);
   if (r.error) { console.error(`无法启动 claude：${r.error.message}`); process.exit(1); }
+  const sw = takeSwitch(r.pid); // ended by `claude-multi swap`: this tab goes on with the account picked
+  if (sw) { console.log(`\n换到账号 ${sw.n}，接着这段对话……\n`); return resume(sw.id, sw.n, sw.prompt); }
   process.exit(r.status ?? 1);
 }
 
@@ -462,7 +464,7 @@ function listSessions(reg) {
   // a Claude that didn't exit cleanly leaves its file, and Windows soon gives its pid to another program:
   // running means that pid also started when Claude wrote down (without PowerShell, the pid alone)
   const starts = procStarts(alive.map((j) => j.pid));
-  for (const j of alive) if (!starts || !j.procStart || starts.get(String(j.pid)) === String(j.procStart)) live.set(j.sessionId, j.pid);
+  for (const j of alive) if (!starts || !j.procStart || starts.get(String(j.pid)) === String(j.procStart)) live.set(j.sessionId, j);
   let webPids = new Set(); // the Claudes the web service runs (web-terms.json, written by it)
   try { webPids = new Set(JSON.parse(fs.readFileSync(WEB_TERMS, 'utf8'))); } catch {}
   const tmp = os.tmpdir().toLowerCase(), out = [];
@@ -484,8 +486,9 @@ function listSessions(reg) {
     }
     const { cwd, title, prompt } = r;
     if (!cwd || !title || cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)) continue; // nothing to go back to
-    const pid = live.get(s.id) ?? null;
-    out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, web: !!pid && webPids.has(pid),
+    const pid = live.get(s.id)?.pid ?? null, st = live.get(s.id)?.status;
+    // busy: answering or running a command (its session file's status), for 换账号继续's 答完再换
+    out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell',
       who: reg.profiles[s.acct].label.split('@')[0] });
   }
   return out.sort((a, b) => b.at - a.at);
@@ -532,10 +535,10 @@ function rename(id, name) {
   console.log(`已改名：${name}`);
 }
 
-// resume ID N: continue a past conversation with account N, in its own folder. Claude only finds a
-// transcript in its own config dir, so the newest copy (and its side folder of subagent and tool-output
-// files) is copied into N's first when another account wrote it last.
-function resume(id, n) {
+// resume ID N [PROMPT]: continue a past conversation with account N, in its own folder (PROMPT, like 继续, sent
+// first). Claude only finds a transcript in its own config dir, so the newest copy (and its side folder of
+// subagent and tool-output files) is copied into N's first when another account wrote it last.
+function resume(id, n, prompt) {
   const reg = load(), s = listSessions(reg).find((x) => x.id === id);
   if (!s) { console.log(`找不到对话 ${id}。`); process.exit(1); }
   if (s.pid) { console.log(`这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
@@ -543,7 +546,65 @@ function resume(id, n) {
   if (!p) { console.log('请指定账号编号：claude-multi resume <对话 id> <账号编号>'); process.exit(1); }
   copyTo(s, p);
   process.chdir(s.cwd);
-  start(p, ['--resume', id], 'resume');
+  start(p, ['--resume', id, ...(prompt ? [prompt] : [])], 'resume');
+}
+
+// --- 换账号继续: a running conversation goes on with the account you pick (the island, the page, `swap`) ------
+// Its Claude is ended, once its answer is over unless you say now (or it only waits out a usage limit), and its own
+// tab goes on with the other account: start() finds the request (switch\<pid>.json) when its Claude exits. A Claude
+// running in no tab of ours leaves the request lying: a new tab opens the conversation instead.
+const SWITCH = path.join(ROOT, 'switch');
+function takeSwitch(pid) {
+  const f = path.join(SWITCH, `${pid}.json`);
+  try { const j = JSON.parse(fs.readFileSync(f, 'utf8')); fs.rmSync(f, { force: true }); return j; } catch { return null; }
+}
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+// At a usage limit, by the last quota read: a Claude there only waits for the reset, ending it cuts nothing.
+function atLimit(p, now = Date.now()) {
+  let u = null;
+  try { u = JSON.parse(fs.readFileSync(USAGE_CACHE, 'utf8'))[p.id]?.u; } catch {}
+  return WINDOWS.some(([k]) => u?.[k]?.utilization >= 100 && Date.parse(u[k].resets_at) > now);
+}
+// Until the Claude with this pid (of config dir) may be ended: at once with now; else once its session file says it
+// isn't at work (busy, shell: answering, running a command; waiting on you or idle are fine).
+// ponytail: an answer still going after 2 h is ended anyway
+async function untilFree(dir, pid, now) {
+  for (const end = Date.now() + 7200000; !now && Date.now() < end && alive(pid); await sleep(1000)) {
+    let st = null;
+    try { st = JSON.parse(fs.readFileSync(path.join(dir, 'sessions', `${pid}.json`), 'utf8')).status; } catch {}
+    if (st !== 'busy' && st !== 'shell') return;
+  }
+}
+// Conversation s, running in a window here, to go on with account n (prompt sent first). 'tab' or 'new': where it went on.
+async function switchWindow(s, n, prompt, now) {
+  const reg = load(), own = reg.profiles[s.acct];
+  await untilFree(own.configDir, s.pid, now || atLimit(own));
+  fs.mkdirSync(SWITCH, { recursive: true });
+  const f = path.join(SWITCH, `${s.pid}.json`);
+  fs.writeFileSync(f, JSON.stringify({ id: s.id, n: Number(n), prompt }));
+  try { process.kill(s.pid); } catch {}
+  for (let k = 0; k < 50 && fs.existsSync(f); k++) await sleep(100); // its tab picks the request up
+  if (!fs.existsSync(f)) return 'tab';
+  fs.rmSync(f, { force: true });
+  require('child_process').spawn('wt.exe', ['-d', s.cwd, process.execPath, __filename, 'resume', s.id, String(n), ...(prompt ? [prompt] : [])],
+    { detached: true, stdio: 'ignore' }).unref();
+  return 'new';
+}
+// swap ID N [--now] [--no-continue]: what the island runs for a running conversation; one running in the web service
+// is the service's to switch.
+async function switchChat(id, n, now, cont) {
+  const reg = load(), s = listSessions(reg).find((x) => x.id === id), prompt = cont ? '继续' : undefined;
+  if (!s || !reg.profiles[n - 1]) return console.log(s ? '没有这个账号。' : `找不到对话 ${id}。`);
+  if (!s.pid) return console.log(`这个对话没在运行，用 claude-multi resume ${id} ${n} 打开即可。`);
+  if (s.web) {
+    const r = await fetch(`http://127.0.0.1:${WEB_PORT}/api/switch`, { method: 'POST', body: JSON.stringify({ id, acct: Number(n), now, cont }),
+      headers: { 'tailscale-user-login': tailscaleMe()?.login ?? '', 'content-type': 'application/json', 'accept-encoding': 'identity' } });
+    const j = await r.json().catch(() => ({}));
+    return console.log(r.ok ? `网页上的这个对话会换到账号 ${n} 接着` : `没换成：${j.err ?? r.status}`);
+  }
+  const where = await switchWindow(s, n, prompt, now);
+  console.log(where === 'tab' ? `已换到账号 ${n}，在原来的窗口里接着` : `已换到账号 ${n}，在新窗口里接着`);
 }
 // attach ID: this terminal joins a conversation running in the web service (one started or continued from
 // the web page): the same screen on both sides, either one types. The size follows the side you type on;
@@ -734,6 +795,8 @@ async function usageState(reg = load()) {
   try { cache = JSON.parse(fs.readFileSync(USAGE_CACHE, 'utf8')); } catch {}
   const [got, states] = await Promise.all([Promise.all(reg.profiles.map(fetchUsage)), Promise.all(reg.profiles.map((p) => subState(p, cache)))]);
   const res = keepLast(reg.profiles, got, cache);
+  // counted only with an account at its limit (the island's notice is all that needs it): listing costs a PowerShell
+  const running = res.some((r) => WINDOWS.some(([k]) => Math.round(r.u?.[k]?.utilization) >= 100)) ? listSessions(reg).filter((s) => s.pid) : [];
   // whole or not at all: the island and the web service both write it, and a half-written one read would lose them all
   try { fs.writeFileSync(`${USAGE_CACHE}.${process.pid}`, JSON.stringify(cache)); fs.renameSync(`${USAGE_CACHE}.${process.pid}`, USAGE_CACHE); } catch {}
   const ok = res.map((r, i) => ({ ...r, i })).filter((r) => r.u);
@@ -746,7 +809,8 @@ async function usageState(reg = load()) {
     accounts: reg.profiles.map((p, i) => ({ label: p.label, err: res[i].err ?? null,
       runway: res[i].u ? Math.round(runway(res[i].u) * 10) / 10 : null,
       windows: cols.filter(([k]) => res[i].u?.[k]).map(([k]) => ({ k, pct: Math.round(res[i].u[k].utilization),
-        reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })), sub: subscription(p, states[i]) })),
+        reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })), sub: subscription(p, states[i]),
+      running: running.filter((s) => s.acct === i).length })), // conversations running on it: the island's notice at its limit
     projects: recentProjects(reg) };
   return { res, ok, open, rec, cols, json };
 }
@@ -1008,7 +1072,8 @@ async function web() {
       if (!t.listed && proc.pid) { t.listed = true; saveTerms(); }
       t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
     });
-    proc.onExit(() => { t.gone = true; saveTerms(); send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
+    // ended to go on with another account (switching): its pages are sent to the new one instead of told it's gone
+    proc.onExit(() => { t.gone = true; saveTerms(); if (!t.switching) send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t);
     log('web_session', { profile_id: p.id, cwd, args: args.join(' ') });
     return t;
@@ -1129,6 +1194,30 @@ async function web() {
       if (!b.dir || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
       sessCache = null;
       return { key: startPty(p, b.dir, [], cols, rows).key, kind: 'pty' };
+    },
+    // 换账号继续 {id, acct, now, cont}: the conversation goes on with account acct, "继续" sent first unless cont is false.
+    // Not running: started here like a continued one. Running here: ended once its answer is over (now: at once; at a
+    // usage limit: at once), started again on acct, and its pages moved to it (event switched). In a window: switchWindow.
+    // Answers at once; the switch itself happens when it can.
+    'POST /api/switch': (q, b) => {
+      sessCache = null;
+      const reg = load(), s = sessions().find((x) => x.id === b.id), p = reg.profiles[b.acct - 1];
+      if (!s) throw new Error('找不到这个对话');
+      if (!p) throw new Error('没有这个账号');
+      const prompt = b.cont === false ? undefined : '继续', args = ['--resume', s.id, ...(prompt ? [prompt] : [])];
+      if (!s.pid) { copyTo(s, p); return { key: startPty(p, s.cwd, args, b.cols | 0 || 100, b.rows | 0 || 30).key, kind: 'pty' }; }
+      const t = where(s);
+      if (t?.kind !== 'pty') { switchWindow(s, b.acct, prompt, !!b.now).catch(() => {}); return { window: true }; }
+      (async () => {
+        await untilFree(t.dir, t.pid, b.now || atLimit(reg.profiles[s.acct]));
+        if (t.gone || t.switching) return; // a second request (the island and the page both): one new Claude, not two
+        t.switching = true;
+        t.proc.kill();
+        while (!t.gone) await sleep(100); // it has stopped writing its record: the copy is whole
+        copyTo(s, p);
+        send(t, 'switched', { key: startPty(p, s.cwd, args, t.w, t.h).key });
+      })().catch(() => {});
+      return { pty: true };
     },
     'POST /api/input': (q, b) => {
       const t = terms.get(b.key);
@@ -1347,7 +1436,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal };
+module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -1363,7 +1452,8 @@ if (require.main === module) {
   }
   else if (cmd === 'island') island();
   else if (cmd === 'chats') chats(process.argv[3]);
-  else if (cmd === 'resume') resume(process.argv[3], process.argv[4]);
+  else if (cmd === 'resume') resume(process.argv[3], process.argv[4], process.argv[5]);
+  else if (cmd === 'swap') switchChat(process.argv[3], Number(process.argv[4]), process.argv.includes('--now'), !process.argv.includes('--no-continue'));
   else if (cmd === 'attach') attach(process.argv[3]);
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'web') web();
