@@ -756,11 +756,15 @@ async function usageState(reg = load()) {
 // and the next renewal, guessed: monthly, on the day it began; canceled (from subState): the day it ends instead.
 // ponytail: an annual plan would be guessed wrong; the profile doesn't say which, the store (or claude.ai) does
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// The subscription's start doesn't move when the store's billing day does (a resubscription, a late payment): account 1
+// began on the 7th and the App Store bills it on the 28th. A day you set (renewOn, `claude-multi renew`) wins.
 function subscription(p, status = null) {
   let o = null;
   try { o = JSON.parse(fs.readFileSync(path.join(p.configDir, '.claude.json'), 'utf8')).oauthAccount; } catch {}
   const since = new Date(o?.subscriptionCreatedAt ?? NaN);
-  return isNaN(since) ? null : { since: ymd(since), renew: ymd(nextRenewal(since)), billing: o.billingType ?? null, canceled: status === 'canceled' };
+  if (isNaN(since)) return null; // no subscription (and nextRenewal would never find an anniversary of no date)
+  const renew = p.renewOn ? nextRenewal(new Date(`${p.renewOn}T00:00:00`), new Date(), true) : nextRenewal(since);
+  return { since: ymd(since), renew: ymd(renew), billing: o.billingType ?? null, canceled: status === 'canceled' };
 }
 // Whether the subscription still renews: Claude Code's copy of the profile leaves that out, Anthropic's profile has it
 // (subscription_status, 'canceled' once renewal is turned off). Read every 6 h, kept in the quota cache.
@@ -775,12 +779,13 @@ async function subState(p, cache, now = Date.now()) {
   } catch {} // the network or a stale login: the last one known, if any
   return cache[k]?.status ?? null;
 }
-// The first monthly anniversary of since, today or later (a day the month lacks, like the 31st: its last day).
-function nextRenewal(since, now = new Date()) {
+// The first monthly anniversary of since, today or later (a day the month lacks, like the 31st: its last day). since
+// itself counts only when it's a billing day (onIt), not the day the subscription began.
+function nextRenewal(since, now = new Date(), onIt = false) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()), first = new Date(since.getFullYear(), since.getMonth(), since.getDate());
   for (let m = now.getMonth(); ; m++) {
     const d = new Date(now.getFullYear(), m, Math.min(since.getDate(), new Date(now.getFullYear(), m + 1, 0).getDate()));
-    if (d >= today && d > first) return d;
+    if (d >= today && (onIt ? d >= first : d > first)) return d;
   }
 }
 
@@ -1364,6 +1369,12 @@ if (require.main === module) {
   else if (cmd === 'web') web();
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));
   else if (cmd === 'wt-bind') wtBind();
+  else if (cmd === 'renew') { // renew N M-D: the day account N renews (or ends) as the store shows it; renew N auto: guessed again
+    const [n, v] = process.argv.slice(3), m = /^(?:(\d{4})\D)?(\d{1,2})\D(\d{1,2})\D?$/.exec(v ?? '');
+    if (!load().profiles[n - 1] || (v !== 'auto' && !m)) { console.log('用法：claude-multi renew <账号编号> <月-日，如 10-28；auto 改回推算>'); process.exit(1); }
+    update((r) => { const p = r.profiles[n - 1]; if (v === 'auto') delete p.renewOn; else p.renewOn = `${m[1] ?? new Date().getFullYear()}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; });
+    console.log(v === 'auto' ? `账号 ${n} 改回按订阅开始时间推算` : `已记下：账号 ${n} 每月 ${+m[3]} 号续费（取消续订的，这天到期）`);
+  }
   else if (cmd === 'sessions') {
     const all = listSessions(load());
     if (process.argv.includes('--json')) console.log(JSON.stringify(all));

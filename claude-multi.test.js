@@ -270,5 +270,8 @@ console.log('tokens ok');
   assert.equal(next('2026-10-09', '2026-10-09'), '2026-11-09'); // began today: next month
   assert.equal(next('2026-01-31', '2026-02-10'), '2026-02-28'); // a day February lacks
   assert.equal(next('2026-08-15', '2026-12-20'), '2027-01-15'); // into the next year
+  const on = (day, now) => { const x = nextRenewal(d(day), d(now), true); return `${x.getMonth() + 1}-${x.getDate()}`; };
+  assert.equal(on('2026-10-28', '2026-10-11'), '10-28');         // a billing day you set: itself counts
+  assert.equal(on('2026-10-28', '2026-11-02'), '11-28');
   console.log('renewal ok');
 }
