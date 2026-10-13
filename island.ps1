@@ -202,7 +202,8 @@ $self = $PSCommandPath
 $got = $false
 $mutex = New-Object Threading.Mutex($false, 'Local\ClaudeMultiIsland')
 try { $got = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $got = $true }
-if (-not $got) { exit }
+# started again while one runs (you looking for it): that one comes to the front and down from the edge
+if (-not $got) { [IO.File]::WriteAllText("$PSScriptRoot\inbox\front-$PID.json", '{"kind":"front"}'); exit }
 $pidFile = "$PSCommandPath.pid" # lets `claude-multi notify` skip starting us when we already run
 Set-Content -Path $pidFile -Value $PID
 # the phone page (claude-multi web) rides along, hidden and on its own: it outlives an island restart, and a
@@ -221,29 +222,47 @@ Add-Type -Name U -Namespace Native -MemberDefinition @'
 [void][Native.U]::SetProcessDPIAware() # sharp text on scaled screens
 # Drawn by the CPU: nothing to lose when the graphics driver resets. For a pill and a list it costs nothing.
 [Windows.Media.RenderOptions]::ProcessRenderMode = [Windows.Interop.RenderMode]::SoftwareOnly
-# A see-through window can stop being drawn after the screen goes off, the computer locks or sleeps, while the island
-# keeps running (it vanished overnight twice, CPU drawing or not); hidden and shown again, it's drawn again. So it is,
-# 2 s after the screen comes on, an unlock or a wake. The hook is C#: one in PowerShell would run for every message.
+# Windows can leave the island, still marked topmost, under ordinary windows (seen 10-13: 8 terminals, Chrome and
+# more above it, other apps' topmost windows sunk too); everything then brought to the front lands above it. So each
+# time the front window changes (a window brought up comes up that way) it looks: an ordinary window of another
+# program above it, and it goes back on top, without taking the focus, and logs who was there (island-errors.log).
 Add-Type -ReferencedAssemblies PresentationFramework, PresentationCore, WindowsBase, System.Xaml -TypeDefinition @'
-using System; using System.Runtime.InteropServices; using System.Windows; using System.Windows.Interop; using System.Windows.Threading;
+using System; using System.Diagnostics; using System.IO; using System.Runtime.InteropServices; using System.Text;
+using System.Windows; using System.Windows.Interop;
 namespace Native {
-public static class Redraw {
-  [DllImport("user32.dll")] static extern IntPtr RegisterPowerSettingNotification(IntPtr h, ref Guid g, int flags);
-  [DllImport("wtsapi32.dll")] static extern bool WTSRegisterSessionNotification(IntPtr h, int flags);
-  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
-  public static void Watch(Window w) {
-    var h = new WindowInteropHelper(w).Handle;
-    var display = new Guid("6FE69556-704A-47A0-8F24-C28D936FDA47"); // GUID_CONSOLE_DISPLAY_STATE: 0 off, 1 on, 2 dimmed
-    RegisterPowerSettingNotification(h, ref display, 0);
-    WTSRegisterSessionNotification(h, 0);
-    var later = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-    later.Tick += (s, e) => { later.Stop(); ShowWindow(h, 0); ShowWindow(h, 8); }; // SW_HIDE, SW_SHOWNA: not activated
-    HwndSource.FromHwnd(h).AddHook((IntPtr hw, int msg, IntPtr wp, IntPtr lp, ref bool handled) => {
-      bool back = (msg == 0x218 && ((int)wp == 0x12 || ((int)wp == 0x8013 && Marshal.ReadInt32(lp, 20) == 1))) // power: awake; screen on
-        || (msg == 0x2B1 && (int)wp == 8); // session: unlocked
-      if (back) { later.Stop(); later.Start(); }
-      return IntPtr.Zero;
-    });
+public static class OnTop {
+  delegate void WinEvent(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time);
+  [DllImport("user32.dll")] static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr mod, WinEvent f, uint pid, uint tid, uint flags);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int hgt, uint flags);
+  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int size);
+  static IntPtr me; static string log; static WinEvent keep; // kept: the hook calls it for as long as we run
+  public static void Watch(Window w, string logFile) {
+    me = new WindowInteropHelper(w).Handle; log = logFile;
+    keep = (hook, ev, hwnd, obj, child, thread, time) => Check(false);
+    SetWinEventHook(3, 3, IntPtr.Zero, keep, 0, 0, 0); // EVENT_SYSTEM_FOREGROUND, called on this thread
+  }
+  // back on top when covered (or always, with force); the ordinary window of another program found above it, logged
+  public static void Check(bool force) {
+    if (me == IntPtr.Zero) return;
+    uint mine; GetWindowThreadProcessId(me, out mine);
+    for (IntPtr h = GetWindow(me, 3); h != IntPtr.Zero; h = GetWindow(h, 3)) { // GW_HWNDPREV: above it
+      int cloaked; uint pid;
+      if (!IsWindowVisible(h) || (GetWindowLong(h, -20) & 8) != 0) continue; // hidden, or topmost itself
+      if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) continue; // on another desktop
+      GetWindowThreadProcessId(h, out pid);
+      if (pid == mine) continue;
+      var t = new StringBuilder(80); GetWindowText(h, t, 80);
+      string who; try { who = Process.GetProcessById((int)pid).ProcessName; } catch { who = "pid " + pid; }
+      try { File.AppendAllText(log, DateTime.Now.ToString("MM-dd HH:mm:ss") + " 被压在下面，回到最上面：" + who + " '" + t + "' 在上面\r\n"); } catch {}
+      force = true;
+      break;
+    }
+    if (force) SetWindowPos(me, new IntPtr(-1), 0, 0, 0, 0, 0x13); // HWND_TOPMOST; NOSIZE | NOMOVE | NOACTIVATE
   }
 }}
 '@
@@ -418,6 +437,7 @@ function TopFor([bool]$hide) {
   if ($hide) { $wa.Top + 6 - ($win.ActualHeight - 16) } else { $wa.Top } # 16 = the island's bottom margin
 }
 function Slide([bool]$hide) {
+  if (-not $hide) { [Native.OnTop]::Check($false) } # to be seen: a window brought up without becoming the front one may cover it
   $script:hidden = $hide
   Paint-Rim
   $an = New-Object Windows.Media.Animation.DoubleAnimation -ArgumentList (TopFor $hide), (New-Object Windows.Duration ([TimeSpan]::FromMilliseconds(220)))
@@ -792,6 +812,7 @@ function Check-Inbox {
     $age = (Get-Date) - [IO.File]::GetLastWriteTime($f)
     try { [IO.File]::Delete($f) } catch { continue }
     if ($n -and $n.kind -eq 'read') { Drop-Read $n.id; continue } # read on the web page
+    if ($n -and $n.kind -eq 'front') { [Native.OnTop]::Check($true); if ($script:hidden) { Slide $false }; $script:away = 0; continue } # started again
     if ($n -and $n.kind -eq 'chats' -and $n.tokens) { Open-Tokens; continue } # claude-multi chats tokens
     if ($n -and $n.kind -eq 'chats') { $script:folder = if ($n.arrange) { '*' } else { '' }; $script:arranging = [bool]$n.arrange; Open-Chats; Load-Chats; continue } # claude-multi chats
     if ($n -and $age.TotalMinutes -lt 2) { Add-Alert $n } # older ones were for an island that wasn't running
@@ -1871,7 +1892,7 @@ $Pin.Add_MouseLeftButtonUp({
 $win.Add_Deactivated({ Collapse })
 $win.Add_SizeChanged({ Recenter })
 $win.Add_Loaded({ Recenter })
-$win.Add_SourceInitialized({ [Native.Redraw]::Watch($win) })
+$win.Add_SourceInitialized({ [Native.OnTop]::Watch($win, "$root\island-errors.log") })
 
 $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(300)
