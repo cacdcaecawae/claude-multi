@@ -106,11 +106,27 @@ assert.equal(t.accounts[0].total, 0); assert.equal(t.accounts[1].total, 4);
 fs.writeFileSync(fb, reply('msg_6', atH(13), 0, 1, 0, 0, 'claude-opus-5'));
 assert.equal(tokenStats(roots, cacheC).total, 5);
 fs.rmSync(require('path').join(A, 'copy.jsonl')); fs.rmSync(fb);
-// the first cache format (no model, no write kind): a deleted file's replies keep counting, as 1-h writes at Opus 5.5
+// an older cache (replies without their time): a deleted file's replies keep counting
 const old = require('path').join(tmp, 'old.json');
-fs.writeFileSync(old, JSON.stringify({ [require('path').join(tmp, 'a', 'p', 'gone.jsonl')]: { size: 9, recs: [['msg_9:r', '2026-09-29', 1, 0, 1, 0]] } }));
+fs.writeFileSync(old, JSON.stringify({ v: 2, files: { [require('path').join(tmp, 'a', 'p', 'gone.jsonl')]: { size: 9, recs: [['msg_9:r', '2026-09-29', 1, 0, 0, 1, 0, 'claude-opus-5-5', 0]] } } }));
 t = tokenStats(roots, old);
 assert.equal(t.total, 2); near(t.usd, (1 + 1 * 2) * 4 / 1e6);
+// switched to b and back to a: a's file is the older one and holds every reply, yet b's stay b's (by the switch log)
+{
+  const sid = '0cca25c9-be24-456d-a34c-fa807b945adb', log = require('path').join(tmp, 'events.jsonl');
+  // kept under a folder named like another conversation: a record's own is the one under its project folder
+  const base = require('path').join(tmp, '2e904423-c9c9-4af8-8828-4d59b90ef388'), A = require('path').join(base, 'a', 'p'), B = require('path').join(base, 'b', 'p');
+  fs.mkdirSync(A, { recursive: true }); fs.mkdirSync(B, { recursive: true });
+  const fA = require('path').join(A, `${sid}.jsonl`), fB = require('path').join(B, `${sid}.jsonl`);
+  const r2 = [{ id: 'pa', label: 'a', dir: require('path').join(base, 'a') }, { id: 'pb', label: 'b', dir: require('path').join(base, 'b') }];
+  fs.writeFileSync(fA, reply('msg_a', atH(9), 0, 1, 0, 0, 'claude-opus-5-5'));
+  const later = Date.now() + 30; while (Date.now() < later); // the copy born later
+  fs.copyFileSync(fA, fB); fs.appendFileSync(fB, reply('msg_b', atH(11), 0, 2, 0, 0, 'claude-opus-5-5'));
+  fs.copyFileSync(fB, fA); fs.appendFileSync(fA, reply('msg_c', atH(13), 0, 4, 0, 0, 'claude-opus-5-5'));
+  fs.writeFileSync(log, [[atH(10), 'pb'], [atH(12), 'pa']].map(([timestamp, p]) => JSON.stringify({ timestamp, event: 'session_copied', profile_id: p, session_id: sid })).join('\n') + '\n');
+  t = tokenStats(r2, require('path').join(tmp, 'sw.json'), log);
+  assert.deepEqual(t.accounts.map((a) => a.total), [5, 2]); // a: msg_a and msg_c; b: msg_b
+}
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('tokens ok');
 
@@ -294,8 +310,8 @@ console.log('tokens ok');
   status('waiting'); t = Date.now(); await untilFree(dir, process.pid, false);
   assert.ok(Date.now() - t < 200);                                        // waiting on you: nothing to cut
   const sw = path.join(os.homedir(), '.claude-multi', 'switch');
-  fs.mkdirSync(sw, { recursive: true }); fs.writeFileSync(path.join(sw, '999999.json'), JSON.stringify({ id: 'x', n: 2, prompt: '继续' }));
-  assert.deepEqual(takeSwitch(999999), { id: 'x', n: 2, prompt: '继续' });
+  fs.mkdirSync(sw, { recursive: true }); fs.writeFileSync(path.join(sw, '999999.json'), JSON.stringify({ id: 'x', n: 2 }));
+  assert.deepEqual(takeSwitch(999999), { id: 'x', n: 2 });
   assert.equal(takeSwitch(999999), null);                                 // taken once
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('switch ok');

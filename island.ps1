@@ -219,9 +219,34 @@ Add-Type -Name U -Namespace Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
 '@
 [void][Native.U]::SetProcessDPIAware() # sharp text on scaled screens
-# Drawn by the CPU: drawn by the GPU, a see-through window can stop showing after the screen sleeps or locks, while
-# it keeps running (the island vanished overnight that way). For a pill and a list, software drawing costs nothing.
+# Drawn by the CPU: nothing to lose when the graphics driver resets. For a pill and a list it costs nothing.
 [Windows.Media.RenderOptions]::ProcessRenderMode = [Windows.Interop.RenderMode]::SoftwareOnly
+# A see-through window can stop being drawn after the screen goes off, the computer locks or sleeps, while the island
+# keeps running (it vanished overnight twice, CPU drawing or not); hidden and shown again, it's drawn again. So it is,
+# 2 s after the screen comes on, an unlock or a wake. The hook is C#: one in PowerShell would run for every message.
+Add-Type -ReferencedAssemblies PresentationFramework, PresentationCore, WindowsBase, System.Xaml -TypeDefinition @'
+using System; using System.Runtime.InteropServices; using System.Windows; using System.Windows.Interop; using System.Windows.Threading;
+namespace Native {
+public static class Redraw {
+  [DllImport("user32.dll")] static extern IntPtr RegisterPowerSettingNotification(IntPtr h, ref Guid g, int flags);
+  [DllImport("wtsapi32.dll")] static extern bool WTSRegisterSessionNotification(IntPtr h, int flags);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+  public static void Watch(Window w) {
+    var h = new WindowInteropHelper(w).Handle;
+    var display = new Guid("6FE69556-704A-47A0-8F24-C28D936FDA47"); // GUID_CONSOLE_DISPLAY_STATE: 0 off, 1 on, 2 dimmed
+    RegisterPowerSettingNotification(h, ref display, 0);
+    WTSRegisterSessionNotification(h, 0);
+    var later = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+    later.Tick += (s, e) => { later.Stop(); ShowWindow(h, 0); ShowWindow(h, 8); }; // SW_HIDE, SW_SHOWNA: not activated
+    HwndSource.FromHwnd(h).AddHook((IntPtr hw, int msg, IntPtr wp, IntPtr lp, ref bool handled) => {
+      bool back = (msg == 0x218 && ((int)wp == 0x12 || ((int)wp == 0x8013 && Marshal.ReadInt32(lp, 20) == 1))) // power: awake; screen on
+        || (msg == 0x2B1 && (int)wp == 8); // session: unlocked
+      if (back) { later.Stop(); later.Start(); }
+      return IntPtr.Zero;
+    });
+  }
+}}
+'@
 
 $root = Split-Path -Parent $PSCommandPath
 $js = Join-Path $root 'claude-multi.js'
@@ -1651,9 +1676,9 @@ function Save-Name($ed) {
 function Switch-Chat($s) {
   $c = Pick-Switch $s
   if (-not $c) { return }
-  if (-not $s.pid) { Open-Terminal $s.cwd "resume $($s.id) $($c.n)$(if ($c.cont) { ' 继续' })"; return }
+  if (-not $s.pid) { Open-Terminal $s.cwd "resume $($s.id) $($c.n)"; return }
   Say $(if ($s.busy -and -not $c.now) { "这一轮答完后，换到账号 $($c.n) 接着…" } else { "正在换到账号 $($c.n)…" })
-  Run-Node "swap $($s.id) $($c.n)$(if ($c.now) { ' --now' })$(if (-not $c.cont) { ' --no-continue' })" {
+  Run-Node "swap $($s.id) $($c.n)$(if ($c.now) { ' --now' })" {
     param($out)
     $msg = "$out".Trim(); if (-not $msg) { $msg = '换账号时出错了' }
     Add-Alert @{ kind = 'done'; info = $true; project = '换账号继续'; msg = $msg }
@@ -1661,7 +1686,7 @@ function Switch-Chat($s) {
   }
 }
 # The dialog: which account (each with what it can still give; the conversation's own one not offered), while it
-# answers 答完再换 or 立即换, and whether 继续 is sent once there. @{ n; now; cont }, or $null when cancelled.
+# answers 答完再换 or 立即换. @{ n; now }, or $null when cancelled.
 function Chip-Xaml([int]$tag, [string]$text, [string]$note, [bool]$off) {
   "<Border Tag='$tag' CornerRadius='10' Padding='12,6' Margin='0,0,8,8' BorderThickness='1' Cursor='Hand' IsEnabled='$(-not $off)' Opacity='$(if ($off) { 0.4 } else { 1 })'>" +
   "<StackPanel Orientation='Horizontal'><TextBlock Text='$(Esc $text)' FontSize='13' FontWeight='SemiBold'/>" +
@@ -1699,7 +1724,6 @@ function Pick-Switch($s) {
     <TextBlock Text="换到" FontSize="12" Foreground="#8CFFFFFF" Margin="0,16,0,8"/>
     <WrapPanel x:Name="Accs">$chips</WrapPanel>
     $modes
-    <CheckBox x:Name="Cont" IsChecked="True" Foreground="#E6FFFFFF" FontSize="13" Margin="0,8,0,0" Content="换好后自动发「继续」"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
      <Button x:Name="No" Style="{StaticResource Text}" FontSize="13" Margin="0,0,10,0" Padding="4,4" Content="取消"/>
      <Button x:Name="Go" Style="{StaticResource Primary}" FontSize="13"/>
@@ -1731,7 +1755,7 @@ function Pick-Switch($s) {
   if ($script:cw -and $script:cw.IsVisible) { $d.Owner = $script:cw } else { $d.WindowStartupLocation = 'CenterScreen' }
   [void]$d.ShowDialog()
   if (-not $d.Tag.ok) { return $null }
-  @{ n = $d.Tag.n; now = $d.Tag.now; cont = [bool]$d.FindName('Cont').IsChecked }
+  @{ n = $d.Tag.n; now = $d.Tag.now }
 }
 function Add-Chat($s) {
   $n = [int]$s.acct + 1 # its own account; a switch is only ever offered on click (Pick-Account)
@@ -1847,6 +1871,7 @@ $Pin.Add_MouseLeftButtonUp({
 $win.Add_Deactivated({ Collapse })
 $win.Add_SizeChanged({ Recenter })
 $win.Add_Loaded({ Recenter })
+$win.Add_SourceInitialized({ [Native.Redraw]::Watch($win) })
 
 $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(300)

@@ -128,8 +128,6 @@
   #send textarea { flex: 1; resize: none; height: 44px; max-height: 120px; }
   .btn.icon { padding: 6px 8px; display: grid; place-items: center; flex: none; }
   .btn.icon svg { width: 18px; height: 18px; }
-  .chk { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--fg2); margin-top: 4px; }
-  .chk input { width: 18px; height: 18px; accent-color: var(--blue); margin: 0; }
   .opt small { color: var(--fg3); font-size: 12px; margin-left: 4px; }
   .opt:disabled { opacity: .45; }
   #gone { display: none; background: rgba(255,69,58,.15); color: #ff8a80; font-size: 13px; padding: 6px 12px; }
@@ -496,7 +494,7 @@ function md(t) {
 }
 $('#back').onclick = closeTerm;
 // 换账号继续: the open conversation goes on with the account picked here. While it answers, it can wait for the end of
-// the answer or stop now; "继续" is sent once it's there unless unticked. The service does it (/api/switch) and the page
+// the answer or stop now; nothing is sent, it waits for you there. The service does it (/api/switch) and the page
 // follows: one running in the service comes back as event switched, one in a window on the computer as a new Claude in
 // the same tab, found by asking for the conversation until it runs under another key.
 let switching = 0; // the account it's going to, while it goes
@@ -504,22 +502,20 @@ $('#swap').onclick = () => {
   const s = state?.sessions.find((x) => x.id === histId), accts = state?.usage?.accounts ?? [], rec = state?.usage?.rec;
   if (!histId || !s) return toast('这个对话还没有消息，不用换账号');
   if (accts.length < 2) return toast('只有一个账号');
-  let acct = rec != null && rec !== s.acct ? rec + 1 : (s.acct + 1) % accts.length + 1, now = false, cont = true;
+  let acct = rec != null && rec !== s.acct ? rec + 1 : (s.acct + 1) % accts.length + 1, now = false;
   const draw = () => {
     $('#sheetIn').innerHTML = `<b style="font-size:17px">换账号继续</b><div class="m" style="margin-top:4px">${esc(s.title)}</div>
       <div class="m" style="margin-top:14px">换到</div><div class="opts">${accts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}"${i === s.acct ? ' disabled' : ''}>
         账号 ${i + 1}<small>${i === s.acct ? '当前' : a.err ? '读不到额度' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满'}${rec === i && i !== s.acct ? ' · 推荐' : ''}</small></button>`).join('')}</div>
       ${busyNow ? `<div class="m">它正在回答</div><div class="opts"><button class="opt ${now ? '' : 'on'}" data-now="">答完再换</button><button class="opt ${now ? 'on' : ''}" data-now="1">立即换</button></div>` : ''}
-      <label class="chk"><input type="checkbox" id="contIn"${cont ? ' checked' : ''}>换好后自动发「继续」</label>
       <div style="display:flex;gap:10px;margin-top:16px"><button class="btn" id="cancel" style="flex:1">取消</button><button class="btn primary" id="swapGo" style="flex:2">换到账号 ${acct}</button></div>`;
     document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
     document.querySelectorAll('[data-now]').forEach((b) => (b.onclick = () => { now = !!b.dataset.now; draw(); }));
-    $('#contIn').onchange = (e) => (cont = e.target.checked);
     $('#cancel').onclick = () => $('#sheet').classList.remove('on');
     $('#swapGo').onclick = async () => {
       $('#sheet').classList.remove('on');
       try {
-        const r = await post('/api/switch', { id: histId, acct, now, cont, cols: term?.cols, rows: term?.rows });
+        const r = await post('/api/switch', { id: histId, acct, now, cols: term?.cols, rows: term?.rows });
         switching = acct;
         if (r.key) { ({ key, kind } = r); switched(); connect(); return; }
         toast(busyNow && !now ? `这一轮答完后，换到账号 ${acct} 接着` : `正在换到账号 ${acct}…`, 4000);

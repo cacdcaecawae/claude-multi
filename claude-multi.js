@@ -275,7 +275,9 @@ function start(p, args, source) {
   const r = run(p.configDir, args);
   if (r.error) { console.error(`无法启动 claude：${r.error.message}`); process.exit(1); }
   const sw = takeSwitch(r.pid); // ended by `claude-multi swap`: this tab goes on with the account picked
-  if (sw) { console.log(`\n换到账号 ${sw.n}，接着这段对话……\n`); return resume(sw.id, sw.n, sw.prompt); }
+  // the terminal reset first: the Claude ended mid-draw can leave a control sequence half written (a title, say),
+  // which swallowed the new one's output and left its screen drawn wrong. ESC \ ends one, ESC c resets the rest.
+  if (sw) { process.stdout.write('\x1b\\\x1bc'); console.log(`换到账号 ${sw.n}，接着这段对话……\n`); return resume(sw.id, sw.n); }
   process.exit(r.status ?? 1);
 }
 
@@ -535,10 +537,10 @@ function rename(id, name) {
   console.log(`已改名：${name}`);
 }
 
-// resume ID N [PROMPT]: continue a past conversation with account N, in its own folder (PROMPT, like 继续, sent
-// first). Claude only finds a transcript in its own config dir, so the newest copy (and its side folder of
-// subagent and tool-output files) is copied into N's first when another account wrote it last.
-function resume(id, n, prompt) {
+// resume ID N: continue a past conversation with account N, in its own folder. Claude only finds a
+// transcript in its own config dir, so the newest copy (and its side folder of subagent and tool-output
+// files) is copied into N's first when another account wrote it last.
+function resume(id, n) {
   const reg = load(), s = listSessions(reg).find((x) => x.id === id);
   if (!s) { console.log(`找不到对话 ${id}。`); process.exit(1); }
   if (s.pid) { console.log(`这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
@@ -546,7 +548,7 @@ function resume(id, n, prompt) {
   if (!p) { console.log('请指定账号编号：claude-multi resume <对话 id> <账号编号>'); process.exit(1); }
   copyTo(s, p);
   process.chdir(s.cwd);
-  start(p, ['--resume', id, ...(prompt ? [prompt] : [])], 'resume');
+  start(p, ['--resume', id], 'resume');
 }
 
 // --- 换账号继续: a running conversation goes on with the account you pick (the island, the page, `swap`) ------
@@ -576,34 +578,35 @@ async function untilFree(dir, pid, now) {
     if (st !== 'busy' && st !== 'shell') return;
   }
 }
-// Conversation s, running in a window here, to go on with account n (prompt sent first). 'tab' or 'new': where it went on.
-async function switchWindow(s, n, prompt, now) {
+// Conversation s, running in a window here, to go on with account n; nothing is sent, it waits for you there.
+// 'tab' or 'new': where it went on.
+async function switchWindow(s, n, now) {
   const reg = load(), own = reg.profiles[s.acct];
   await untilFree(own.configDir, s.pid, now || atLimit(own));
   fs.mkdirSync(SWITCH, { recursive: true });
   const f = path.join(SWITCH, `${s.pid}.json`);
-  fs.writeFileSync(f, JSON.stringify({ id: s.id, n: Number(n), prompt }));
+  fs.writeFileSync(f, JSON.stringify({ id: s.id, n: Number(n) }));
   try { process.kill(s.pid); } catch {}
   for (let k = 0; k < 50 && fs.existsSync(f); k++) await sleep(100); // its tab picks the request up
   if (!fs.existsSync(f)) return 'tab';
   fs.rmSync(f, { force: true });
-  require('child_process').spawn('wt.exe', ['-d', s.cwd, process.execPath, __filename, 'resume', s.id, String(n), ...(prompt ? [prompt] : [])],
+  require('child_process').spawn('wt.exe', ['-d', s.cwd, process.execPath, __filename, 'resume', s.id, String(n)],
     { detached: true, stdio: 'ignore' }).unref();
   return 'new';
 }
-// swap ID N [--now] [--no-continue]: what the island runs for a running conversation; one running in the web service
-// is the service's to switch.
-async function switchChat(id, n, now, cont) {
-  const reg = load(), s = listSessions(reg).find((x) => x.id === id), prompt = cont ? '继续' : undefined;
+// swap ID N [--now]: what the island runs for a running conversation; one running in the web service is the
+// service's to switch.
+async function switchChat(id, n, now) {
+  const reg = load(), s = listSessions(reg).find((x) => x.id === id);
   if (!s || !reg.profiles[n - 1]) return console.log(s ? '没有这个账号。' : `找不到对话 ${id}。`);
   if (!s.pid) return console.log(`这个对话没在运行，用 claude-multi resume ${id} ${n} 打开即可。`);
   if (s.web) {
-    const r = await fetch(`http://127.0.0.1:${WEB_PORT}/api/switch`, { method: 'POST', body: JSON.stringify({ id, acct: Number(n), now, cont }),
+    const r = await fetch(`http://127.0.0.1:${WEB_PORT}/api/switch`, { method: 'POST', body: JSON.stringify({ id, acct: Number(n), now }),
       headers: { 'tailscale-user-login': tailscaleMe()?.login ?? '', 'content-type': 'application/json', 'accept-encoding': 'identity' } });
     const j = await r.json().catch(() => ({}));
     return console.log(r.ok ? `网页上的这个对话会换到账号 ${n} 接着` : `没换成：${j.err ?? r.status}`);
   }
-  const where = await switchWindow(s, n, prompt, now);
+  const where = await switchWindow(s, n, now);
   console.log(where === 'tab' ? `已换到账号 ${n}，在原来的窗口里接着` : `已换到账号 ${n}，在新窗口里接着`);
 }
 // attach ID: this terminal joins a conversation running in the web service (one started or continued from
@@ -1195,7 +1198,7 @@ async function web() {
       sessCache = null;
       return { key: startPty(p, b.dir, [], cols, rows).key, kind: 'pty' };
     },
-    // 换账号继续 {id, acct, now, cont}: the conversation goes on with account acct, "继续" sent first unless cont is false.
+    // 换账号继续 {id, acct, now}: the conversation goes on with account acct (nothing sent: it waits for you).
     // Not running: started here like a continued one. Running here: ended once its answer is over (now: at once; at a
     // usage limit: at once), started again on acct, and its pages moved to it (event switched). In a window: switchWindow.
     // Answers at once; the switch itself happens when it can.
@@ -1204,10 +1207,10 @@ async function web() {
       const reg = load(), s = sessions().find((x) => x.id === b.id), p = reg.profiles[b.acct - 1];
       if (!s) throw new Error('找不到这个对话');
       if (!p) throw new Error('没有这个账号');
-      const prompt = b.cont === false ? undefined : '继续', args = ['--resume', s.id, ...(prompt ? [prompt] : [])];
+      const args = ['--resume', s.id];
       if (!s.pid) { copyTo(s, p); return { key: startPty(p, s.cwd, args, b.cols | 0 || 100, b.rows | 0 || 30).key, kind: 'pty' }; }
       const t = where(s);
-      if (t?.kind !== 'pty') { switchWindow(s, b.acct, prompt, !!b.now).catch(() => {}); return { window: true }; }
+      if (t?.kind !== 'pty') { switchWindow(s, b.acct, !!b.now).catch(() => {}); return { window: true }; }
       (async () => {
         await untilFree(t.dir, t.pid, b.now || atLimit(reg.profiles[s.acct]));
         if (t.gone || t.switching) return; // a second request (the island and the page both): one new Claude, not two
@@ -1314,7 +1317,7 @@ async function web() {
 // A reply is [key, day, input, output, 5-min cache writes, 1-h cache writes, cache reads, model, fast].
 // tokens-cache.json keeps each file's replies and how far it was read: a run reads only what was appended.
 function tokenRoots(reg = load()) {
-  return reg.profiles.map((p) => ({ label: p.label, dir: path.join(p.configDir, 'projects') }));
+  return reg.profiles.map((p) => ({ id: p.id, label: p.label, dir: path.join(p.configDir, 'projects') }));
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
 // input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5).
@@ -1328,16 +1331,13 @@ function replyCost([, , i, o, w5, w1, r, model, fast]) {
   const [pi, po, pr] = PRICES[k ?? 'claude-opus-5-5'];
   return ((i + w5 * 1.25 + w1 * 2) * pi + o * po + r * pr) / 1e6 * (fast ? 2 : 1);
 }
-function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-cache.json')) {
-  let cache = { v: 2, files: {} };
+function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-cache.json'), logFile = LOG) {
+  let cache = { v: 3, files: {} };
   try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch (e) {
     if (e.code !== 'ENOENT') try { fs.copyFileSync(cacheFile, `${cacheFile}.bad`); } catch {} // unreadable: keep it for a hand rescue
   }
-  if (cache.v !== 2) { // the first format had no model or cache-write kind: read the records again; for
-    const files = {};  // deleted ones keep the counts, with the commonest kind (1 h) and price (Opus 5.5)
-    for (const [f, c] of Object.entries(cache)) if (c?.recs && !fs.existsSync(f)) files[f] = { size: c.size, recs: c.recs.map(([k, d, i, o, w, r]) => [k, d, i, o, 0, w, r, '', 0]) };
-    cache = { v: 2, files };
-  }
+  // replies now carry their time (who made one goes by it): the records read again; deleted ones keep theirs, without
+  if (cache.v !== 3) cache = { v: 3, files: Object.fromEntries(Object.entries(cache.files ?? {}).filter(([f]) => !fs.existsSync(f))) };
   const num = (s, k) => +(s.match(new RegExp(`"${k}":(\\d+)`))?.[1] ?? 0);
   const two = (n) => String(n).padStart(2, '0');
   const day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; };
@@ -1349,14 +1349,28 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
     return out;
   };
   const next = {}, best = new Map();
-  // A reply found in several files counts at its largest; on a tie, in the oldest file: a resume copies the
-  // whole record into the other account (a newer file), and the replies belong to the account that made them.
-  const count = (c, ri) => {
+  // Which account ran a conversation when: going on with another account copies its whole record there (logged as
+  // session_copied), so a reply is that account's when it came after the copy, before any other.
+  const moves = new Map(); // conversation id -> [[ms, profile id]], oldest first
+  try {
+    for (const l of fs.readFileSync(logFile, 'utf8').split('\n')) {
+      if (!l.includes('"session_copied"')) continue;
+      const j = JSON.parse(l);
+      if (!moves.has(j.session_id)) moves.set(j.session_id, []);
+      moves.get(j.session_id).push([Date.parse(j.timestamp), j.profile_id]);
+    }
+  } catch {}
+  const ranBy = (sid, ts) => { let o = null; for (const [t, id] of moves.get(sid) ?? []) if (t <= ts) o = id; return o; };
+  // A reply found in several files counts at its largest; on a tie, in the file of the account it was made on, and
+  // before any copy (or with no time) in the oldest file: the first account's, a copy being newer.
+  const count = (c, ri, sid) => {
     for (const x of c.recs) {
-      const b = best.get(x[0]);
-      if (!b || sum(x) > sum(b.x) || (sum(x) === sum(b.x) && (c.born ?? Infinity) < b.born)) best.set(x[0], { x, ri, born: c.born ?? Infinity });
+      const b = best.get(x[0]), by = x[9] && ranBy(sid, x[9]), rank = by && roots[ri].id !== by ? 1 : 0, born = c.born ?? Infinity;
+      if (!b || sum(x) > sum(b.x) || (sum(x) === sum(b.x) && (rank < b.rank || (rank === b.rank && born < b.born)))) best.set(x[0], { x, ri, born, rank });
     }
   };
+  // its conversation, under projects\<folder>\: <id>.jsonl, or a subagent's record in the side folder <id>\
+  const sidOf = (ri, f) => path.relative(roots[ri].dir, f).split(path.sep)[1]?.replace(/\.jsonl$/, '');
   roots.forEach((r, ri) => {
     for (const f of walk(r.dir)) {
       const st = fs.statSync(f), size = st.size;
@@ -1378,7 +1392,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
             if (!id || !ts) continue;
             const u = l.slice(l.indexOf('"usage":')), w = num(u, 'cache_creation_input_tokens'), w1 = Math.min(w, num(u, 'ephemeral_1h_input_tokens'));
             const x = [`${id}:${l.match(/"requestId":"([^"]+)"/)?.[1] ?? ''}`, day(ts), num(u, 'input_tokens'), num(u, 'output_tokens'),
-              w - w1, w1, num(u, 'cache_read_input_tokens'), l.match(/"model":"([^"]+)"/)?.[1] ?? '', +/"speed":"fast"/.test(u)];
+              w - w1, w1, num(u, 'cache_read_input_tokens'), l.match(/"model":"([^"]+)"/)?.[1] ?? '', +/"speed":"fast"/.test(u), Date.parse(ts)];
             const i = at.get(x[0]);
             if (i === undefined) { at.set(x[0], c.recs.length); c.recs.push(x); } else if (sum(x) > sum(c.recs[i])) c.recs[i] = x;
           }
@@ -1387,7 +1401,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
         fs.closeSync(fd);
       }
       next[f] = c;
-      count(c, ri);
+      count(c, ri, sidOf(ri, f));
     }
   });
   // Claude Code deletes records older than 30 days (cleanupPeriodDays): their replies stay counted from here.
@@ -1396,12 +1410,12 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
     const ri = roots.findIndex((r) => f.startsWith(r.dir + path.sep));
     if (next[f] || ri < 0 || fs.existsSync(f)) continue;
     next[f] = c;
-    count(c, ri);
+    count(c, ri, sidOf(ri, f));
   }
   // whole or not at all: this cache is the only record left of deleted transcripts, so a cut-off write must
   // never replace it (two runs at once: the later rename wins, each file whole)
   const tmp = `${cacheFile}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ v: 2, files: next }));
+  fs.writeFileSync(tmp, JSON.stringify({ v: 3, files: next }));
   try { fs.renameSync(tmp, cacheFile); } catch { fs.rmSync(tmp, { force: true }); } // held open by another run: it saves
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0 });
@@ -1452,8 +1466,8 @@ if (require.main === module) {
   }
   else if (cmd === 'island') island();
   else if (cmd === 'chats') chats(process.argv[3]);
-  else if (cmd === 'resume') resume(process.argv[3], process.argv[4], process.argv[5]);
-  else if (cmd === 'swap') switchChat(process.argv[3], Number(process.argv[4]), process.argv.includes('--now'), !process.argv.includes('--no-continue'));
+  else if (cmd === 'resume') resume(process.argv[3], process.argv[4]);
+  else if (cmd === 'swap') switchChat(process.argv[3], Number(process.argv[4]), process.argv.includes('--now'));
   else if (cmd === 'attach') attach(process.argv[3]);
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'web') web();
