@@ -1051,8 +1051,10 @@ function lead(items, lines, more = false) { // more: the record goes back furthe
 
 async function web() {
   const http = require('http'), pty = require('@lydell/node-pty');
-  const me = tailscaleMe();
-  if (!me) { console.log('读不到 Tailscale 的登录信息：先在这台电脑上登录 Tailscale。'); process.exit(1); }
+  // started with the island at sign-in, Tailscale may not be up yet (10-13: it quit, and the phone found nothing): wait
+  let me = tailscaleMe();
+  if (!me) console.log('读不到 Tailscale 的登录信息，等它就绪……（还没登录的话，先在这台电脑上登录 Tailscale）');
+  while (!me) { await sleep(5000); me = tailscaleMe(); }
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
   let usageCache = null, usageAt = 0, usageBusy = false, sessCache = null, sessAt = 0;
