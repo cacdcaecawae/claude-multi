@@ -922,6 +922,12 @@ function Open-Chats {
        </Grid>
       </DockPanel>
      </Border>
+     <Border x:Name="NewBar" DockPanel.Dock="Bottom" Visibility="Collapsed" BorderBrush="#14FFFFFF" BorderThickness="0,1,0,0" Padding="0,14,8,0" Margin="0,10,0,0">
+      <DockPanel>
+       <Button x:Name="NewGo" Style="{StaticResource Primary}" FontSize="13" DockPanel.Dock="Left" VerticalAlignment="Top" Margin="0,0,16,0"/>
+       <WrapPanel x:Name="NewAccts" VerticalAlignment="Center"/>
+      </DockPanel>
+     </Border>
      <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="List" Margin="0,0,8,0"/></ScrollViewer>
     </DockPanel>
    </Grid>
@@ -929,7 +935,9 @@ function Open-Chats {
  </Grid>
 </Window>
 "@
-  foreach ($n in 'Bar', 'Close', 'Folders', 'Heading', 'SubHeading', 'Hint', 'Search', 'SearchBox', 'List', 'Side', 'SideCol') { Set-Variable -Scope Script -Name "c$n" -Value $script:cw.FindName($n) }
+  foreach ($n in 'Bar', 'Close', 'Folders', 'Heading', 'SubHeading', 'Hint', 'Search', 'SearchBox', 'List', 'Side', 'SideCol', 'NewBar', 'NewGo', 'NewAccts') { Set-Variable -Scope Script -Name "c$n" -Value $script:cw.FindName($n) }
+  $script:newAcct = 0 # the account picked for 新建对话 in this window; 0: the recommended one
+  $cNewGo.Add_Click({ New-Chat })
   $cBar.Add_MouseLeftButtonDown({ $script:cw.DragMove() })
   $cClose.Add_Click({ $script:cw.Close() })
   $script:cw.Add_KeyDown({
@@ -987,7 +995,38 @@ function Add-Folder([string]$key, [string]$name, [int]$count, [string]$glyph) {
   [void]$cFolders.Children.Add($b)
 }
 
+# A folder's page ends in 新建对话: Claude started there in a new terminal window, on the recommended account unless
+# another one is picked on the chips beside it (each with what it can still give).
+function Draw-NewBar {
+  $show = $script:folder -and $script:folder -notin '*', '#tokens'
+  $cNewBar.Visibility = if ($show) { 'Visible' } else { 'Collapsed' }
+  if (-not $show) { return }
+  $u = $script:data; $accs = @($u.accounts)
+  $rec = if ($u -and $null -ne $u.rec) { [int]$u.rec + 1 } else { 1 }
+  $n = if ($script:newAcct) { $script:newAcct } else { $rec }
+  $cNewGo.Content = "＋ 新建对话 · 账号 $n$(if ($n -eq $rec) { '（推荐）' })"
+  $cNewAccts.Children.Clear()
+  if ($accs.Count -lt 2) { return }
+  for ($i = 0; $i -lt $accs.Count; $i++) {
+    $a = $accs[$i]
+    $note = if ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
+    $chip = X ((Chip-Xaml ($i + 1) "账号 $($i + 1)" $note $false) -replace '^<Border ', "<Border $ns ")
+    $chip.ToolTip = $a.label
+    $chip.Add_MouseLeftButtonUp({ param($x) $script:newAcct = [int]$x.Tag; Draw-NewBar })
+    [void]$cNewAccts.Children.Add($chip)
+  }
+  Paint-Chips $cNewAccts $n
+}
+function New-Chat {
+  $dir = $script:folder
+  $n = if ($script:newAcct) { $script:newAcct } elseif ($script:data -and $null -ne $script:data.rec) { [int]$script:data.rec + 1 } else { 1 }
+  if (-not (Test-Path -LiteralPath $dir -PathType Container)) { Say "这个文件夹已经不在了：$dir"; return }
+  Open-Terminal $dir "start $n"
+  Say "正在新窗口里用账号 $n 打开 Claude（$(Split-Path $dir -Leaf)），发出第一句话后它会出现在这个列表里"
+}
+
 function Render-List {
+  Draw-NewBar
   $wide = ($script:folder -eq '*' -and $script:arranging) -or $script:folder -eq '#tokens' # these take the whole window
   $cSideCol.Width = New-Object Windows.GridLength $(if ($wide) { 0 } else { 240 })
   $cSide.Visibility = if ($wide) { 'Collapsed' } else { 'Visible' }
