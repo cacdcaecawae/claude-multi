@@ -932,14 +932,14 @@ async function usage(args) {
 // in a pseudo-terminal here (node-pty) sized to the phone; one already open in a terminal window on this
 // computer is mirrored by console-bridge.ps1 (its screen, typing into it), so both sides use the same one.
 // Listens on 127.0.0.1 only. The way in from outside is an SSH tunnel this service keeps up to the server
-// (TUNNEL.ssh, a host in ~/.ssh/config), whose nginx serves TUNNEL.url over HTTPS and passes it all to the same port
-// on its end. The page runs Claude here, so it opens only with the key (web-key): `claude-multi web-link` prints a
+// (TUNNEL.ssh, a host in ~/.ssh/config), whose nginx serves TUNNEL.url over HTTPS and passes it all to the tunnel's
+// end there. The page runs Claude here, so it opens only with the key (web-key): `claude-multi web-link` prints a
 // link with it, and a browser that opened the link keeps it as a cookie. `web-link new` makes a new key: every
 // browser that had the old one is out.
 const NOTES = path.join(ROOT, 'notes.jsonl');
 const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes running in the web service
 const WEB_PORT = 7788;
-const TUNNEL = { ssh: 'huawei', url: 'https://your-server:8443' };
+const TUNNEL = { ssh: 'huawei', sock: '/run/claude-multi.sock', url: 'https://your-server:8443' }; // sock: its end on the server
 const WEB_KEY = path.join(ROOT, 'web-key');
 
 function webKey(fresh = false) { // made on first use; in the user's own folder, as each account's login is
@@ -1352,17 +1352,18 @@ async function web() {
   });
   server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
   server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); console.log(`网页：${TUNNEL.url}/  （第一次用 claude-multi web-link 给的链接打开）`); });
-  // the way in from outside, kept up: dialed again after a drop, at once if it had been up a while, else waiting
-  // longer each time (the server or the network down). The server drops a dead one within a minute
-  // (ClientAliveInterval), freeing its port for the next.
-  // ponytail: a tunnel left by a service killed outright keeps working for the next service, whose own waits
+  // the way in from outside, kept up: dialed again 5 s after a drop, waiting longer (up to a minute) while each try
+  // fails at once (the server or the network down). A connection the network swallowed (a proxy's TUN switched on or
+  // off moves it to another interface) is found dead within 15 s, by either side. On the server its end is a socket
+  // file, not a port: the next tunnel replaces it at once (StreamLocalBindUnlink), where a port stayed taken until the
+  // server gave up on the dead one, and every try in between failed.
   let tun = null, wait = 5000;
   process.on('exit', () => tun?.kill());
   function tunnel() {
     const at = Date.now();
-    tun = require('child_process').spawn('ssh', ['-N', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=15',
-      '-o', 'ServerAliveCountMax=3', '-R', `127.0.0.1:${WEB_PORT}:127.0.0.1:${WEB_PORT}`, TUNNEL.ssh], { windowsHide: true, stdio: 'ignore' });
-    tun.on('exit', () => { wait = Date.now() - at > 60000 ? 5000 : Math.min(wait * 2, 300000); setTimeout(tunnel, wait); });
+    tun = require('child_process').spawn('ssh', ['-N', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=5',
+      '-o', 'ServerAliveCountMax=3', '-R', `${TUNNEL.sock}:127.0.0.1:${WEB_PORT}`, TUNNEL.ssh], { windowsHide: true, stdio: 'ignore' });
+    tun.on('exit', () => { wait = Date.now() - at > 30000 ? 5000 : Math.min(wait * 2, 60000); setTimeout(tunnel, wait); });
   }
 }
 
