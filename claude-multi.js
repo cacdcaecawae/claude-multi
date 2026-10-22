@@ -938,6 +938,7 @@ async function usage(args) {
 // browser that had the old one is out.
 const NOTES = path.join(ROOT, 'notes.jsonl');
 const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes running in the web service
+const WEB_USAGE = path.join(ROOT, 'web-usage.json'); // the quota as the page last got it
 const WEB_PORT = 7788;
 const TUNNEL = { ssh: 'huawei', sock: '/run/claude-multi.sock', url: 'https://your-server:8443' }; // sock: its end on the server
 const WEB_KEY = path.join(ROOT, 'web-key');
@@ -1097,7 +1098,9 @@ async function web() {
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
-  let usageCache = null, usageAt = 0, usageBusy = false, sessCache = null, sessAt = 0;
+  // the quota as the page last got it, kept on disk: after a restart the page shows it at once (read again behind it)
+  let usageCache = (() => { try { return JSON.parse(fs.readFileSync(WEB_USAGE, 'utf8')); } catch { return null; } })();
+  let usageAt = 0, usageNow = null, sessCache = null, sessAt = 0;
 
   const send = (t, ev, data) => { for (const res of t.clients) res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); };
   const sessions = () => {
@@ -1182,13 +1185,16 @@ async function web() {
 
   const api = {
     // the quota as last read, at once: reading it again (each account's, over the network) takes a second or
-    // more, so one over a minute old is read again in the background, for the next look. ?fresh waits for it.
+    // more, so one over a minute old is read again in the background, for the next look. That read goes abroad
+    // through this computer's proxy, and hung the page for up to 20 s while its node was bad: 刷新 (?fresh) waits
+    // 3 s at most, then shows the last numbers; the page's next look (10 s) has the new ones.
     'GET /api/state': async (q) => {
-      if (!usageCache || q.has('fresh')) { usageCache = (await usageState()).json; usageAt = Date.now(); }
-      else if (Date.now() - usageAt > 60000 && !usageBusy) {
-        usageBusy = true;
-        usageState().then((r) => { usageCache = r.json; usageAt = Date.now(); }, () => {}).finally(() => { usageBusy = false; });
-      }
+      if (!usageCache || q.has('fresh') || Date.now() - usageAt > 60000) usageNow ??= usageState().then((r) => {
+        usageCache = r.json; usageAt = Date.now();
+        fs.writeFile(WEB_USAGE, JSON.stringify(r.json), () => {});
+      }, () => {}).finally(() => { usageNow = null; });
+      if (!usageCache) await usageNow; // nothing read ever: nothing to show before it
+      else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc' }));
       return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname() };
     },
@@ -1218,7 +1224,7 @@ async function web() {
     },
     'POST /api/warmup': () => new Promise((ok) => { // not spawnSync: the terminals keep streaming meanwhile
       require('child_process').execFile(process.execPath, [__filename, 'warmup'], { env: { ...process.env, NO_COLOR: '1' }, windowsHide: true },
-        (e, stdout) => { usageCache = null; ok({ out: String(stdout || e?.message || '').trim() }); });
+        (e, stdout) => { usageAt = 0; ok({ out: String(stdout || e?.message || '').trim() }); }); // read again on the page's next look
     }),
     // open a conversation's terminal: {id, acct?} continues one (its window here if it runs in one),
     // {dir, acct} starts one. acct is 1-based; the page proposes it like the island does.
