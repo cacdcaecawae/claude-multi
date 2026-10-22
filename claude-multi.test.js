@@ -342,3 +342,16 @@ console.log('tokens ok');
   assert.deepEqual(roots.map((r) => r.label), ['a@x', 'b@x（已移除）']);
   console.log('remove ok');
 }
+
+// the web page's key: from the link or the cookie the link left, nothing else opens it
+{
+  const { keyMatch, keyCookie } = require('./claude-multi');
+  const k = 'Zq3x_9-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
+  assert.ok(keyMatch(k, k));
+  for (const bad of [undefined, null, '', k.slice(1), k + 'x', k.replace('Z', 'z'), 'é'.repeat(k.length)]) assert.ok(!keyMatch(bad, k), String(bad));
+  assert.equal(keyCookie(`a=1; cm=${k}; b=2`), k);
+  assert.equal(keyCookie(`cm=${k}`), k);
+  assert.equal(keyCookie(`xcm=${k}`), undefined);   // another cookie's name ending in cm
+  assert.equal(keyCookie(undefined), undefined);
+  console.log('web key ok');
+}

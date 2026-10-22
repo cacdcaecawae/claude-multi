@@ -605,7 +605,7 @@ async function switchChat(id, n, now) {
   if (!s.pid) return console.log(`这个对话没在运行，用 claude-multi resume ${id} ${n} 打开即可。`);
   if (s.web) {
     const r = await fetch(`http://127.0.0.1:${WEB_PORT}/api/switch`, { method: 'POST', body: JSON.stringify({ id, acct: Number(n), now }),
-      headers: { 'tailscale-user-login': tailscaleMe()?.login ?? '', 'content-type': 'application/json', 'accept-encoding': 'identity' } });
+      headers: { cookie: `cm=${webKey()}`, 'content-type': 'application/json', 'accept-encoding': 'identity' } });
     const j = await r.json().catch(() => ({}));
     return console.log(r.ok ? `网页上的这个对话会换到账号 ${n} 接着` : `没换成：${j.err ?? r.status}`);
   }
@@ -618,7 +618,7 @@ async function switchChat(id, n, now) {
 async function attach(id) {
   const base = `http://127.0.0.1:${WEB_PORT}`;
   // on this computer: unpacked (the service gzips for the phone)
-  const headers = { 'tailscale-user-login': tailscaleMe()?.login ?? '', 'content-type': 'application/json', 'accept-encoding': 'identity' };
+  const headers = { cookie: `cm=${webKey()}`, 'content-type': 'application/json', 'accept-encoding': 'identity' };
   const post = async (p, body) => {
     const r = await fetch(base + p, { method: 'POST', headers, body: JSON.stringify(body) });
     const j = await r.json();
@@ -931,17 +931,29 @@ async function usage(args) {
 // tokens) and the conversations themselves, as real terminals: one started or continued from the page runs
 // in a pseudo-terminal here (node-pty) sized to the phone; one already open in a terminal window on this
 // computer is mirrored by console-bridge.ps1 (its screen, typing into it), so both sides use the same one.
-// Listens on 127.0.0.1 only. `tailscale serve` publishes it to the tailnet over HTTPS and names the visitor
-// in Tailscale-User-Login; only this machine's own Tailscale user gets in, as the page runs Claude here.
+// Listens on 127.0.0.1 only. The way in from outside is an SSH tunnel this service keeps up to the server
+// (TUNNEL.ssh, a host in ~/.ssh/config), whose nginx serves TUNNEL.url over HTTPS and passes it all to the same port
+// on its end. The page runs Claude here, so it opens only with the key (web-key): `claude-multi web-link` prints a
+// link with it, and a browser that opened the link keeps it as a cookie. `web-link new` makes a new key: every
+// browser that had the old one is out.
 const NOTES = path.join(ROOT, 'notes.jsonl');
 const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes running in the web service
 const WEB_PORT = 7788;
-const TAILSCALE = 'C:\\Program Files\\Tailscale\\tailscale.exe';
+const TUNNEL = { ssh: 'huawei', url: 'https://your-server:8443' };
+const WEB_KEY = path.join(ROOT, 'web-key');
 
-function tailscaleMe() {
-  const r = spawnSync(fs.existsSync(TAILSCALE) ? TAILSCALE : 'tailscale', ['status', '--json'], { encoding: 'utf8', windowsHide: true });
-  try { const j = JSON.parse(r.stdout); return { login: j.User[j.Self.UserID].LoginName, host: j.Self.DNSName.replace(/\.$/, '') }; } catch { return null; }
+function webKey(fresh = false) { // made on first use; in the user's own folder, as each account's login is
+  if (!fresh) try { const k = fs.readFileSync(WEB_KEY, 'utf8').trim(); if (k.length >= 32) return k; } catch {}
+  const k = require('crypto').randomBytes(32).toString('base64url');
+  fs.writeFileSync(WEB_KEY, k);
+  return k;
 }
+// true when given (from the link or the cookie) is the key; in constant time
+function keyMatch(given, key) {
+  const a = Buffer.from(String(given ?? '')), b = Buffer.from(key);
+  return a.length === b.length && require('crypto').timingSafeEqual(a, b);
+}
+const keyCookie = (cookie) => /(?:^|;\s*)cm=([^;]+)/.exec(cookie ?? '')?.[1];
 function readNotes(n = 30) {
   try {
     const fd = fs.openSync(NOTES, 'r'), size = fs.fstatSync(fd).size, t = slice(fd, Math.max(0, size - 65536), 65536);
@@ -1083,10 +1095,6 @@ function lead(items, lines, more = false) { // more: the record goes back furthe
 
 async function web() {
   const http = require('http'), pty = require('@lydell/node-pty');
-  // started with the island at sign-in, Tailscale may not be up yet (10-13: it quit, and the phone found nothing): wait
-  let me = tailscaleMe();
-  if (!me) console.log('读不到 Tailscale 的登录信息，等它就绪……（还没登录的话，先在这台电脑上登录 Tailscale）');
-  while (!me) { await sleep(5000); me = tailscaleMe(); }
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
   let usageCache = null, usageAt = 0, usageBusy = false, sessCache = null, sessAt = 0;
@@ -1182,7 +1190,7 @@ async function web() {
         usageState().then((r) => { usageCache = r.json; usageAt = Date.now(); }, () => {}).finally(() => { usageBusy = false; });
       }
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc' }));
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: me.login };
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname() };
     },
     'GET /api/tokens': () => tokenStats(),
     // asked every second while shown, mostly from where the last answer ended. By the open terminal's key: one
@@ -1286,11 +1294,17 @@ async function web() {
     const out = (code, body, type = 'application/json; charset=utf-8') =>
       reply(code, { 'content-type': type, 'cache-control': 'no-store' }, Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)));
     try {
-      if (req.headers['tailscale-user-login'] !== me.login) return out(403, { err: `只有 ${me.login} 能打开` });
-      const url = new URL(req.url, 'http://x');
-      if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
-      const icon = { '/favicon.ico': ['island.ico', 'image/x-icon'], '/icon-180.png': ['icon-180.png', 'image/png'] }[url.pathname]; // the island's
+      const url = new URL(req.url, 'http://x'), text = 'text/plain; charset=utf-8';
+      // the island's logo, to anyone: a phone adding the page to its home screen fetches it without the cookie
+      const icon = { '/favicon.ico': ['island.ico', 'image/x-icon'], '/icon-180.png': ['icon-180.png', 'image/png'] }[url.pathname];
       if (req.method === 'GET' && icon) { res.writeHead(200, { 'content-type': icon[1], 'cache-control': 'max-age=86400' }); return res.end(fs.readFileSync(path.join(ROOT, icon[0]))); }
+      if (req.method === 'GET' && url.pathname === '/' && url.searchParams.has('key')) { // the link: kept as a cookie, a year
+        if (!keyMatch(url.searchParams.get('key'), webKey())) return out(403, '这个链接的钥匙不对，或者已经换了新的。在电脑上运行 claude-multi web-link 拿新链接。', text);
+        res.writeHead(303, { location: '/', 'cache-control': 'no-store', 'set-cookie': `cm=${webKey()}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax` });
+        return res.end();
+      }
+      if (!keyMatch(keyCookie(req.headers.cookie), webKey())) return out(403, '要用链接打开：在电脑上运行 claude-multi web-link。', text);
+      if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
       // the terminal's files, from our node_modules: from the CDN abroad they took 7-8 s, and the page waits for
       // them. Kept a year: the page asks with the version, ?6.0.0, so a new one is a new address.
       const lib = /^\/lib\/(@xterm\/[\w-]+\/(?:lib|css)\/[\w.-]+\.(js|css))$/.exec(url.pathname);
@@ -1329,7 +1343,7 @@ async function web() {
       if (req.method === 'POST') {
         // only from our own page: JSON from the same origin (another site's page can't send that cross-origin)
         if (!/^application\/json/.test(req.headers['content-type'] ?? '')) return out(415, { err: '只收 JSON' });
-        if (req.headers.origin && new URL(req.headers.origin).host !== me.host) return out(403, { err: '来源不对' });
+        if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return out(403, { err: '来源不对' });
         let raw = ''; for await (const ch of req) { raw += ch; if (raw.length > 1 << 20) return out(413, { err: '太大' }); }
         body = JSON.parse(raw || '{}');
       }
@@ -1337,7 +1351,19 @@ async function web() {
     } catch (e) { out(500, { err: e.message }); }
   });
   server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
-  server.listen(WEB_PORT, '127.0.0.1', () => saveTerms() || console.log(`手机页面：https://${me.host}/  （只有 ${me.login} 能打开）`));
+  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); console.log(`网页：${TUNNEL.url}/  （第一次用 claude-multi web-link 给的链接打开）`); });
+  // the way in from outside, kept up: dialed again after a drop, at once if it had been up a while, else waiting
+  // longer each time (the server or the network down). The server drops a dead one within a minute
+  // (ClientAliveInterval), freeing its port for the next.
+  // ponytail: a tunnel left by a service killed outright keeps working for the next service, whose own waits
+  let tun = null, wait = 5000;
+  process.on('exit', () => tun?.kill());
+  function tunnel() {
+    const at = Date.now();
+    tun = require('child_process').spawn('ssh', ['-N', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=15',
+      '-o', 'ServerAliveCountMax=3', '-R', `127.0.0.1:${WEB_PORT}:127.0.0.1:${WEB_PORT}`, TUNNEL.ssh], { windowsHide: true, stdio: 'ignore' });
+    tun.on('exit', () => { wait = Date.now() - at > 60000 ? 5000 : Math.min(wait * 2, 300000); setTimeout(tunnel, wait); });
+  }
 }
 
 // Claude Code's status line: the account (bold, in its own color), model and effort, the conversation's folder
@@ -1485,7 +1511,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { pickOpen, keyMatch, keyCookie, childEnv, helpersBusy, statusline, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -1507,6 +1533,7 @@ if (require.main === module) {
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'remove') remove(Number(process.argv[3]));
   else if (cmd === 'web') web();
+  else if (cmd === 'web-link') console.log(`${TUNNEL.url}/?key=${webKey(process.argv[3] === 'new')}`); // new: the old key's browsers are out
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));
   else if (cmd === 'wt-bind') wtBind();
   else if (cmd === 'renew') { // renew N M-D: the day account N renews (or ends) as the store shows it; renew N auto: guessed again
