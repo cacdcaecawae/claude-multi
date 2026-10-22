@@ -123,6 +123,8 @@ public static class Bridge {
         while (j < s.Length && !(s[j] >= '@' && s[j] <= '~')) j++;
         string seq = s.Substring(i + 2, Math.Min(j, s.Length - 1) - i - 1);
         i = j;
+        // a paste's marks go through as typed: Claude takes what's between them as one paste, new lines and all
+        if (seq == "200~" || seq == "201~") { foreach (char x in "\x1b[" + seq) Key(k, x == '\x1b' ? (ushort)0x1B : (ushort)0, x, 0); continue; }
         uint mod = seq.Contains(";2") ? SHIFT : seq.Contains(";5") ? CTRL : seq.Contains(";3") ? ALT : 0;
         char fin = seq.Length > 0 ? seq[seq.Length - 1] : ' ';
         ushort vk = fin == 'A' ? (ushort)0x26 : fin == 'B' ? (ushort)0x28 : fin == 'C' ? (ushort)0x27 : fin == 'D' ? (ushort)0x25

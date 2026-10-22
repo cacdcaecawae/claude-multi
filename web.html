@@ -349,9 +349,10 @@ $('#line').addEventListener('input', goMode);
 $('#go').onclick = () => {
   if ($('#go').classList.contains('stop')) return input('\x1b');
   const v = $('#line').value.trim(); if (!v) return;
-  input(v.replace(/\n/g, '\r') + '\r'); $('#line').value = '';
-  // each line goes to Claude as its own message (Enter sends), so each shows as one
-  if (view === 'hist') { for (const l of v.split('\n')) if (l.trim()) sent.push({ text: l.trim(), at: Date.now() }); drawLive(true); }
+  // one message: the text as a paste (its new lines stay in it), then Enter on its own. Typed in one piece with its
+  // Enter, a long text was taken for a paste, the Enter with it for a new line, and the message sat there unsent.
+  input(`\x1b[200~${v.replace(/\n/g, '\r')}\x1b[201~`); input('\r'); $('#line').value = '';
+  if (view === 'hist') { sent.push({ text: v, at: Date.now() }); drawLive(true); }
   goMode();
 };
 $('#line').onkeydown = (e) => {
@@ -398,6 +399,9 @@ function addItems(box, items) {
 async function histGet(q) { // by the terminal's key once it's open (a new conversation has no id), else the id
   const r = await (await fetch(`/api/history?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(histId ?? '')}${q}`)).json();
   if (r.err) throw new Error(r.err);
+  // a long paste is recorded as Claude Code hands it to the model, in <pasted_content id="N"> … </pasted_content id="N">:
+  // shown without them, and so your message sent here is found in the record (not shown twice)
+  for (const m of r.items ?? []) if (m.role === 'user') m.text = m.text.replace(/<pasted_content id="[^"]*">\n?([\s\S]*?)\n?<\/pasted_content id="[^"]*">/g, '$1').trim();
   return r;
 }
 async function loadHist() {
@@ -413,7 +417,8 @@ async function loadHist() {
     if (r.items.length) {
       const atEnd = first || el.scrollHeight - el.scrollTop - el.clientHeight < 80;
       addItems($('#hNew'), r.items);
-      for (const m of r.items) { const i = m.role === 'user' ? sent.findIndex((s) => s.text === m.text) : -1; if (i >= 0) sent.splice(i, 1); }
+      const flat = (s) => s.replace(/\s+/g, ' '); // a paste's new lines may come back as \r\n
+      for (const m of r.items) { const i = m.role === 'user' ? sent.findIndex((s) => flat(s.text) === flat(m.text)) : -1; if (i >= 0) sent.splice(i, 1); }
       if (atEnd) el.scrollTop = el.scrollHeight;
     }
     drawLive(first);
