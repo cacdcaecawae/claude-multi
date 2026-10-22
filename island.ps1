@@ -595,12 +595,35 @@ function Render {
         "<TextBlock Text='$(MDay $a.sub.renew)$(if ($a.sub.canceled) { '到期' } else { '续费' })' FontSize='11' Foreground='$fg' VerticalAlignment='Center'/></StackPanel>"
     }
     $card = X ("<Border $ns Background='$(if ($rec) { '#17FFFFFF' } else { '#0AFFFFFF' })' CornerRadius='14' Padding='14,11,14,12' Margin='0,0,0,6'><StackPanel>" +
-      "<DockPanel>$small<TextBlock DockPanel.Dock='Right' Text='$right' FontSize='12' Foreground='$rightFg' VerticalAlignment='Center'/>$head$renew</DockPanel>" +
+      "<DockPanel>$small<TextBlock DockPanel.Dock='Right' Text='$right' FontSize='12' Foreground='$rightFg' VerticalAlignment='Center'/>" +
+      "<Button x:Name='Del' DockPanel.Dock='Right' Content='&#xE74D;' ToolTip='移除这个账号' Opacity='0' Margin='0,-6,4,-6'/>" +
+      "<Button x:Name='Sure' DockPanel.Dock='Right' Visibility='Collapsed' Cursor='Hand' VerticalAlignment='Center' Margin='0,0,4,0' ToolTip='从列表里拿掉，文件夹（连同它的对话）放进回收站；Token 统计照常保留'>" +
+      "<Button.Template><ControlTemplate TargetType='Button'><Border Background='#FF453A' CornerRadius='10' Padding='11,3'><ContentPresenter/></Border></ControlTemplate></Button.Template>" +
+      "<TextBlock Text='确认移除' FontSize='12' FontWeight='SemiBold' Foreground='White'/></Button>$head$renew</DockPanel>" +
       "$($lines -join '')$big</StackPanel></Border>")
     $go = $card.FindName('Go')
     $go.Style = $win.FindResource($(if ($rec) { 'Primary' } else { 'Icon' }))
     $go.Tag = $i + 1
     $go.Add_Click({ param($s) Show-Projects $s.Tag })
+    # remove: the trash, shown while the pointer is on the card, asks once more (red 确认移除); leaving the card takes it back
+    $del = $card.FindName('Del'); $sure = $card.FindName('Sure')
+    $del.Style = $win.FindResource('Icon')
+    $del.Tag = $sure
+    $del.Add_Click({ param($s) $s.Tag.Visibility = 'Visible' })
+    $sure.Tag = @{ n = $i + 1; card = $card }
+    $sure.Add_Click({
+      param($s)
+      $Rows.Children.Remove($s.Tag.card) # gone at once: the removal and the refresh after it take a few seconds; a failure brings it back
+      Run-Node "remove $($s.Tag.n)" {
+        param($out)
+        if ("$out" -notmatch '文件夹在回收站里') { Add-Alert @{ kind = 'ask'; info = $true; project = '移除账号'; msg = ("$out".Trim(), '移除时出错了')[-not "$out".Trim()] } }
+        $script:limitTold = @{} # kept by account number, which moved
+        Refresh
+      }
+    })
+    $card.Tag = $del
+    $card.Add_MouseEnter({ param($s) $s.Tag.Opacity = 1 })
+    $card.Add_MouseLeave({ param($s) $s.Tag.Opacity = 0; $s.Tag.Tag.Visibility = 'Collapsed' })
     [void]$Rows.Children.Add($card)
   }
 }

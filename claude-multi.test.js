@@ -321,3 +321,24 @@ console.log('tokens ok');
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('switch ok');
 })();
+// removing an account: the links in its folder go, never what they point to; its tokens stay counted
+{
+  const { unlinkAll, tokenRoots } = require('./claude-multi');
+  const path = require('path'), d = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cm-rm-'));
+  const shared = path.join(d, 'shared'), acct = path.join(d, 'acct'), f = path.join(acct, 'projects', 'f');
+  fs.mkdirSync(path.join(shared, 'skills'), { recursive: true }); fs.mkdirSync(f, { recursive: true });
+  fs.writeFileSync(path.join(shared, 'skills', 'x.md'), 'x'); fs.writeFileSync(path.join(shared, 'settings.json'), '{}');
+  fs.writeFileSync(path.join(f, 'a.jsonl'), '');
+  fs.symlinkSync(path.join(shared, 'skills'), path.join(acct, 'skills'), 'dir');
+  fs.symlinkSync(path.join(shared, 'skills'), path.join(f, 'memory'), 'junction');
+  fs.symlinkSync(path.join(shared, 'settings.json'), path.join(acct, 'settings.json'), 'file');
+  unlinkAll(acct);
+  assert.deepEqual(fs.readdirSync(acct), ['projects']);
+  assert.deepEqual(fs.readdirSync(f), ['a.jsonl']);                                   // its own files left for the Recycle Bin
+  assert.equal(fs.readFileSync(path.join(shared, 'skills', 'x.md'), 'utf8'), 'x');   // what the links pointed to, untouched
+  assert.ok(fs.existsSync(path.join(shared, 'settings.json')));
+  fs.rmSync(d, { recursive: true, force: true });
+  const roots = tokenRoots({ profiles: [{ id: 'a', label: 'a@x', configDir: 'C:\\A' }], removed: [{ id: 'b', label: 'b@x', configDir: 'C:\\B' }] });
+  assert.deepEqual(roots.map((r) => r.label), ['a@x', 'b@x（已移除）']);
+  console.log('remove ok');
+}

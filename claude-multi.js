@@ -687,14 +687,43 @@ function del(id) {
   const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
   const paths = reg.profiles.flatMap((p) => ls(path.join(p.configDir, 'projects')).flatMap((folder) =>
     [`${id}.jsonl`, id].map((n) => path.join(p.configDir, 'projects', folder, n)))).filter((f) => fs.existsSync(f));
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Add-Type -AssemblyName Microsoft.VisualBasic; '
-    + 'foreach ($p in ($env:CM_DEL | ConvertFrom-Json)) { if (Test-Path -PathType Container $p) '
-    + '{ [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, "OnlyErrorDialogs", "SendToRecycleBin") } '
-    + 'else { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, "OnlyErrorDialogs", "SendToRecycleBin") } }'],
-  { env: { ...process.env, CM_DEL: JSON.stringify(paths) }, windowsHide: true, encoding: 'utf8' });
+  const r = recycle(paths);
   if (r.status !== 0 || paths.some((f) => fs.existsSync(f))) { console.log(`删除失败：${(r.stderr || '').trim().split('\n')[0]}`); process.exit(1); }
   log('session_deleted', { session_id: id, files: paths.length });
   console.log(`已删除「${s.title}」，可以在回收站里找回。`);
+}
+const recycle = (paths) => spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Add-Type -AssemblyName Microsoft.VisualBasic; '
+  + 'foreach ($p in ($env:CM_DEL | ConvertFrom-Json)) { if (Test-Path -PathType Container $p) '
+  + '{ [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, "OnlyErrorDialogs", "SendToRecycleBin") } '
+  + 'else { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, "OnlyErrorDialogs", "SendToRecycleBin") } }'],
+{ env: { ...process.env, CM_DEL: JSON.stringify(paths) }, windowsHide: true, encoding: 'utf8' });
+// Every link (symlink, junction) under d removed, never what it points to: an account's settings, skills, plugins and
+// notes are links to ~/.claude's, which a folder deleted for good (one too big for the Recycle Bin) mustn't reach through.
+function unlinkAll(d) {
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const f = path.join(d, e.name);
+    if (e.isSymbolicLink()) fs.unlinkSync(f); else if (e.isDirectory()) unlinkAll(f);
+  }
+}
+
+// remove N: account N leaves the list (not while a conversation runs on it) and its folder goes to the Recycle Bin, its
+// conversations with it. Its notes are merged into the shared copy first, and its tokens stay counted: the registry
+// keeps it under removed for that alone.
+function remove(n) {
+  const reg = load(), p = reg.profiles[n - 1];
+  if (!p) { console.log('用法：claude-multi remove <账号编号>'); process.exit(1); }
+  if (listSessions(reg).some((s) => s.acct === n - 1 && s.pid)) { console.log('这个账号上有对话正在运行，先关掉再移除。'); process.exit(1); }
+  tokenStats(); shareMemory(); // while it's still listed
+  update((r) => {
+    r.profiles = r.profiles.filter((q) => q.id !== p.id);
+    (r.removed ??= []).push({ id: p.id, label: p.label, configDir: p.configDir });
+    if (r.active === p.id) r.active = r.profiles[0]?.id ?? null;
+  });
+  log('profile_removed', { profile_id: p.id });
+  try { unlinkAll(p.configDir); } catch {}
+  const r = recycle([p.configDir]);
+  if (fs.existsSync(p.configDir)) console.log(`已移除账号 ${p.label}，但文件夹没能放进回收站（${(r.stderr || '').trim().split('\n')[0] || '可能有程序开着里面的文件'}），可以之后手动删：${p.configDir}`);
+  else console.log(`已移除账号 ${p.label}，文件夹在回收站里。`);
 }
 
 // True while a helper the conversation started is still at work, read from its transcript's tail. With
@@ -1322,7 +1351,8 @@ async function web() {
 // A reply is [key, day, input, output, 5-min cache writes, 1-h cache writes, cache reads, model, fast].
 // tokens-cache.json keeps each file's replies and how far it was read: a run reads only what was appended.
 function tokenRoots(reg = load()) {
-  return reg.profiles.map((p) => ({ id: p.id, label: p.label, dir: path.join(p.configDir, 'projects') }));
+  return [...reg.profiles, ...(reg.removed ?? []).map((p) => ({ ...p, label: `${p.label}（已移除）` }))]
+    .map((p) => ({ id: p.id, label: p.label, dir: path.join(p.configDir, 'projects') }));
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
 // input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5).
@@ -1455,7 +1485,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { pickOpen, childEnv, helpersBusy, statusline, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -1475,6 +1505,7 @@ if (require.main === module) {
   else if (cmd === 'swap') switchChat(process.argv[3], Number(process.argv[4]), process.argv.includes('--now'));
   else if (cmd === 'attach') attach(process.argv[3]);
   else if (cmd === 'delete') del(process.argv[3]);
+  else if (cmd === 'remove') remove(Number(process.argv[3]));
   else if (cmd === 'web') web();
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));
   else if (cmd === 'wt-bind') wtBind();
