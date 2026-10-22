@@ -146,6 +146,9 @@ const SESSION_ENV = ['CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_CODE_E
 function childEnv(dir) {
   const env = { ...process.env, CLAUDE_CONFIG_DIR: dir };
   for (const k of SESSION_ENV) delete env[k];
+  // our plugin (plugin\): the cache's countdown and the accounts above the prompt, a turn's cost on its closing line
+  const plug = path.join(ROOT, 'plugin');
+  if (!(env.CLAUDE_CODE_PLUGIN_DIRS ?? '').split(path.delimiter).includes(plug)) env.CLAUDE_CODE_PLUGIN_DIRS = [env.CLAUDE_CODE_PLUGIN_DIRS, plug].filter(Boolean).join(path.delimiter);
   for (const k of AUTH_ENV) {
     if (k in env) { delete env[k]; console.error(`已忽略环境变量 ${k}（它会覆盖账号身份）`); }
   }

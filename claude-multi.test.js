@@ -28,6 +28,11 @@ assert.equal(env.CLAUDE_PID, undefined);
 assert.equal(env.NO_COLOR, undefined);
 assert.equal(env.CLAUDE_CODE_GIT_BASH_PATH, 'x');
 assert.equal(env.CLAUDE_CONFIG_DIR, 'D:/acct');
+const plug = require('path').join(require('os').homedir(), '.claude-multi', 'plugin');
+assert.equal(env.CLAUDE_CODE_PLUGIN_DIRS, plug);              // our plugin, in every Claude we start
+process.env.CLAUDE_CODE_PLUGIN_DIRS = `D:\\mine${require('path').delimiter}${plug}`;
+assert.equal(childEnv('D:/acct').CLAUDE_CODE_PLUGIN_DIRS, process.env.CLAUDE_CODE_PLUGIN_DIRS); // yours kept, ours not twice
+delete process.env.CLAUDE_CODE_PLUGIN_DIRS;
 console.log('env ok');
 
 // "Done" waits for the helpers: a teammate is busy from its spawn (and each SendMessage) until it goes idle,
