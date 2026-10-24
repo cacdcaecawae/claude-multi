@@ -226,6 +226,10 @@ function newProfile() {
     configDir: dir, createdAt: now(), lastUsedAt: null };
   update((reg) => { reg.profiles.push(p); });
   log('profile_registered', { profile_id: id, account: p.email, plan: p.subscriptionType });
+  try { // the island reads the accounts again at once (its ＋ 添加账号 opened this)
+    fs.mkdirSync(INBOX, { recursive: true });
+    fs.writeFileSync(path.join(INBOX, `${Date.now()}-${process.pid}.json`), JSON.stringify({ kind: 'accounts' }));
+  } catch {}
   console.log(`已保存账号：${label(p)}\n当前默认账号未改变。`);
   return p;
 }

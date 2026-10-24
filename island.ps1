@@ -626,6 +626,11 @@ function Render {
     $card.Add_MouseLeave({ param($s) $s.Tag.Opacity = 0; $s.Tag.Tag.Visibility = 'Collapsed' })
     [void]$Rows.Children.Add($card)
   }
+  # last: a new account, logged in in a terminal window (claude-multi new); the island reads the accounts again once it's saved
+  $add = New-Object Windows.Controls.Button
+  $add.Style = $win.FindResource('Text'); $add.Content = '＋ 添加账号'; $add.HorizontalAlignment = 'Left'; $add.Margin = '4,0,0,0'
+  $add.Add_Click({ Open-Terminal $env:USERPROFILE 'new'; Collapse })
+  [void]$Rows.Children.Add($add)
 }
 
 # --- launching ----------------------------------------------------------------------------------
@@ -835,6 +840,7 @@ function Check-Inbox {
     $age = (Get-Date) - [IO.File]::GetLastWriteTime($f)
     try { [IO.File]::Delete($f) } catch { continue }
     if ($n -and $n.kind -eq 'read') { Drop-Read $n.id; continue } # read on the web page
+    if ($n -and $n.kind -eq 'accounts') { Refresh; continue } # claude-multi new saved one
     if ($n -and $n.kind -eq 'front') { [Native.OnTop]::Check($true); if ($script:hidden) { Slide $false }; $script:away = 0; continue } # started again
     if ($n -and $n.kind -eq 'chats' -and $n.tokens) { Open-Tokens; continue } # claude-multi chats tokens
     if ($n -and $n.kind -eq 'chats') { $script:folder = if ($n.arrange) { '*' } else { '' }; $script:arranging = [bool]$n.arrange; Open-Chats; Load-Chats; continue } # claude-multi chats
