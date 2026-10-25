@@ -845,7 +845,7 @@ async function usageState(reg = load()) {
   const cols = WINDOWS.filter(([k]) => !k.startsWith('seven_day_') || ok.some((r) => r.u[k]?.utilization));
   const json = { rec: rec?.i ?? null, open: open.length > 0,
     ready: !open.length && rec ? until(readyAt(rec.u)) : null,
-    accounts: reg.profiles.map((p, i) => ({ label: p.label, err: res[i].err ?? null,
+    accounts: reg.profiles.map((p, i) => ({ label: p.label, dir: p.configDir, err: res[i].err ?? null,
       runway: res[i].u ? Math.round(runway(res[i].u) * 10) / 10 : null,
       windows: cols.filter(([k]) => res[i].u?.[k]).map(([k]) => ({ k, pct: Math.round(res[i].u[k].utilization),
         reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })), sub: subscription(p, states[i]),

@@ -596,6 +596,7 @@ function Render {
     }
     $card = X ("<Border $ns Background='$(if ($rec) { '#17FFFFFF' } else { '#0AFFFFFF' })' CornerRadius='14' Padding='14,11,14,12' Margin='0,0,0,6'><StackPanel>" +
       "<DockPanel>$small<TextBlock DockPanel.Dock='Right' Text='$right' FontSize='12' Foreground='$rightFg' VerticalAlignment='Center'/>" +
+      "<Button x:Name='Dir' DockPanel.Dock='Right' Content='&#xED25;' ToolTip='打开这个账号的文件夹' Margin='0,-6,2,-6'/>" +
       "<Button x:Name='Del' DockPanel.Dock='Right' Content='&#xE74D;' ToolTip='移除这个账号' Opacity='0' Margin='0,-6,4,-6'/>" +
       "<Button x:Name='Sure' DockPanel.Dock='Right' Visibility='Collapsed' Cursor='Hand' VerticalAlignment='Center' Margin='0,0,4,0' ToolTip='从列表里拿掉，文件夹（连同它的对话）放进回收站；Token 统计照常保留'>" +
       "<Button.Template><ControlTemplate TargetType='Button'><Border Background='#FF453A' CornerRadius='10' Padding='11,3'><ContentPresenter/></Border></ControlTemplate></Button.Template>" +
@@ -605,6 +606,9 @@ function Render {
     $go.Style = $win.FindResource($(if ($rec) { 'Primary' } else { 'Icon' }))
     $go.Tag = $i + 1
     $go.Add_Click({ param($s) Show-Projects $s.Tag })
+    # the account's own folder (accounts\acct-…: its login, settings links, conversations), in Explorer
+    $folderBtn = $card.FindName('Dir'); $folderBtn.Style = $win.FindResource('Icon'); $folderBtn.Tag = $a.dir
+    $folderBtn.Add_Click({ param($s) Start-Process explorer.exe "`"$($s.Tag)`"" })
     # remove: the trash, shown while the pointer is on the card, asks once more (red 确认移除); leaving the card takes it back
     $del = $card.FindName('Del'); $sure = $card.FindName('Sure')
     $del.Style = $win.FindResource('Icon')
