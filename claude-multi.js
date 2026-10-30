@@ -1050,6 +1050,12 @@ function unreadNotes(list, notes = readNotes(60), marks = readMarks()) {
 // Claude's own bookkeeping (reminders, background-task notices) are left out. Read in pieces, as byte ranges of
 // the file that start at a line: no range given, the last 16 MB; {end}, the 16 MB before end (scrolling back);
 // {from}, from there to the end (the newest piece, read again as it grows). start comes back for the next ask.
+// What you said on a record line, as parts (text, image): a message, or one sent while Claude was at work, taken in
+// later (a queued command, its prompt plain text, or parts when it carries a picture).
+function said(j) {
+  const c = j.type === 'attachment' ? j.attachment?.prompt : j.message?.content;
+  return typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : [];
+}
 function history(file, { from, end } = {}) {
   const fd = fs.openSync(file, 'r'), size = fs.fstatSync(fd).size;
   let a, b;
@@ -1076,13 +1082,13 @@ function history(file, { from, end } = {}) {
     try { j = JSON.parse(l); } catch { continue; }
     if (j.isMeta || j.isSidechain) continue;
     const at = Date.parse(j.timestamp) || 0, c = j.message?.content;
-    if (j.type === 'attachment') { // what you sent while Claude was at work, where it took it in
-      if (j.attachment?.type === 'queued_command' && j.attachment.origin?.kind === 'human') add('user', j.attachment.prompt, at);
-    } else if (j.type === 'system') { // Claude's turn over: how long it took, in ms
+    const queued = j.attachment?.type === 'queued_command' && j.attachment.origin?.kind === 'human'; // sent while Claude was at work
+    if (j.type === 'attachment' && !queued) continue;
+    if (j.type === 'system') { // Claude's turn over: how long it took, in ms
       if (j.subtype === 'turn_duration' && j.durationMs > 0) add('done', String(j.durationMs), at);
-    } else if (j.type === 'user') {
+    } else if (j.type === 'user' || queued) {
       if (j.isCompactSummary) { add('note', '更早的内容已压缩', at); continue; }
-      const parts = typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : [];
+      const parts = said(j);
       // your pictures (pasted, dragged in, sent from the page) above what you wrote: "line.k", the line's place and
       // which picture in it. The text has an [Image #N] for each, the page leaves those out.
       parts.filter((p) => p.type === 'image').forEach((p, k) => add('img', `${pos}.${k}`, at));
@@ -1116,7 +1122,7 @@ function recordImage(file, pos, k) {
       nl = b.subarray(0, got).indexOf(10); parts.push(b.subarray(0, nl < 0 ? got : nl)); at += got;
     }
   } finally { fs.closeSync(fd); }
-  const p = JSON.parse(Buffer.concat(parts).toString('utf8')).message?.content?.filter?.((x) => x.type === 'image')[k];
+  const p = said(JSON.parse(Buffer.concat(parts).toString('utf8'))).filter((x) => x.type === 'image')[k];
   if (!/^image\/(png|jpeg|gif|webp)$/.test(p?.source?.media_type ?? '')) throw new Error('没有这张图片'); // never served as anything else
   return { type: p.source.media_type, data: Buffer.from(p.source.data, 'base64') };
 }

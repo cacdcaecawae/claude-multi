@@ -1406,21 +1406,6 @@ focusGroup(makeGroup());
 drawSide();
 load();
 setInterval(() => { if (document.visibilityState === 'visible') load(); }, 5000);
-// ponytail: temporary probe for the gap under the page on an iOS home-screen app: the sizes the phone really has, in a
-// box tapped away. Remove once the gap is gone.
-if (document.documentElement.classList.contains('app')) setTimeout(() => {
-  const len = (h) => { const d = document.createElement('div'); d.style.cssText = `position:absolute;visibility:hidden;height:${h}`; document.body.append(d); const v = d.offsetHeight; d.remove(); return v; };
-  const bottom = (s) => Math.round(document.querySelector(s)?.getBoundingClientRect().bottom ?? -1);
-  const p = document.createElement('div');
-  p.style.cssText = 'position:fixed;z-index:99;left:8px;top:calc(env(safe-area-inset-top) + 50px);background:rgba(0,0,0,.8);color:#fff;font:12px/1.5 monospace;padding:8px 10px;border-radius:8px;white-space:pre';
-  p.textContent = [`standalone ${navigator.standalone} dm ${matchMedia('(display-mode: standalone)').matches}`,
-    `screen ${screen.width}x${screen.height} inner ${innerWidth}x${innerHeight}`,
-    `vv ${Math.round(visualViewport?.height ?? -1)} client ${document.documentElement.clientHeight}`,
-    `vh ${len('100vh')} lvh ${len('100lvh')} dvh ${len('100dvh')} svh ${len('100svh')}`,
-    `inset top ${len('env(safe-area-inset-top)')} bottom ${len('env(safe-area-inset-bottom)')}`,
-    `html ${bottom('html')} body ${bottom('body')} app ${bottom('#app')} act ${bottom('#act')}`, '（点一下关掉）'].join('\n');
-  p.onclick = () => p.remove(); document.body.append(p);
-}, 1500);
 </script>
 </body>
 </html>

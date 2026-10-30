@@ -411,6 +411,13 @@ console.log('tokens ok');
   assert.deepEqual(recordImage(f, ...ref(items[1])), { type: 'image/png', data: png });
   assert.equal(recordImage(f, ...ref(items[2])).type, 'image/jpeg');
   assert.throws(() => recordImage(f, ref(items[2])[0], 2));                    // no third one
+  // one sent while Claude was at work, with a picture: its prompt is parts, not text (was shown "[object Object],...")
+  const q = JSON.stringify({ type: 'attachment', timestamp: ts, attachment: { type: 'queued_command', origin: { kind: 'human' },
+    prompt: [{ type: 'text', text: '[Image #3]这个也是 bug' }, pic('image/png', png.toString('base64'))] } });
+  fs.appendFileSync(f, q + '\n');
+  const more = history(f).items.slice(4);
+  assert.deepEqual(more.map((m) => [m.role, m.role === 'user' ? m.text : '']), [['img', ''], ['user', '[Image #3]这个也是 bug']]);
+  assert.deepEqual(recordImage(f, ...ref(more[0])), { type: 'image/png', data: png });
   const up = path.join(d, 'up'), old = path.join(up, 'old.png');
   fs.mkdirSync(up); fs.writeFileSync(old, 'x'); fs.utimesSync(old, new Date(0), new Date(0));
   const saved = saveUpload(png, 'png', up);
