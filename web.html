@@ -145,7 +145,10 @@ look(); LOOK.addEventListener('change', look);
   #editor { flex: 1; min-width: 0; display: flex; background: var(--bg); }
   .group { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; position: relative; }
   .sash + .group { border-left: 1px solid var(--split); } /* groups side by side: a line between them */
-  .group.drop::after { content: ''; position: absolute; inset: 35px 0 0; background: rgba(0,120,212,.14); pointer-events: none; z-index: 5; }
+  .group[data-drop]::after { content: ''; position: absolute; top: 35px; bottom: 0; left: 0; right: 0; background: rgba(0,120,212,.14);
+    border: 2px solid var(--accent); pointer-events: none; z-index: 5; transition: left .08s, right .08s; }
+  .group[data-drop=l]::after { right: 50%; } /* docks on the left */
+  .group[data-drop=r]::after { left: 50%; }
   .tabs { height: 35px; flex: none; display: flex; background: var(--bar); box-shadow: inset 0 -1px var(--border); }
   .strip { flex: 1; min-width: 0; display: flex; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
   .strip::-webkit-scrollbar { display: none; }
@@ -261,6 +264,14 @@ look(); LOOK.addEventListener('change', look);
   #status .remote svg { width: 14px; height: 14px; }
   #status .grow { padding: 0; }
   #status i { width: 8px; height: 8px; border-radius: 4px; }
+  #status { overflow: hidden; }
+  #here { display: flex; padding: 0; }
+  #here > span { display: flex; align-items: center; gap: 5px; padding: 0 9px; white-space: nowrap; }
+  #here b { font-weight: 600; }
+  #here .where { color: #fff; font-weight: 600; } /* where it runs, bright: green a window on the computer, purple the web service */
+  #here .where.pc { background: #16825d; }
+  #here .where.pty { background: #8250df; }
+  #here .ok { color: var(--green); } #here .warn { color: var(--orange); } #here .bad { color: var(--red); }
   #sAcct:hover { background: var(--tint); }
 
   /* a phone: one group; the side bar over it under the tab strip, the activity bar at the bottom */
@@ -343,7 +354,7 @@ look(); LOOK.addEventListener('change', look);
   <main id="editor"></main>
 </div>
 <footer id="status"><span class="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span id="host">…</span></span>
-  <span id="conn"></span><span class="grow"></span><button id="sAcct" title="看额度"></button></footer>
+  <span id="conn"></span><span class="grow"></span><span id="here"></span><button id="sAcct" title="看额度"></button></footer>
 <div class="sheet" id="sheet"><div class="in" id="sheetIn"></div></div>
 <div class="toast" id="toast"></div>
 
@@ -423,7 +434,7 @@ async function load(fresh) {
   if (!restored) restore();
   for (const c of allConvs()) c.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
-  drawStatus();
+  drawStatus(); drawHere();
 }
 function drawSide() {
   if (NARROW.matches && !allConvs().length) sideOn = true; // a phone with nothing open: the list
@@ -441,10 +452,31 @@ function drawStatus() {
   $('#conn').innerHTML = (n ? `${n} 个在运行` : '') + (b ? ` · <span class="spin"></span> ${b} 个在回复` : '');
   $('#sAcct').innerHTML = u.open ? `<i style="background:${ACCT[u.rec % 4]}"></i>推荐 账号 ${u.rec + 1}${w ? ` · 5 小时已用 ${w.pct}%` : ''}` : `都到上限了，${esc(u.ready)} 后恢复`;
 }
+// The conversation you're looking at, in the status bar: where it runs, its account (and that one's 5-hour use), model and
+// effort and context used (its terminal's status line), how long the prompt cache lives on (an hour from the last
+// request; past it the next message writes the conversation to the cache again, at more quota).
+const HOUR = 3600000;
+function drawHere() {
+  const c = focusG?.active, s = c?.id ? state?.sessions.find((x) => x.id === c.id) : null, el = $('#here');
+  if (!c || !state) return void (el.innerHTML = '');
+  const tone = (p) => (p >= 80 ? 'bad' : p >= 50 ? 'warn' : 'ok'), w = c.where(), line = s?.line;
+  const a = state.usage.accounts?.[c.acct - 1], five = a?.windows?.find((x) => x.k === 'five_hour')?.pct;
+  const left = s?.req ? s.req + HOUR - Date.now() : null, min = Math.ceil(left / 60000);
+  el.innerHTML = [
+    w && `<span class="where ${w}" title="这个对话的 Claude 在哪里运行">${w === 'pc' ? '电脑窗口' : '网页服务'}</span>`,
+    c.acct && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % 4]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
+    line?.model && `<span title="模型 · 思考强度">${esc([line.model, line.effort].filter(Boolean).join(' · '))}</span>`,
+    line?.ctx != null && `<span title="上下文已用">上下文 <b class="${tone(line.ctx)}">${Math.round(line.ctx)}%</b></span>`,
+    left != null && (left > 0 || w) && `<span title="提示缓存在最后一次请求后留 1 小时；过期后，下一条消息要把整段对话重新写进缓存，多用额度">${left > 0
+      ? `缓存还剩 <b class="${min <= 5 ? 'bad' : min <= 15 ? 'warn' : 'ok'}">${min} 分</b>` : '<b class="bad">缓存已过期</b>'}</span>`,
+  ].filter(Boolean).join('');
+}
+setInterval(drawHere, 30000);
 function markRows() { // the side bar's rows: which are open in a tab, which one you're looking at
   const sel = focusG?.active?.id;
   document.querySelectorAll('#view [data-open]').forEach((r) => { r.classList.toggle('sel', r.dataset.open === sel); r.classList.toggle('open', !!convOf(r.dataset.open)); });
   document.title = focusG?.active ? `${focusG.active.title} — Claude 多账号` : 'Claude 多账号';
+  drawHere();
 }
 
 function renderChats() {
@@ -593,7 +625,7 @@ sheetOff();
 
 // --- groups and tabs. Only each group's shown tab is live (its terminal's stream, its record read every second);
 // a tab put behind another sleeps, and wakes up where it was.
-function makeGroup(after) {
+function makeGroup(ref, left) { // after ref (or before it: left), or last
   const g = { tabs: [], active: null, size: 1, el: document.createElement('div') };
   g.el.className = 'group blank';
   g.el.innerHTML = `<div class="tabs"><button class="ico list" title="对话列表">${svg(I.list)}</button><div class="strip"></div>
@@ -617,23 +649,32 @@ function makeGroup(after) {
     const t = e.target.closest('[data-i]');
     if (t) { drag = { conv: g.tabs[+t.dataset.i] }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); }
   };
-  // a tab or a side bar row dropped on a group: moved or opened there; on a tab: before it
-  g.el.ondragover = (e) => { if (drag || (g.active && e.dataTransfer.types.includes('Files'))) { e.preventDefault(); g.el.classList.add('drop'); } };
-  g.el.ondragleave = (e) => { if (!g.el.contains(e.relatedTarget)) g.el.classList.remove('drop'); };
+  // a tab or a side bar row dropped on a group: moved or opened there (on a tab: before it); on the conversation's left or
+  // right quarter, docked there as a new group (while there's room for one), as VS Code does. A picture: to its input.
+  const zone = (e) => {
+    if (!drag || NARROW.matches || groups.length >= 3 || e.target.closest('.tabs')) return 'c';
+    const r = g.body.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
+    return x < 0.25 ? 'l' : x > 0.75 ? 'r' : 'c';
+  };
+  g.el.ondragover = (e) => { if (drag || (g.active && e.dataTransfer.types.includes('Files'))) { e.preventDefault(); g.el.dataset.drop = zone(e); } };
+  g.el.ondragleave = (e) => { if (!g.el.contains(e.relatedTarget)) delete g.el.dataset.drop; };
   g.el.ondrop = (e) => {
-    e.preventDefault(); g.el.classList.remove('drop');
-    const d = drag, at = e.target.closest('[data-i]');
+    e.preventDefault(); delete g.el.dataset.drop;
+    const d = drag, at = e.target.closest('[data-i]'), z = zone(e);
     drag = null;
-    if (d?.conv) moveConv(d.conv, g, at ? +at.dataset.i : g.tabs.length); else if (d?.id) openSession(d.id, g);
+    if (z !== 'c' && (d.id || !(d.conv.g === g && g.tabs.length === 1))) { // (a group's only tab to its own edge: stays)
+      const n = makeGroup(g, z === 'l');
+      if (d.conv) moveConv(d.conv, n); else openSession(d.id, n);
+    } else if (d?.conv) moveConv(d.conv, g, at ? +at.dataset.i : g.tabs.length); else if (d?.id) openSession(d.id, g);
     else if (e.dataTransfer.files.length) g.active?.attach([...e.dataTransfer.files]);
   };
-  if (after) after.el.after(g.el); else $('#editor').append(g.el);
-  groups.splice(after ? groups.indexOf(after) + 1 : groups.length, 0, g);
+  if (!ref) $('#editor').append(g.el); else if (left) ref.el.before(g.el); else ref.el.after(g.el);
+  groups.splice(ref ? groups.indexOf(ref) + (left ? 0 : 1) : groups.length, 0, g);
   relayout(); drawTabs(g);
   return g;
 }
 for (const t of ['dragover', 'drop']) document.addEventListener(t, (e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
-document.addEventListener('dragend', () => { drag = null; document.querySelectorAll('.drop').forEach((x) => x.classList.remove('drop')); });
+document.addEventListener('dragend', () => { drag = null; document.querySelectorAll('[data-drop]').forEach((x) => delete x.dataset.drop); });
 function drawTabs(g) {
   const note = new Map((state?.notes ?? []).map((n) => [n.id, n.kind])), busy = new Set(state?.sessions.filter((s) => s.busy).map((s) => s.id));
   g.strip.innerHTML = g.tabs.map((c, i) => {
@@ -695,7 +736,9 @@ function dropGroup(g) {
 }
 function relayout() { // a sash before each group but the first
   document.querySelectorAll('#editor > .sash').forEach((s) => s.remove());
+  const sum = groups.reduce((a, g) => a + g.size, 0);
   groups.forEach((g, i) => {
+    g.size *= groups.length / sum;
     g.el.style.flexGrow = g.size;
     if (!i) return;
     const L = groups[i - 1], s = document.createElement('div');
@@ -782,7 +825,7 @@ function makeConv(body, title) {
     <div class="send"><div class="atts"></div><button class="ico pic" title="发图片（也可以粘贴、拖进来）">${svg(I.pic)}</button><input type="file" accept="image/*" multiple hidden><textarea placeholder="${FINE ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入，按发送'}" enterkeyhint="send"></textarea><button class="btn primary go">发送</button></div>`;
   const $p = (s) => el.querySelector(s), scr = $p('.screen'), hist = $p('.msgs'), line = $p('.send textarea'), go = $p('.go');
   const notice = (cls, text) => { el.classList.remove('gone', 'idle'); if (cls) { el.classList.add(cls); $p('.notice span').textContent = text; } };
-  const redraw = () => { c.sync(); if (c.g) drawTabs(c.g); };
+  const redraw = () => { c.sync(); if (c.g) drawTabs(c.g); drawHere(); };
   const stale = (ms) => shown && term && key && !c.ended && Date.now() - lastSeen > ms;
 
   // in order; when another screen had the size, this one takes it first (you type here, so it decides)
@@ -1161,6 +1204,7 @@ function makeConv(body, title) {
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(histTimer); gen++; es?.close(); es = null; c.live = ''; readNote(c.id); };
   c.close = () => { c.closed = true; c.sleep(); ro.disconnect(); clearTimeout(liveT); clearTimeout(fitT); term?.dispose(); term = null; key = null; switching = 0; el.remove(); };
   c.claim = claim;
+  c.where = () => (key && !c.ended ? kind : null); // 'pc' a window on the computer, 'pty' the web service
   c.focus = () => { if (view === 'hist') line.focus({ preventScroll: true }); else term?.focus(); };
   c.back = () => { if (shown && key) { if (stale(25000)) connect(true); else claim(); } }; // back to this screen after a while: the stream likely died meanwhile
   c.tick = () => { if (stale(45000)) connect(true); };

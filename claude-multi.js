@@ -453,6 +453,18 @@ const field = (s, key, lastOne) => { // raw "key":"value" scan of a transcript s
   try { return v ? JSON.parse(`"${v}"`) : null; } catch { return null; }
 };
 
+// When Claude's last model request began, in a transcript slice: right after its last user line (your message, or a
+// tool's result: each is written, then the request goes). The prompt cache lives an hour from there.
+const lastReq = (s) => {
+  const ls = s.split('\n');
+  for (let i = ls.length - 1; i >= 0; i--) {
+    if (!ls[i].includes('"type":"user"') || ls[i].includes('"isSidechain":true')) continue;
+    const t = Date.parse(field(ls[i], 'timestamp'));
+    if (t) return t;
+  }
+  return null;
+};
+
 // Start times (Windows FILETIME, as sessions/<pid>.json's procStart) of these pids; null if PowerShell failed.
 // The same pids within a minute: the last answer (PowerShell takes ~0.2 s, and the web service asks every few seconds).
 let startsSeen = { key: '', at: 0, map: null };
@@ -506,15 +518,15 @@ function listSessions(reg) {
         .filter((p) => p && !/^(Another Claude session sent a message|<task-notification>)/.test(p)).pop() ?? null;
       let named = null; // /rename's sidecar: holds the name even once its transcript line is out of the tail
       try { named = JSON.parse(fs.readFileSync(path.join(s.file.slice(0, -6), 'custom-title.json'), 'utf8')).customTitle; } catch {}
-      r = { at: s.at, cwd: field(head, 'cwd') ?? field(tail, 'cwd', true), prompt,
+      r = { at: s.at, cwd: field(head, 'cwd') ?? field(tail, 'cwd', true), prompt, req: lastReq(tail),
         title: named || field(tail, 'customTitle', true) || field(tail, 'aiTitle', true) || field(head, 'aiTitle') || prompt };
       readHeads.set(s.file, r);
     }
-    const { cwd, title, prompt } = r;
+    const { cwd, title, prompt, req } = r;
     if (!cwd || !title || cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)) continue; // nothing to go back to
     const pid = live.get(s.id)?.pid ?? null, st = live.get(s.id)?.status;
     // busy: answering or running a command (its session file's status), for 换账号继续's 答完再换
-    out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell',
+    out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell',
       who: reg.profiles[s.acct].label.split('@')[0] });
   }
   return out.sort((a, b) => b.at - a.at);
@@ -1258,7 +1270,8 @@ async function web() {
       if (!usageCache) await usageNow; // nothing read ever: nothing to show before it
       if (!usageCache) throw new Error('额度读取失败，稍后再试'); // the page can't draw without it
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
-      const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc' }));
+      // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
+      const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
       return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname() };
     },
     'GET /api/tokens': () => tokenStats(),
@@ -1593,7 +1606,23 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+// What the terminal's status line knows of a conversation, for the web page's status bar: model, effort, context used.
+// Claude Code hands it to the status line on each update: kept in status/<session>.json, written when it changes.
+const LINES = path.join(ROOT, 'status');
+function saveLine(input, dir = LINES) {
+  const id = input.session_id;
+  if (!/^[\w-]{1,80}$/.test(id ?? '')) return;
+  const line = JSON.stringify({ model: input.model?.display_name ?? null, effort: input.effort?.level ?? null, ctx: input.context_window?.used_percentage ?? null });
+  const f = path.join(dir, `${id}.json`);
+  try { if (fs.readFileSync(f, 'utf8') === line) return; } catch { // a conversation new here: ones untouched for a month go
+    fs.mkdirSync(dir, { recursive: true });
+    for (const x of fs.readdirSync(dir)) try { if (Date.now() - fs.statSync(path.join(dir, x)).mtimeMs > 30 * 864e5) fs.unlinkSync(path.join(dir, x)); } catch {}
+  }
+  fs.writeFileSync(`${f}.tmp`, line); fs.renameSync(`${f}.tmp`, f); // whole, for the service reading it meanwhile
+}
+const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
+
+module.exports = { pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -1647,6 +1676,7 @@ if (require.main === module) {
     let input = {};
     try { input = JSON.parse(fs.readFileSync(0, 'utf8')); } catch {}
     console.log(statusline(input));
+    try { saveLine(input); } catch {} // the line is what counts
   }
   else launch(process.argv.slice(2));
 }

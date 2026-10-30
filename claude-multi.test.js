@@ -414,3 +414,26 @@ console.log('tokens ok');
   fs.rmSync(d, { recursive: true, force: true });
   console.log('image ok');
 }
+
+// The status bar's numbers: the status line's (kept per conversation, rewritten only when they change) and when the last
+// model request began (the record's last user line, not a subagent's), for the cache's hour.
+{
+  const fs = require('fs'), path = require('path'), os = require('os');
+  const { saveLine, readLine, lastReq } = require('./claude-multi');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-line-'));
+  const input = { session_id: 'abc-1', model: { display_name: 'Opus 5.5' }, effort: { level: 'xhigh' }, context_window: { used_percentage: 41.6 } };
+  saveLine(input, d);
+  assert.deepEqual(readLine('abc-1', d), { model: 'Opus 5.5', effort: 'xhigh', ctx: 41.6 });
+  const f = path.join(d, 'abc-1.json'); fs.utimesSync(f, new Date(0), new Date(0));
+  saveLine(input, d); assert.equal(fs.statSync(f).mtimeMs, 0);                  // the same: not written
+  saveLine({ ...input, session_id: '../x' }, d); assert.equal(readLine('../x', d), null); // not a session id: nothing
+  assert.equal(readLine('nope', d), null);
+  fs.rmSync(d, { recursive: true, force: true });
+  const l = (o) => JSON.stringify(o);
+  const tail = [l({ type: 'user', timestamp: '2026-10-30T10:00:00.000Z' }), l({ type: 'assistant', timestamp: '2026-10-30T10:00:05.000Z' }),
+    l({ type: 'user', timestamp: '2026-10-30T10:01:00.000Z', message: { content: [{ type: 'tool_result' }] } }),
+    l({ type: 'user', isSidechain: true, timestamp: '2026-10-30T10:02:00.000Z' }), l({ type: 'assistant', timestamp: '2026-10-30T10:03:00.000Z' })].join('\n');
+  assert.equal(lastReq(tail), Date.parse('2026-10-30T10:01:00.000Z'));         // the tool result, not the subagent's line
+  assert.equal(lastReq('{"type":"assistant"}'), null);
+  console.log('line ok');
+}
