@@ -436,12 +436,13 @@ async function load(fresh) {
   } catch (e) {
     $('#status').classList.add('off'); $('#conn').textContent = '连不上：' + e.message;
     if (!state) $('#view').innerHTML = `<div class="empty">连不上<br>${esc(e.message)}</div>`;
-    return;
+    return e.message;
   }
   if (!restored) restore();
   for (const c of allConvs()) c.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
   drawStatus(); drawHere();
+  return ''; // read: no error
 }
 function drawSide() {
   if (NARROW.matches && !allConvs().length) sideOn = true; // a phone with nothing open: the list
@@ -508,9 +509,13 @@ $('#side').onclick = (e) => {
   const b = e.target.closest('button, .row');
   if (!b) return;
   if (b.matches('[data-new]')) return newSheet();
-  if (b.matches('[data-refresh]')) { if (side !== 'tokens') return load(side === 'usage'); tokens = null; return renderTokens(); }
+  if (b.matches('[data-refresh]')) {
+    if (side === 'usage') return refreshUsage();
+    if (side === 'chats') return load().then((err) => toast(err ? `刷新失败：${err}` : '列表已刷新'));
+    tokens = null; return renderTokens();
+  }
   if (b.matches('[data-readall]')) { e.preventDefault(); return post('/api/read', { all: true }).then(() => load(), (x) => toast(x.message)); } // not the fold
-  if (b.matches('[data-warm]')) return warm(b);
+  if (b.matches('[data-warm]')) return warm();
   const r = e.target.closest('[data-open]'); // ctrl/⌘-click or its icon: to the side, as in VS Code
   if (r) openSession(r.dataset.open, e.target.closest('[data-aside]') || e.ctrlKey || e.metaKey ? 'aside' : undefined);
 };
@@ -571,13 +576,30 @@ function renderUsage() {
       ${a.windows.map((w) => `<div class="win"><span>${w.k === 'five_hour' ? '5 小时' : w.k === 'seven_day' ? '7 天' : esc(w.k)}</span>
         <div class="meter"><i style="width:${Math.min(100, w.pct)}%;background:${w.pct >= 80 ? 'var(--red)' : w.pct >= 50 ? 'var(--orange)' : 'var(--green)'}"></i></div>
         <b>${w.pct}%</b><span>${esc(w.reset)}后</span></div>`).join('')}`}</div>`).join('')}
-    <div class="btns"><button class="btn" data-refresh>刷新</button><button class="btn" data-warm>预热</button></div>
+    <div class="btns"><button class="btn" data-refresh${usageBusy ? ' disabled' : ''}>${usageBusy === 'refresh' ? '刷新中…' : '刷新'}</button>
+      <button class="btn" data-warm${usageBusy ? ' disabled' : ''}>${usageBusy === 'warm' ? '预热中…' : '预热'}</button></div>
     <div class="m" style="margin-top:8px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div></div>`;
 }
-async function warm(b) {
-  b.disabled = true; b.textContent = '预热中…';
-  try { toast((await post('/api/warmup')).out, 6000); } catch (x) { toast(x.message); }
-  load(true);
+// 刷新 and 预热 under 额度: the button says it's at work while it is (the panel is drawn again every 5 s meanwhile),
+// a bubble says how it went
+let usageBusy = ''; // 'refresh' or 'warm' while one runs
+async function refreshUsage() {
+  if (usageBusy) return;
+  usageBusy = 'refresh'; drawSide();
+  const err = await load(true), bad = state?.usage?.accounts?.map((a, i) => (a.err ? `账号 ${i + 1}：${a.err}` : '')).filter(Boolean) ?? [];
+  usageBusy = ''; drawSide();
+  toast(err ? `刷新失败：${err}` : bad.length ? `已刷新，但有账号读不到额度\n${bad.join('\n')}` : '额度已刷新', bad.length ? 6000 : 2600);
+}
+async function warm() {
+  if (usageBusy) return;
+  usageBusy = 'warm'; drawSide();
+  toast('正在预热：给还没开始计时的账号各发一条很小的消息，大约要半分钟…', 120000);
+  let msg;
+  try { // the command's report, one line per account: without its title, each line's "发送中…" before its result, the padding
+    const out = (await post('/api/warmup')).out;
+    msg = `预热完成\n${out.split('\n').map((l) => l.split('\r').pop().replace(/\s{2,}/g, '  ').trim()).filter((l) => l && l !== '预热 5 小时窗口').join('\n')}`;
+  } catch (x) { msg = `预热失败：${x.message}`; }
+  usageBusy = ''; toast(msg, 10000); load(true);
 }
 async function renderTokens() {
   $('#sideActs').innerHTML = `<button class="ico" data-refresh title="重新统计">${svg(I.refresh)}</button>`;
