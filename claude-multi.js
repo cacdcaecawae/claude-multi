@@ -244,7 +244,8 @@ function newProfile() {
   log('profile_registered', { profile_id: id, account: p.email, plan: p.subscriptionType });
   try { // the island reads the accounts again at once (its ＋ 添加账号 opened this)
     fs.mkdirSync(INBOX, { recursive: true });
-    fs.writeFileSync(path.join(INBOX, `${Date.now()}-${process.pid}.json`), JSON.stringify({ kind: 'accounts' }));
+    const f = path.join(INBOX, `${Date.now()}-${process.pid}`); // whole or not at all: the island reads the inbox every 300 ms
+    fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'accounts' })); fs.renameSync(`${f}.tmp`, `${f}.json`);
   } catch {}
   console.log(`已保存账号：${label(p)}\n当前默认账号未改变。`);
   return p;
@@ -729,10 +730,11 @@ function unlinkAll(d) {
 // remove N: account N leaves the list (not while a conversation runs on it) and its folder goes to the Recycle Bin, its
 // conversations with it. Its notes are merged into the shared copy first, and its tokens stay counted: the registry
 // keeps it under removed for that alone.
-function remove(n) {
-  const reg = load(), p = reg.profiles[n - 1];
-  if (!p) { console.log('用法：claude-multi remove <账号编号>'); process.exit(1); }
-  if (listSessions(reg).some((s) => s.acct === n - 1 && s.pid)) { console.log('这个账号上有对话正在运行，先关掉再移除。'); process.exit(1); }
+// By its id too (the island's way): a number names whichever account is there now, and the island's list can be older.
+function remove(x) {
+  const reg = load(), i = /^\d+$/.test(x ?? '') ? Number(x) - 1 : reg.profiles.findIndex((q) => q.id === x), p = reg.profiles[i];
+  if (!p) { console.log('用法：claude-multi remove <账号编号或 id，如 acct-20261010-002>'); process.exit(1); }
+  if (listSessions(reg).some((s) => s.acct === i && s.pid)) { console.log('这个账号上有对话正在运行，先关掉再移除。'); process.exit(1); }
   tokenStats(); shareMemory(); // while it's still listed
   update((r) => {
     r.profiles = r.profiles.filter((q) => q.id !== p.id);
@@ -1214,6 +1216,7 @@ async function web() {
         fs.writeFile(WEB_USAGE, JSON.stringify(r.json), () => {});
       }, () => {}).finally(() => { usageNow = null; });
       if (!usageCache) await usageNow; // nothing read ever: nothing to show before it
+      if (!usageCache) throw new Error('额度读取失败，稍后再试'); // the page can't draw without it
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc' }));
       return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname() };
@@ -1389,7 +1392,8 @@ async function web() {
     const at = Date.now();
     tun = require('child_process').spawn('ssh', ['-N', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=5',
       '-o', 'ServerAliveCountMax=3', '-R', `${TUNNEL.sock}:127.0.0.1:${WEB_PORT}`, TUNNEL.ssh], { windowsHide: true, stdio: 'ignore' });
-    tun.on('exit', () => { wait = Date.now() - at > 30000 ? 5000 : Math.min(wait * 2, 60000); setTimeout(tunnel, wait); });
+    let again = () => { again = () => {}; wait = Date.now() - at > 30000 ? 5000 : Math.min(wait * 2, 60000); setTimeout(tunnel, wait); };
+    tun.on('exit', () => again()); tun.on('error', () => again()); // error: no ssh to start (unhandled, it took the service down)
   }
 }
 
@@ -1558,7 +1562,7 @@ if (require.main === module) {
   else if (cmd === 'swap') switchChat(process.argv[3], Number(process.argv[4]), process.argv.includes('--now'));
   else if (cmd === 'attach') attach(process.argv[3]);
   else if (cmd === 'delete') del(process.argv[3]);
-  else if (cmd === 'remove') remove(Number(process.argv[3]));
+  else if (cmd === 'remove') remove(process.argv[3]);
   else if (cmd === 'web') web();
   else if (cmd === 'web-link') console.log(`${TUNNEL.url}/?key=${webKey(process.argv[3] === 'new')}`); // new: the old key's browsers are out
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));

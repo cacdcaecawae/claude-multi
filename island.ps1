@@ -614,11 +614,11 @@ function Render {
     $del.Style = $win.FindResource('Icon')
     $del.Tag = $sure
     $del.Add_Click({ param($s) $s.Tag.Visibility = 'Visible' })
-    $sure.Tag = @{ n = $i + 1; card = $card }
+    $sure.Tag = @{ id = Split-Path $a.dir -Leaf; card = $card } # by id: the list may have changed since it was drawn
     $sure.Add_Click({
       param($s)
       $Rows.Children.Remove($s.Tag.card) # gone at once: the removal and the refresh after it take a few seconds; a failure brings it back
-      Run-Node "remove $($s.Tag.n)" {
+      Run-Node "remove $($s.Tag.id)" {
         param($out)
         if ("$out" -notmatch '文件夹在回收站里') { Add-Alert @{ kind = 'ask'; info = $true; project = '移除账号'; msg = ("$out".Trim(), '移除时出错了')[-not "$out".Trim()] } }
         $script:limitTold = @{} # kept by account number, which moved
