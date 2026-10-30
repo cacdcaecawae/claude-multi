@@ -32,7 +32,7 @@ look(); LOOK.addEventListener('change', look);
     --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; color-scheme: dark;
     --fgHi: #ffffff; --msg: #d4d4d4; --tint: rgba(255,255,255,.08); --btn: #313131; --btnH: #3c3c3c; --badge: #616161; --badgeFg: #f8f8f8;
     --pop: #252526; --popB: #454545; --accentH: #026ec1; --accentBg: rgba(0,120,212,.22); --errFg: #ffa198; --cellB: #3c3c3c;
-    --split: #4a4a4a; --term: #1f1f1f; --act: #131313; --purple: #b180d7; --shadow: rgba(0,0,0,.5); /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
+    --split: #4a4a4a; --term: #1f1f1f; --act: #131313; --purple: #b180d7; --shadow: rgba(0,0,0,.5); --lift: rgba(0,0,0,.25); --frame: #111111; --cardB: #2b2b2b; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
     --ui: -apple-system, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; --mono: "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
     --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 4l4 4-4 4' fill='none' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E"); }
   /* 亮色: VS Code's Light Modern */
@@ -40,7 +40,7 @@ look(); LOOK.addEventListener('change', look);
     --inputB: #cecece; --fg: #3b3b3b; --fg2: #616161; --fg3: #8b8b8b; --fgHi: #1f1f1f; --msg: #2b2b2b; --accent: #005fb8; --accentH: #0258a8;
     --accentBg: rgba(0,95,184,.1); --link: #005fb8; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.06);
     --btn: #e8e8e8; --btnH: #dadada; --badge: #cccccc; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #d4d4d4; --cellB: #d9d9d9;
-    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); }
+    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 13px/1.4 var(--ui); }
   body { display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
@@ -53,19 +53,20 @@ look(); LOOK.addEventListener('change', look);
   #act { width: 48px; flex: none; display: flex; flex-direction: column; align-items: center; border-right: 1px solid var(--border); background: var(--act); }
   #act .logo { width: 24px; height: 24px; margin: 12px 0 8px; color: #d97757; }
   .spark { display: block; width: 100%; height: 100%; }
-  #act button { position: relative; width: 48px; height: 48px; display: grid; place-items: center; color: var(--fg3); }
+  #act button { position: relative; width: 40px; height: 40px; margin: 2px 0; border-radius: 8px; display: grid; place-items: center; color: var(--fg3); }
   #act button:hover, #act button.on { color: var(--fg); }
-  #app.side #act button.on::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+  #app.side #act button.on { background: var(--tint); } /* the side bar's view: a soft tile, as VS Code's now */
+  @media (hover: hover) { #act button:hover { background: var(--tint); } }
   #act svg { width: 24px; height: 24px; }
   #act .label { display: none; }
   #look { margin-top: auto; } /* at the bottom, as VS Code's settings */
-  #badge { position: absolute; right: 7px; bottom: 7px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
+  #badge { position: absolute; right: 2px; bottom: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
   #side { width: var(--sideW, 300px); flex: none; display: none; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); }
   #app.side #side { display: flex; }
   .sideHead { height: 35px; flex: none; display: flex; align-items: center; padding: 0 8px 0 20px; font-size: 13px; font-weight: 600; color: var(--fgHi); }
   #sideTitle { flex: 1; }
   #sideActs { display: flex; gap: 2px; }
-  .ico { width: 26px; height: 26px; border-radius: 5px; display: grid; place-items: center; color: var(--fg2); flex: none; }
+  .ico { width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--fg2); flex: none; }
   .ico svg { width: 16px; height: 16px; }
   #view { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 16px; }
   .sash { width: 4px; margin: 0 -2px; flex: none; position: relative; z-index: 4; cursor: col-resize; transition: background .1s .1s; }
@@ -76,12 +77,13 @@ look(); LOOK.addEventListener('change', look);
   @media (hover: hover) { .ico:hover { background: var(--tint); color: var(--fg); } }
 
   /* the side bar's lists: folding sections, two-line rows */
-  .btn { background: var(--btn); border-radius: 3px; padding: 5px 12px; line-height: 18px; }
+  .btn { background: var(--btn); border-radius: 6px; padding: 5px 12px; line-height: 18px; }
   .btn.primary { background: var(--accent); color: #fff; }
   .btn:disabled { opacity: .45; pointer-events: none; }
   @media (hover: hover) { .btn:hover { background: var(--btnH); } .btn.primary:hover { background: var(--accentH); } }
-  details.sec + details.sec { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; }
-  details.sec > summary { color: var(--fg2); letter-spacing: .03em; list-style: none; height: 26px; display: flex; align-items: center; gap: 2px; padding: 0 10px 0 2px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; }
+  details.sec + details.sec { margin-top: 6px; }
+  details.sec + details.sec::before { content: ''; display: block; height: 1px; margin: 0 14px 4px; background: var(--border); }
+  details.sec > summary { color: var(--fg2); letter-spacing: .03em; list-style: none; height: 26px; display: flex; align-items: center; gap: 2px; padding: 0 14px 0 6px; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; }
   details.sec > summary::-webkit-details-marker, details.tools summary::-webkit-details-marker { display: none; }
   details.sec > summary::before, details.tools summary::before { content: ''; width: 16px; height: 16px; flex: none; background: currentColor;
     -webkit-mask: var(--chev) center / 16px no-repeat; mask: var(--chev) center / 16px no-repeat; transition: transform .1s; }
@@ -89,7 +91,8 @@ look(); LOOK.addEventListener('change', look);
   details.sec > summary > span { flex: 1; }
   .count { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--badge); color: var(--badgeFg); font-size: 10px; line-height: 16px; }
   .link { color: var(--link); font-size: 11px; font-weight: 400; }
-  .row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 4px 8px 4px 20px; cursor: pointer; }
+  /* rows highlight as rounded tiles inset from the side bar's edges */
+  .row { display: flex; align-items: center; gap: 8px; min-height: 42px; margin: 1px 8px; padding: 4px 6px 4px 12px; border-radius: 6px; cursor: pointer; }
   .row:not([data-open]) { cursor: default; }
   .row.sel { background: var(--sel); }
   .row.open .t { color: var(--fgHi); }
@@ -152,21 +155,24 @@ look(); LOOK.addEventListener('change', look);
   #editor { flex: 1; min-width: 0; display: flex; background: var(--bg); }
   .group { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; position: relative; }
   .sash + .group { border-left: 1px solid var(--split); } /* groups side by side: a line between them */
-  .group[data-drop]::after { content: ''; position: absolute; top: 35px; bottom: 0; left: 0; right: 0; background: rgba(0,120,212,.14);
+  .group[data-drop]::after { content: ''; position: absolute; top: 38px; bottom: 0; left: 0; right: 0; background: rgba(0,120,212,.14);
     border: 2px solid var(--accent); pointer-events: none; z-index: 5; transition: left .08s, right .08s; }
   .group[data-drop=l]::after { right: 50%; } /* docks on the left */
   .group[data-drop=r]::after { left: 50%; }
-  .tabs { height: 35px; flex: none; display: flex; background: var(--bar); box-shadow: inset 0 -1px var(--border); }
+  /* tabs with rounded tops; the shown one the conversation's color, joined to it over the strip's bottom line */
+  .tabs { height: 38px; flex: none; display: flex; align-items: flex-end; padding: 0 4px 0 6px; background: var(--bar); box-shadow: inset 0 -1px var(--border); }
   .strip { flex: 1; min-width: 0; display: flex; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
   .strip::-webkit-scrollbar { display: none; }
-  .tab { position: relative; flex: none; display: flex; align-items: center; gap: 6px; max-width: 220px; height: 100%; padding: 0 4px 0 10px;
-    color: var(--fg2); border-right: 1px solid var(--border); cursor: pointer; user-select: none; }
+  .strip { align-self: stretch; align-items: flex-end; gap: 2px; }
+  .tab { position: relative; flex: none; display: flex; align-items: center; gap: 6px; max-width: 220px; height: 32px; padding: 0 4px 0 10px;
+    color: var(--fg2); border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; cursor: pointer; user-select: none; }
+  @media (hover: hover) { .tab:not(.on):hover { background: var(--tint); } }
   .tab .tt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tab.on { background: var(--bg); color: var(--fgHi); }
-  .group.focus .tab.on::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--accent); }
+  .tab.on { background: var(--bg); color: var(--fgHi); border-color: var(--border); }
+  .group:not(.focus) .tab.on { color: var(--fg2); } /* the group in focus: its shown tab's title bright, as in VS Code */
   .tab.gone .tt { opacity: .6; text-decoration: line-through; }
   .tab .ac { width: 18px; height: 18px; font-size: 10px; }
-  .x { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; visibility: hidden; color: var(--fg2); }
+  .x { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; visibility: hidden; color: var(--fg2); }
   .x svg { width: 14px; height: 14px; }
   .tab.on .x, .x.ask, .x.done { visibility: visible; }
   /* unread, as VS Code marks an unsaved file: a dot where the × is, the × on hover */
@@ -176,7 +182,7 @@ look(); LOOK.addEventListener('change', look);
   .x.done::after { background: var(--green); }
   @media (hover: hover) { .tab:hover .x { visibility: visible; } .x:hover { background: var(--tint); color: var(--fg); }
     .tab:hover .x svg { display: block; } .tab:hover .x::after { display: none; } }
-  .tabs > .ico { width: 35px; height: 35px; border-radius: 0; }
+  .tabs > .ico { width: 30px; height: 30px; align-self: center; }
   .tabs .list, .brand { display: none; }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .hint { display: none; margin: auto; flex-direction: column; align-items: center; gap: 14px; color: var(--fg3); text-align: center; padding: 20px; }
@@ -191,8 +197,8 @@ look(); LOOK.addEventListener('change', look);
   .crumbs .path { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .crumbs .path b { font-weight: 400; color: var(--fg); }
   .crumbs .dim { color: var(--fg3); }
-  .seg { display: flex; border: 1px solid var(--border); border-radius: 4px; padding: 1px; flex: none; margin-right: 2px; }
-  .seg button { padding: 1px 9px; border-radius: 2px; font-size: 12px; color: var(--fg2); }
+  .seg { display: flex; border: 1px solid var(--border); border-radius: 7px; padding: 1px; flex: none; margin-right: 2px; }
+  .seg button { padding: 1px 9px; border-radius: 5px; font-size: 12px; color: var(--fg2); }
   .seg button.on { background: var(--sel); color: var(--fgHi); }
   .notice { display: none; align-items: center; gap: 10px; padding: 6px 14px; font-size: 12.5px; }
   .pane.gone .notice, .pane.idle .notice { display: flex; }
@@ -213,7 +219,7 @@ look(); LOOK.addEventListener('change', look);
   .hm.tool { font: 12.5px/1.5 var(--mono); color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hm.tool::before { content: '● '; color: var(--green); }
   .hm.note { align-self: center; font-size: 12px; color: var(--fg3); }
-  .hm pre, .hm .mono { font: 13px/1.5 var(--mono); background: var(--bar); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; overflow-x: auto; white-space: pre; margin: 4px 0; }
+  .hm pre, .hm .mono { font: 13px/1.5 var(--mono); background: var(--bar); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; overflow-x: auto; white-space: pre; margin: 4px 0; }
   .hm .tbl { overflow-x: auto; margin: 4px 0; } /* sideways only when even wrapped it can't fit (a phone, many columns) */
   .hm table { border-collapse: collapse; white-space: normal; font-size: .95em; line-height: 1.55; }
   .hm th, .hm td { border: 1px solid var(--cellB); padding: 5px 10px; text-align: left; vertical-align: top; min-width: 4.5em; }
@@ -235,20 +241,22 @@ look(); LOOK.addEventListener('change', look);
   .busy { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--orange); }
   .busy i { width: 7px; height: 7px; border-radius: 4px; background: var(--orange); animation: pulse 1.2s infinite; }
   @keyframes pulse { 50% { opacity: .25; } }
-  .ask { background: var(--bar); border: 1px solid var(--border); border-radius: 4px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+  .ask { background: var(--bar); border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
   .ask .q { white-space: pre-wrap; font-size: 13px; padding: 0 2px 6px; }
-  .ask .pick { text-align: left; padding: 7px 10px; border-radius: 3px; border: 1px solid transparent; }
+  .ask .pick { text-align: left; padding: 7px 10px; border-radius: 6px; border: 1px solid transparent; }
   .ask .pick.on { background: var(--accentBg); border-color: var(--accent); }
   .ask .row2 { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
-  .ask .row2 button { font-size: 12px; padding: 3px 10px; border-radius: 3px; background: var(--btn); }
+  .ask .row2 button { font-size: 12px; padding: 3px 10px; border-radius: 6px; background: var(--btn); }
   @media (hover: hover) { .ask .pick:hover { background: var(--hover); } .ask .pick.on:hover { background: var(--accentBg); } }
   .keys { display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; border-top: 1px solid var(--border); scrollbar-width: none; flex: none; }
-  .keys button { flex: none; background: var(--btn); border-radius: 3px; padding: 7px 11px; font-size: 13px; font-weight: 600; }
-  .send { display: flex; gap: 8px; align-items: flex-end; width: 100%; max-width: 1640px; margin: 0 auto; padding: 8px 20px calc(10px + env(safe-area-inset-bottom)); flex: none; }
-  .send { flex-wrap: wrap; }
-  .send .pic { width: 38px; height: 38px; }
-  .send .pic svg { width: 20px; height: 20px; }
-  .atts { flex-basis: 100%; display: flex; gap: 8px; overflow-x: auto; padding: 8px 8px 4px 2px; }
+  .keys button { flex: none; background: var(--btn); border-radius: 6px; padding: 7px 11px; font-size: 13px; font-weight: 600; }
+  /* the input: one box, the pictures waiting at its top, the text, a bar inside its bottom (pictures left, 发送 right) */
+  .send { width: 100%; max-width: 1640px; margin: 0 auto; padding: 6px 20px calc(14px + env(safe-area-inset-bottom)); flex: none; }
+  .box { display: flex; flex-direction: column; background: var(--input); border: 1px solid var(--inputB); border-radius: 12px; box-shadow: 0 2px 10px var(--lift); }
+  .box:focus-within { border-color: var(--accent); }
+  .bar { display: flex; align-items: center; gap: 4px; padding: 2px 6px 6px; }
+  .bar .pic svg { width: 18px; height: 18px; }
+  .atts { display: flex; gap: 8px; overflow-x: auto; padding: 12px 12px 2px; }
   .atts:empty { display: none; }
   .att { position: relative; flex: none; }
   .att img { height: 56px; width: auto; max-width: 120px; border-radius: 6px; border: 1px solid var(--border); object-fit: cover; display: block; }
@@ -259,10 +267,10 @@ look(); LOOK.addEventListener('change', look);
   .hm.img + .hm.img, .hm.img + .hm.user { margin-top: 0; } /* a message's pictures and its words together */
   .hm.img img { height: 200px; width: auto; max-width: 100%; min-width: 60px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; background: var(--bar); }
   .hm.img.pending { opacity: .5; }
-  .send textarea { font-size: 14px; flex: 1; resize: none; height: 38px; max-height: 160px; }
-  .go { height: 38px; min-width: 64px; }
+  .box textarea { font-size: 14px; line-height: 1.5; resize: none; height: 44px; max-height: 200px; border: 0; border-radius: 0; background: none; padding: 11px 14px 2px; }
+  .go { margin-left: auto; height: 28px; padding: 0 14px; font-size: 13px; line-height: 28px; }
   .go.stop { background: var(--red); }
-  input[type=text], textarea { width: 100%; background: var(--input); border: 1px solid var(--inputB); border-radius: 4px; color: var(--fg); font: inherit; padding: 8px 10px; outline: none; }
+  input[type=text], textarea { width: 100%; background: var(--input); border: 1px solid var(--inputB); border-radius: 6px; color: var(--fg); font: inherit; padding: 8px 10px; outline: none; }
   input[type=text]:focus, textarea:focus { border-color: var(--accent); }
   /* a computer's browser: the real keyboard types straight into the terminal, so no key row, no input box there */
   @media (pointer: fine) { .keys { display: none; } .pane:not(.hist) .send { display: none; } }
@@ -270,22 +278,38 @@ look(); LOOK.addEventListener('change', look);
      hidden input box is a textarea too) */
   @media (pointer: coarse) { input, textarea { font-size: 16px !important; } }
 
-  #status { height: 22px; flex: none; display: flex; font-size: 12px; color: var(--fg2); border-top: 1px solid var(--border); }
-  #status > * { display: flex; align-items: center; gap: 5px; padding: 0 9px; white-space: nowrap; }
-  #status .remote { background: var(--accent); color: #fff; }
-  #status.off .remote { background: var(--red); }
+  #status { height: 26px; flex: none; display: flex; align-items: center; padding: 0 6px; font-size: 12px; color: var(--fg2); }
+  #status > * { display: flex; align-items: center; gap: 5px; padding: 0 9px; white-space: nowrap; height: 20px; border-radius: 5px; }
+  #status .remote { color: var(--fg); }
+  #status.off .remote { background: var(--red); color: #fff; }
   #status .remote svg { width: 14px; height: 14px; }
   #status .grow { padding: 0; }
   #status i { width: 8px; height: 8px; border-radius: 4px; }
   #status { overflow: hidden; }
   #here { display: flex; padding: 0; }
-  #here > span { display: flex; align-items: center; gap: 5px; padding: 0 9px; white-space: nowrap; }
+  #here > span { display: flex; align-items: center; gap: 5px; padding: 0 9px; white-space: nowrap; height: 20px; border-radius: 5px; }
+  #here .where { margin-right: 4px; }
   #here b { font-weight: 600; }
   #here .where { color: #fff; font-weight: 600; } /* where it runs, bright: green a window on the computer, purple the web service */
   #here .where.pc { background: #16825d; }
   #here .where.pty { background: #8250df; }
   #here .ok { color: var(--green); } #here .warn { color: var(--orange); } #here .bad { color: var(--red); }
   #sAcct:hover { background: var(--tint); }
+
+  /* a computer: as VS Code now, the activity bar, the side bar and each group of tabs a rounded card with a thin
+     border, floating on the window's darker frame; the gaps between them are the sashes */
+  @media (min-width: 760px) {
+    html, body { background: var(--frame); }
+    #app { padding: 6px 6px 0; }
+    #act, #side, .group { border: 1px solid var(--cardB); border-radius: 10px; overflow: hidden; }
+    #act { background: var(--bar); margin-right: 6px; padding-bottom: 6px; }
+    #editor { background: none; }
+    .group { background: var(--bg); }
+    .sash + .group { border-left-color: var(--cardB); }
+    .sash { width: 6px; margin: 0; background: none !important; }
+    .sash::after { content: ''; position: absolute; top: 12px; bottom: 12px; left: 2px; width: 2px; border-radius: 1px; transition: background .1s .1s; }
+    .sash:hover::after, .sash.drag::after { background: var(--accent); }
+  }
 
   /* a phone: one group; the side bar over it under the tab strip, the activity bar at the bottom */
   @media (max-width: 759px) {
@@ -298,16 +322,16 @@ look(); LOOK.addEventListener('change', look);
     #act button { flex: 1; height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
     #act .label { display: block; font-size: 11px; }
     #act svg { width: 22px; height: 22px; }
-    #app.side #act button.on::before { display: none; }
+    #act button { width: auto; margin: 0; border-radius: 0; background: none !important; }
     #badge { right: calc(50% - 24px); top: 4px; bottom: auto; }
     #side { position: fixed; z-index: 6; left: 0; right: 0; top: calc(env(safe-area-inset-top) + 44px); bottom: calc(53px + env(safe-area-inset-bottom));
       width: auto; border: 0; background: var(--bar); }
     .group:not(.focus), .group.blank .hint { display: none; }
-    .tabs { height: 44px; }
-    .tabs .list { display: grid; width: 44px; height: 44px; }
+    .tabs { height: 46px; padding-left: 0; }
+    .tab { height: 38px; }
+    .tabs .list { display: grid; width: 40px; height: 40px; margin: 0 2px; }
     #app.side .tabs .list { color: var(--fgHi); background: var(--bg); }
-    #app.side .tab.on { background: none; color: var(--fg2); }
-    #app.side .group.focus .tab.on::before { display: none; }
+    #app.side .tab.on { background: none; color: var(--fg2); border-color: transparent; }
     .tab { max-width: 170px; padding: 0 2px 0 12px; }
     .tab .ac { width: 18px; height: 18px; font-size: 11px; }
     .x { width: 30px; height: 30px; }
@@ -315,7 +339,7 @@ look(); LOOK.addEventListener('change', look);
     .sideHead { height: 44px; padding-left: 16px; font-size: 16px; }
     .sideHead .ico { width: 36px; height: 36px; } .sideHead .ico svg { width: 20px; height: 20px; } /* 新对话 is the + here */
     .panel { padding: 0 14px 0 16px; }
-    .row { min-height: 56px; padding: 8px 14px 8px 16px; gap: 10px; }
+    .row { min-height: 56px; padding: 8px 8px 8px 10px; gap: 10px; }
     .row .t { font-size: 15px; } .m { font-size: 12.5px; }
     .row .ac, .row .dot { width: 24px; height: 24px; font-size: 12px; }
     .crumbs { height: 38px; padding-left: 12px; }
@@ -325,12 +349,13 @@ look(); LOOK.addEventListener('change', look);
     .hm { font-size: 15px; } .hm.tool { font-size: 12.5px; } .hm.sub { font-size: 13.5px; }
     .hm th, .hm td { padding: 4px 7px; min-width: 3.5em; }
     .send { padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
-    .send textarea, .go, .send .pic { height: 42px; }
+    .box textarea { height: 48px; }
+    .go, .bar .pic { height: 34px; } .go { line-height: 34px; } .bar .pic { width: 34px; } .bar .pic svg { width: 20px; height: 20px; }
     .hm.img img { height: 160px; }
   }
   @media (pointer: fine) {
     ::-webkit-scrollbar { width: 10px; height: 10px; }
-    ::-webkit-scrollbar-thumb { background: rgba(121,121,121,.35); }
+    ::-webkit-scrollbar-thumb { background: rgba(121,121,121,.35); border: 2px solid transparent; border-radius: 6px; background-clip: padding-box; }
     ::-webkit-scrollbar-thumb:hover { background: rgba(100,100,100,.7); }
     ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
     #view::-webkit-scrollbar-thumb { background: transparent; } #view:hover::-webkit-scrollbar-thumb { background: rgba(121,121,121,.35); } /* as VS Code: on hover */
@@ -342,16 +367,16 @@ look(); LOOK.addEventListener('change', look);
   .sheet .in { background: var(--pop); width: 100%; padding: 16px 16px calc(18px + env(safe-area-inset-bottom)); border-radius: 12px 12px 0 0; max-height: 85vh; overflow: auto; border-top: 1px solid var(--popB); }
   @media (min-width: 760px) {
     .sheet { align-items: flex-start; justify-content: center; background: rgba(0,0,0,.3); }
-    .sheet .in { width: 560px; margin-top: 8vh; border-radius: 6px; border: 1px solid var(--popB); box-shadow: 0 8px 32px var(--shadow); padding: 16px; }
+    .sheet .in { width: 560px; margin-top: 8vh; border-radius: 12px; border: 1px solid var(--popB); box-shadow: 0 8px 32px var(--shadow); padding: 16px; }
   }
   .stitle { font-size: 15px; font-weight: 600; color: var(--fgHi); }
   .opts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 12px; }
-  .opt { padding: 6px 10px; border-radius: 3px; background: var(--btn); border: 1px solid transparent; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opt { padding: 6px 10px; border-radius: 6px; background: var(--btn); border: 1px solid transparent; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .opt.on { background: var(--accentBg); border-color: var(--accent); color: var(--fgHi); }
   .opt small { color: var(--fg2); font-size: 11.5px; margin-left: 4px; }
   .opt:disabled { opacity: .45; }
   .toast { position: fixed; z-index: 30; right: 12px; bottom: 34px; max-width: min(420px, calc(100vw - 24px)); background: var(--pop); border: 1px solid var(--popB);
-    box-shadow: 0 4px 20px var(--shadow); border-radius: 4px; padding: 10px 14px; white-space: pre-wrap; display: none; }
+    box-shadow: 0 4px 20px var(--shadow); border-radius: 8px; padding: 10px 14px; white-space: pre-wrap; display: none; }
   @media (max-width: 759px) { .toast { left: 50%; right: auto; transform: translateX(-50%); width: max-content; bottom: calc(80px + env(safe-area-inset-bottom)); } }
 </style>
 </head>
@@ -871,7 +896,8 @@ function makeConv(body, title) {
     <div class="notice"><span></span><button class="btn primary" data-act="resume">接着聊</button></div>
     <div class="screen"></div><div class="msgs"></div>
     <div class="keys">${KEYS.map(([l], i) => `<button data-kb="${i}">${l}</button>`).join('')}</div>
-    <div class="send"><div class="atts"></div><button class="ico pic" title="发图片（也可以粘贴、拖进来）">${svg(I.pic)}</button><input type="file" accept="image/*" multiple hidden><textarea placeholder="${FINE ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入，按发送'}" enterkeyhint="send"></textarea><button class="btn primary go">发送</button></div>`;
+    <div class="send"><div class="box"><div class="atts"></div><textarea placeholder="${FINE ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入，按发送'}" enterkeyhint="send"></textarea>
+      <div class="bar"><button class="ico pic" title="发图片（也可以粘贴、拖进来）">${svg(I.pic)}</button><input type="file" accept="image/*" multiple hidden><button class="btn primary go">发送</button></div></div></div>`;
   const $p = (s) => el.querySelector(s), scr = $p('.screen'), hist = $p('.msgs'), line = $p('.send textarea'), go = $p('.go');
   const notice = (cls, text) => { el.classList.remove('gone', 'idle'); if (cls) { el.classList.add(cls); $p('.notice span').textContent = text; } };
   const redraw = () => { c.sync(); if (c.g) drawTabs(c.g); drawHere(); };
@@ -903,7 +929,7 @@ function makeConv(body, title) {
     const stop = view === 'hist' && busyNow && !line.value.trim() && !atts.length;
     go.textContent = stop ? '停止' : '发送'; go.classList.toggle('stop', stop);
   }
-  const grow = () => { line.style.height = ''; line.style.height = Math.min(line.scrollHeight + 2, 160) + 'px'; };
+  const grow = () => { line.style.height = ''; line.style.height = Math.min(line.scrollHeight, 200) + 'px'; };
   line.addEventListener('input', () => { goMode(); grow(); });
   let atts = [], sending = false; // the pictures waiting to go, each { url: shown here, up: its upload, to the path }
   const attsEl = $p('.atts'), pick = $p('input[type=file]');
