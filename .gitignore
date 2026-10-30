@@ -11,3 +11,6 @@
 !package.json
 !package-lock.json
 !icon-180.png
+!README.md
+!docs/
+!docs/*.png
