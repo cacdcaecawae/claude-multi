@@ -24,6 +24,8 @@ function look() {
   return v ?? 'auto';
 }
 look(); LOOK.addEventListener('change', look);
+// opened from the home screen (iOS says so itself; the display-mode query may not match a page without a manifest)
+if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) document.documentElement.classList.add('app');
 </script>
 <style>
   /* VS Code's Dark Modern colors; the account colors are the island's */
@@ -46,7 +48,7 @@ look(); LOOK.addEventListener('change', look);
   /* opened from the home screen, iOS 26 makes the page shorter than the screen by the status bar (WebKit bug 301108):
      a band left empty under the bottom bar. At least the screen's height, so the page and its fixed bars reach the
      bottom; the min() keeps it as it was where the status bar takes no room (top inset 0). */
-  @media (display-mode: standalone) { html, body { min-height: min(100lvh, calc(100% + env(safe-area-inset-top))); } } /* body too: the input */
+  html.app, html.app body { min-height: min(100lvh, calc(100% + env(safe-area-inset-top))); } /* body too: the input */
   body { display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
   button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
   svg { display: block; flex: none; }
@@ -968,8 +970,29 @@ function makeConv(body, title) {
     for (let i = 0; i < term.rows; i++) t += b.getLine(b.baseY + i)?.translateToString(true) ?? '';
     return (t.match(/\[Image #\d+\]/g) ?? []).length;
   };
+  // what sits in Claude's own input box (this page doesn't show it): the rows between its two rules, "❯ " before the first
+  const typed = () => {
+    const b = term.buffer.active, rows = [];
+    for (let i = 0; i < term.rows; i++) rows.push((b.getLine(b.baseY + i)?.translateToString(true) ?? '').trimEnd()); // Claude pads with spaces
+    const rule = (r) => /^─{20,}$/.test(r), top = rows.findLastIndex((r, i) => rule(r) && /^❯/.test(rows[i + 1] ?? '')), end = rows.findIndex((r, i) => i > top && rule(r));
+    return top < 0 || end < 0 ? '' : rows.slice(top + 1, end).map((r, k) => (k ? r.replace(/^ {2}/, '') : r.replace(/^❯ ?/, ''))).join('\n').trim();
+  };
+  // 停止: Esc to Claude. Stopped before it took the message in, Claude puts that message back in its own input box, and
+  // the next one sent from here was typed on after it. So it comes back to this input box instead, as Claude does in its
+  // terminal, and Claude's is emptied: Ctrl+C empties a filled one (it asks "exit?" only of an empty one).
+  async function stop() {
+    input('\x1b');
+    for (const end = Date.now() + 3000; term && Date.now() < end;) {
+      await new Promise((ok) => setTimeout(ok, 300));
+      const t = typed();
+      if (!t) continue;
+      input('\x03');
+      line.value = line.value.trim() ? `${t}\n${line.value}` : t; grow(); goMode();
+      return toast('已停止。还没执行的那条消息回到了输入框，可以改了再发', 4000);
+    }
+  }
   go.onclick = async () => {
-    if (go.classList.contains('stop')) return input('\x1b');
+    if (go.classList.contains('stop')) return stop();
     const v = line.value.trim(), imgs = atts;
     if ((!v && !imgs.length) || sending) return;
     if (!key || c.ended) return toast(c.started && !c.ended ? '还在连接，稍等一下再发' : '这个对话没有在运行，先点上面的「接着聊」'); // what you wrote stays
@@ -996,7 +1019,7 @@ function makeConv(body, title) {
   };
   line.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim()) go.click(); } // only sends; Shift+Enter: a new line
-    if (e.key === 'Escape' && busyNow) input('\x1b'); // as in Claude: Esc stops it
+    if (e.key === 'Escape' && busyNow) stop(); // as in Claude: Esc stops it
   };
   el.addEventListener('click', (e) => {
     const b = e.target.closest('[data-v], [data-kb], [data-act], [data-pick], [data-key], [data-unatt]');
@@ -1055,7 +1078,9 @@ function makeConv(body, title) {
         const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
         addItems($p('.hNew'), r.items);
         const flat = (s) => s.replace(/\s+/g, ' '); // a paste's new lines may come back as \r\n
-        for (const m of r.items) { const i = m.role === 'user' ? sent.findIndex((s) => flat(s.text) === flat(m.text)) : -1; if (i >= 0) sent.splice(i, 1); }
+        // the record's message, or one with it inside (typed on after text left in Claude's input box): no longer waiting
+        const took = (s, m) => flat(s.text) === flat(m.text) || (s.text && flat(m.text).includes(flat(s.text)));
+        for (const m of r.items) { const i = m.role === 'user' ? sent.findIndex((s) => took(s, m)) : -1; if (i >= 0) sent.splice(i, 1); }
         if (atEnd) hist.scrollTop = hist.scrollHeight;
       }
       drawLive(first); topNote();
@@ -1381,6 +1406,21 @@ focusGroup(makeGroup());
 drawSide();
 load();
 setInterval(() => { if (document.visibilityState === 'visible') load(); }, 5000);
+// ponytail: temporary probe for the gap under the page on an iOS home-screen app: the sizes the phone really has, in a
+// box tapped away. Remove once the gap is gone.
+if (document.documentElement.classList.contains('app')) setTimeout(() => {
+  const len = (h) => { const d = document.createElement('div'); d.style.cssText = `position:absolute;visibility:hidden;height:${h}`; document.body.append(d); const v = d.offsetHeight; d.remove(); return v; };
+  const bottom = (s) => Math.round(document.querySelector(s)?.getBoundingClientRect().bottom ?? -1);
+  const p = document.createElement('div');
+  p.style.cssText = 'position:fixed;z-index:99;left:8px;top:calc(env(safe-area-inset-top) + 50px);background:rgba(0,0,0,.8);color:#fff;font:12px/1.5 monospace;padding:8px 10px;border-radius:8px;white-space:pre';
+  p.textContent = [`standalone ${navigator.standalone} dm ${matchMedia('(display-mode: standalone)').matches}`,
+    `screen ${screen.width}x${screen.height} inner ${innerWidth}x${innerHeight}`,
+    `vv ${Math.round(visualViewport?.height ?? -1)} client ${document.documentElement.clientHeight}`,
+    `vh ${len('100vh')} lvh ${len('100lvh')} dvh ${len('100dvh')} svh ${len('100svh')}`,
+    `inset top ${len('env(safe-area-inset-top)')} bottom ${len('env(safe-area-inset-bottom)')}`,
+    `html ${bottom('html')} body ${bottom('body')} app ${bottom('#app')} act ${bottom('#act')}`, '（点一下关掉）'].join('\n');
+  p.onclick = () => p.remove(); document.body.append(p);
+}, 1500);
 </script>
 </body>
 </html>
