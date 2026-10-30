@@ -179,6 +179,10 @@
   .hm.tool::before { content: '● '; color: var(--green); }
   .hm.note { align-self: center; font-size: 12px; color: var(--fg3); }
   .hm pre, .hm .mono { font: 12.5px/1.5 var(--mono); background: var(--bar); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; overflow-x: auto; white-space: pre; margin: 4px 0; }
+  .hm .tbl { overflow-x: auto; margin: 4px 0; } /* sideways only when even wrapped it can't fit (a phone, many columns) */
+  .hm table { border-collapse: collapse; white-space: normal; font-size: .95em; line-height: 1.55; }
+  .hm th, .hm td { border: 1px solid #3c3c3c; padding: 5px 10px; text-align: left; vertical-align: top; min-width: 4.5em; }
+  .hm th { background: var(--bar); color: #e7e7e7; font-weight: 600; white-space: nowrap; }
   .hm code { font: .92em var(--mono); background: rgba(255,255,255,.1); border-radius: 3px; padding: 1px 4px; }
   .hm .h { font-size: 14.5px; color: #fff; }
   .hm.done { font-size: 12px; color: var(--green); }
@@ -253,6 +257,7 @@
     .seg button { padding: 3px 10px; font-size: 13px; }
     .msgs { padding: 12px 14px 16px; }
     .hm { font-size: 15px; } .hm.tool { font-size: 12.5px; }
+    .hm th, .hm td { padding: 4px 7px; min-width: 3.5em; }
     .send { padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
     .send textarea, .go { height: 42px; }
   }
@@ -1084,10 +1089,19 @@ function addItems(box, items) {
     g.firstElementChild.textContent = `${list.children.length} 个操作：${Object.entries(n).map(([k, v]) => `${k} ${v}`).join('、')}`;
   }
 }
-// enough Markdown for Claude's replies: code blocks, tables (kept monospace), inline code, bold, headings
+// enough Markdown for Claude's replies: code blocks, tables, inline code, bold, headings. A table drawn as one, its
+// cells wrapping to the width as Claude Code's terminal draws it: rows of | cells |, the |---| line under the header
+// (a \| in a cell is a |). Lines of | without that line aren't a table: kept as they are, monospace.
+const table = (rows) => {
+  const cells = rows.trim().split('\n').map((r) => r.trim().replace(/^\||\|$/g, '').replace(/\\\|/g, '\0').split('|').map((c) => c.trim().replace(/\0/g, '|')));
+  if (!cells[1]?.every((c) => /^:?-+:?$/.test(c))) return `<div class="mono">${rows}</div>`;
+  const [head] = cells.splice(0, 2);
+  return `<div class="tbl"><table><thead><tr>${head.map((c) => `<th>${c}</th>`).join('')}</tr></thead>`
+    + `<tbody>${cells.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+};
 function md(t) {
   return esc(t).split(/```[^\n]*\n?/).map((p, i) => i % 2 ? `<pre>${p.replace(/\n$/, '')}</pre>`
-    : p.replace(/((?:^\|.*\n?)+)/gm, '<div class="mono">$1</div>').replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    : p.replace(/((?:^\|.*\n?)+)/gm, table).replace(/`([^`\n]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>')).join('');
 }
 

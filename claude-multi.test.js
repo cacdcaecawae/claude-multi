@@ -374,3 +374,18 @@ console.log('tokens ok');
   fs.rmSync(d, { recursive: true, force: true });
   console.log('trust ok');
 }
+
+// The web page's Markdown: a table drawn as a table (cells inline-formatted, \| a pipe in a cell); lines of | without
+// the |---| line under a header stay monospace text.
+{
+  const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
+  const part = (re) => src.match(re)[0];
+  const md = new Function(`${part(/^const esc = .*$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)();
+  const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
+  assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
+  assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
+  assert.ok(t.includes('<tr><td>c | d</td><td>&lt;e&gt;</td></tr>'), t);              // escaped as everything else
+  assert.ok(t.startsWith('看这个\n<div class="tbl">') && t.endsWith('</table></div>后面'), t);
+  assert.equal(md('| grep x\n'), '<div class="mono">| grep x\n</div>');               // not a table
+  console.log('md ok');
+}
