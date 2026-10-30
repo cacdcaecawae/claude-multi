@@ -32,11 +32,11 @@ look(); LOOK.addEventListener('change', look);
     --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; color-scheme: dark;
     --fgHi: #ffffff; --msg: #d4d4d4; --tint: rgba(255,255,255,.08); --btn: #313131; --btnH: #3c3c3c; --badge: #616161; --badgeFg: #f8f8f8;
     --pop: #252526; --popB: #454545; --accentH: #026ec1; --accentBg: rgba(0,120,212,.22); --errFg: #ffa198; --cellB: #3c3c3c;
-    --split: #4a4a4a; --term: #1f1f1f; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
+    --split: #4a4a4a; --term: #1f1f1f; --act: #131313; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
     --ui: -apple-system, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; --mono: "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
     --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 4l4 4-4 4' fill='none' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E"); }
   /* 亮色: VS Code's Light Modern */
-  :root[data-theme=light] { color-scheme: light; --bg: #ffffff; --bar: #f8f8f8; --border: #e5e5e5; --hover: #f0f0f0; --sel: #e4e6f1; --input: #ffffff;
+  :root[data-theme=light] { color-scheme: light; --bg: #ffffff; --bar: #f3f3f3; --act: #e8e8e8; --border: #e0e0e0; --hover: #f0f0f0; --sel: #e4e6f1; --input: #ffffff;
     --inputB: #cecece; --fg: #3b3b3b; --fg2: #616161; --fg3: #8b8b8b; --fgHi: #1f1f1f; --msg: #2b2b2b; --accent: #005fb8; --accentH: #0258a8;
     --accentBg: rgba(0,95,184,.1); --link: #005fb8; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.06);
     --btn: #e8e8e8; --btnH: #dadada; --badge: #cccccc; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #d4d4d4; --cellB: #d9d9d9;
@@ -50,7 +50,7 @@ look(); LOOK.addEventListener('change', look);
   #app { flex: 1; min-height: 0; display: flex; }
 
   /* activity bar | side bar | editor groups, a status bar under them */
-  #act { width: 48px; flex: none; display: flex; flex-direction: column; align-items: center; border-right: 1px solid var(--border); }
+  #act { width: 48px; flex: none; display: flex; flex-direction: column; align-items: center; border-right: 1px solid var(--border); background: var(--act); }
   #act .logo { width: 24px; height: 24px; border-radius: 5px; margin: 12px 0 8px; }
   #act button { position: relative; width: 48px; height: 48px; display: grid; place-items: center; color: var(--fg3); }
   #act button:hover, #act button.on { color: var(--fg); }
@@ -81,7 +81,8 @@ look(); LOOK.addEventListener('change', look);
   .btn.wide { width: 100%; padding: 6px; }
   .btn:disabled { opacity: .45; pointer-events: none; }
   @media (hover: hover) { .btn:hover { background: var(--btnH); } .btn.primary:hover { background: var(--accentH); } }
-  details.sec > summary { list-style: none; height: 24px; display: flex; align-items: center; gap: 2px; padding: 0 10px 0 2px; font-size: 11px; font-weight: 700; cursor: pointer; user-select: none; }
+  details.sec + details.sec { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; }
+  details.sec > summary { color: var(--fg2); letter-spacing: .03em; list-style: none; height: 24px; display: flex; align-items: center; gap: 2px; padding: 0 10px 0 2px; font-size: 11px; font-weight: 700; cursor: pointer; user-select: none; }
   details.sec > summary::-webkit-details-marker, details.tools summary::-webkit-details-marker { display: none; }
   details.sec > summary::before, details.tools summary::before { content: ''; width: 16px; height: 16px; flex: none; background: currentColor;
     -webkit-mask: var(--chev) center / 16px no-repeat; mask: var(--chev) center / 16px no-repeat; transition: transform .1s; }
@@ -180,7 +181,7 @@ look(); LOOK.addEventListener('change', look);
   /* a conversation: where it is, the record (对话) or the terminal (终端), the input */
   .pane { flex: 1; min-height: 0; display: none; flex-direction: column; }
   .pane.on { display: flex; }
-  .crumbs { height: 30px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 14px; font-size: 12px; color: var(--fg2); }
+  .crumbs { height: 30px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 14px; font-size: 12px; color: var(--fg2); border-bottom: 1px solid var(--border); }
   .crumbs .path { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .crumbs .path b { font-weight: 400; color: var(--fg); }
   .crumbs .dim { color: var(--fg3); }
@@ -212,10 +213,15 @@ look(); LOOK.addEventListener('change', look);
   .hm th, .hm td { border: 1px solid var(--cellB); padding: 5px 10px; text-align: left; vertical-align: top; min-width: 4.5em; }
   .hm th { background: var(--bar); color: var(--fgHi); font-weight: 600; white-space: nowrap; }
   .hm code { font: .92em var(--mono); background: var(--tint); border-radius: 3px; padding: 1px 4px; }
-  .hm .h { font-size: 14.5px; color: var(--fgHi); }
-  .hm.done { font-size: 12px; color: var(--green); }
+  .hm .h { font-size: 1.08em; color: var(--fgHi); }
+  .hm.done { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--green); margin: 2px 0 12px; }
+  .hm.done::after { content: ''; flex: 1; height: 1px; background: var(--border); } /* the turn ends here */
+  .who { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--fg2); margin-top: 2px; }
+  .who img { width: 16px; height: 16px; border-radius: 4px; }
   /* a turn: Claude's tool calls in a row folded into one line (tap to see each); the end of the answer marked */
-  details.tools summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 2px; font-size: 12.5px; color: var(--fg3); }
+  details.tools summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 2px; font-size: 12.5px; color: var(--fg2);
+    padding: 3px 10px 3px 4px; border-radius: 6px; background: var(--tint); }
+  @media (hover: hover) { details.tools summary:hover { color: var(--fg); } }
   details.tools > div { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 4px 7px; padding-left: 11px; border-left: 2px solid var(--border); }
   .hm.sub { font-size: 12.5px; line-height: 1.6; color: var(--fg2); } /* Claude's words on the way, inside 过程 */
   /* under the messages, live: what you sent (faded until the record has it), Claude at work, a menu to pick from */
@@ -1223,6 +1229,9 @@ const KIND = { Bash: '命令', PowerShell: '命令', Read: '读文件', Edit: '�
 const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${Math.floor(s / 3600)} 小时 ${Math.floor(s / 60) % 60} 分`; };
 function addItems(box, items) {
   for (const m of items) {
+    // Claude's answer begins (its words or its first tool call right after your message): marked as Claude's
+    if ((m.role === 'claude' || m.role === 'tool') && box.lastElementChild?.matches('.hm.user, .hm.img'))
+      box.insertAdjacentHTML('beforeend', '<div class="who"><img src="/icon-180.png?spark" alt="">Claude</div>');
     if (m.role === 'img') { box.insertAdjacentHTML('beforeend', `<a class="hm img" href="${esc(m.src)}" target="_blank"><img src="${esc(m.src)}" loading="lazy" alt="图片"></a>`); continue; }
     if (m.role === 'user' && !m.text) continue; // pictures only
     if (m.role !== 'tool') {
