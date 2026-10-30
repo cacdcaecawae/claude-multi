@@ -389,3 +389,28 @@ console.log('tokens ok');
   assert.equal(md('| grep x\n'), '<div class="mono">| grep x\n</div>');               // not a table
   console.log('md ok');
 }
+
+// A picture in a record: history() names it by its line's place in bytes and which picture it is, recordImage() gives
+// it back. A picture from the page is saved under a new name; ones older than a week go.
+{
+  const fs = require('fs'), path = require('path'), os = require('os');
+  const { history, recordImage, saveUpload } = require('./claude-multi');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-img-')), f = path.join(d, 'r.jsonl');
+  const png = Buffer.from('89504e470d0a1a0a', 'hex'), ts = new Date().toISOString();
+  const line = (content) => JSON.stringify({ type: 'user', timestamp: ts, message: { role: 'user', content } });
+  const pic = (type, data) => ({ type: 'image', source: { type: 'base64', media_type: type, data } });
+  fs.writeFileSync(f, `${line('你好，世界')}\n${line([{ type: 'text', text: '[Image #1] [Image #2] 看图' }, pic('image/png', png.toString('base64')), pic('image/jpeg', 'AAAA')])}\n`);
+  const items = history(f).items;
+  assert.deepEqual(items.map((m) => m.role), ['user', 'img', 'img', 'user']);  // the pictures above the words
+  const ref = (m) => m.text.split('.').map(Number);
+  assert.deepEqual(ref(items[2]), [Buffer.byteLength(line('你好，世界')) + 1, 1]); // bytes, not characters
+  assert.deepEqual(recordImage(f, ...ref(items[1])), { type: 'image/png', data: png });
+  assert.equal(recordImage(f, ...ref(items[2])).type, 'image/jpeg');
+  assert.throws(() => recordImage(f, ref(items[2])[0], 2));                    // no third one
+  const up = path.join(d, 'up'), old = path.join(up, 'old.png');
+  fs.mkdirSync(up); fs.writeFileSync(old, 'x'); fs.utimesSync(old, new Date(0), new Date(0));
+  const saved = saveUpload(png, 'png', up);
+  assert.ok(fs.readFileSync(saved).equals(png) && saved.endsWith('.png') && !fs.existsSync(old));
+  fs.rmSync(d, { recursive: true, force: true });
+  console.log('image ok');
+}

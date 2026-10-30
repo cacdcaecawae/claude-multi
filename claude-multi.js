@@ -1054,7 +1054,10 @@ function history(file, { from, end } = {}) {
     text = String(text ?? '').trim();
     if (text) out.push({ role, text: text.length > 20000 ? text.slice(0, 20000) + '…' : text, at });
   };
+  let next = a + skip; // where each line starts in the file: a picture in it is fetched from there (recordImage)
   for (const l of lines) {
+    const pos = next;
+    next += Buffer.byteLength(l) + 1;
     if (!l.includes('"type":"user"') && !l.includes('"type":"assistant"') && !l.includes('"queued_command"') && !l.includes('"turn_duration"')) continue;
     if (l.includes('"type":"tool_result"')) continue; // tool output, often huge (screenshots): not shown, not parsed
     let j;
@@ -1067,8 +1070,11 @@ function history(file, { from, end } = {}) {
       if (j.subtype === 'turn_duration' && j.durationMs > 0) add('done', String(j.durationMs), at);
     } else if (j.type === 'user') {
       if (j.isCompactSummary) { add('note', '更早的内容已压缩', at); continue; }
-      for (const p of typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : []) {
-        if (p.type === 'image') add('user', '[图片]', at);
+      const parts = typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : [];
+      // your pictures (pasted, dragged in, sent from the page) above what you wrote: "line.k", the line's place and
+      // which picture in it. The text has an [Image #N] for each, the page leaves those out.
+      parts.filter((p) => p.type === 'image').forEach((p, k) => add('img', `${pos}.${k}`, at));
+      for (const p of parts) {
         if (p.type !== 'text') continue;
         let t = p.text.trim();
         if (/^<(task-notification|teammate-message|local-command-stdout|local-command-caveat|system-reminder)/.test(t)) continue;
@@ -1087,6 +1093,30 @@ function history(file, { from, end } = {}) {
     }
   }
   return { items: out, start: a + skip, end: last < skip ? a + skip : a + last + 1 };
+}
+// The k-th picture of the record's line at byte pos, as history() names it ("pos.k"): its type and bytes.
+function recordImage(file, pos, k) {
+  const fd = fs.openSync(file, 'r'), parts = [];
+  try { // the line: read on to its end (a picture makes it megabytes long)
+    for (let at = pos, nl = -1; nl < 0 && at - pos < 64 << 20;) {
+      const b = Buffer.alloc(1 << 20), got = fs.readSync(fd, b, 0, b.length, at);
+      if (!got) break;
+      nl = b.subarray(0, got).indexOf(10); parts.push(b.subarray(0, nl < 0 ? got : nl)); at += got;
+    }
+  } finally { fs.closeSync(fd); }
+  const p = JSON.parse(Buffer.concat(parts).toString('utf8')).message?.content?.filter?.((x) => x.type === 'image')[k];
+  if (!/^image\/(png|jpeg|gif|webp)$/.test(p?.source?.media_type ?? '')) throw new Error('没有这张图片'); // never served as anything else
+  return { type: p.source.media_type, data: Buffer.from(p.source.data, 'base64') };
+}
+// A picture sent from the page, kept for Claude to take in by its path: the page pastes the path, as dragging the file
+// into a terminal does, and Claude attaches it ([Image #1]) and copies it into its record. Kept a week.
+const UPLOADS = path.join(ROOT, 'uploads');
+function saveUpload(data, ext, dir = UPLOADS) {
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(dir)) try { if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 7 * 864e5) fs.unlinkSync(path.join(dir, f)); } catch {}
+  const file = path.join(dir, `${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${require('crypto').randomBytes(3).toString('hex')}.${ext}`);
+  fs.writeFileSync(file, data);
+  return file;
 }
 
 // The start of a window's history: the reader keeps only what scrolls by from where it began (the screen then),
@@ -1205,6 +1235,16 @@ async function web() {
     try { fs.writeFileSync(WEB_TERMS, JSON.stringify([...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid).map((t) => t.pid))); } catch {}
   }
 
+  // the record of the conversation asked for (?key, ?id): by the open terminal's key, else by its id
+  function recordOf(q) {
+    const t = terms.get(q.get('key') ?? '');
+    if (t?.dir && !t.file && t.pid) try {
+      const id = JSON.parse(fs.readFileSync(path.join(t.dir, 'sessions', `${t.pid}.json`), 'utf8')).sessionId;
+      for (const d of fs.readdirSync(path.join(t.dir, 'projects'))) if (fs.existsSync(path.join(t.dir, 'projects', d, `${id}.jsonl`))) t.file = path.join(t.dir, 'projects', d, `${id}.jsonl`);
+    } catch {}
+    return { t, file: t?.file ?? sessions().find((x) => x.id === q.get('id'))?.file };
+  }
+
   const api = {
     // the quota as last read, at once: reading it again (each account's, over the network) takes a second or
     // more, so one over a minute old is read again in the background, for the next look. That read goes abroad
@@ -1226,12 +1266,7 @@ async function web() {
     // started here has a record once Claude wrote the first message (its session file, named by its pid, says
     // which conversation it is), until then none.
     'GET /api/history': (q) => {
-      const t = terms.get(q.get('key') ?? '');
-      if (t?.dir && !t.file && t.pid) try {
-        const id = JSON.parse(fs.readFileSync(path.join(t.dir, 'sessions', `${t.pid}.json`), 'utf8')).sessionId;
-        for (const d of fs.readdirSync(path.join(t.dir, 'projects'))) if (fs.existsSync(path.join(t.dir, 'projects', d, `${id}.jsonl`))) t.file = path.join(t.dir, 'projects', d, `${id}.jsonl`);
-      } catch {}
-      const file = t?.file ?? sessions().find((x) => x.id === q.get('id'))?.file;
+      const { t, file } = recordOf(q);
       if (!file) { if (t) return { items: [], start: 0, end: 0 }; throw new Error('找不到这个对话'); }
       return { ...history(file, { from: q.get('from') || undefined, end: q.get('end') || undefined }), id: path.basename(file, '.jsonl') };
     },
@@ -1366,13 +1401,29 @@ async function web() {
         });
         return;
       }
+      // a picture in a conversation's record (?ref "line.k" from the history), for the page's 对话 view
+      if (req.method === 'GET' && url.pathname === '/api/image') {
+        const ref = /^(\d+)\.(\d+)$/.exec(url.searchParams.get('ref') ?? ''), { file } = recordOf(url.searchParams);
+        if (!ref || !file) return out(404, { err: '没有这张图片' });
+        const img = recordImage(file, +ref[1], +ref[2]);
+        res.writeHead(200, { 'content-type': img.type, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
+        return res.end(img.data);
+      }
+      // only from our own page: from the same origin, as JSON or a picture's own type (another site's page can't send
+      // either cross-origin without asking first, and nothing here answers that)
+      if (req.method === 'POST' && req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return out(403, { err: '来源不对' });
+      if (req.method === 'POST' && url.pathname === '/api/upload') { // a picture's bytes: saved, its path back for the page to paste
+        const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }[req.headers['content-type']];
+        if (!ext) return out(415, { err: '只能发 png、jpg、gif、webp 图片' });
+        const parts = []; let size = 0;
+        for await (const ch of req) { if ((size += ch.length) > 20 << 20) return out(413, { err: '图片太大了（最大 20 MB）' }); parts.push(ch); }
+        return out(200, { path: saveUpload(Buffer.concat(parts), ext) });
+      }
       const fn = api[`${req.method} ${url.pathname}`];
       if (!fn) return out(404, { err: '没有这个地址' });
       let body = {};
       if (req.method === 'POST') {
-        // only from our own page: JSON from the same origin (another site's page can't send that cross-origin)
         if (!/^application\/json/.test(req.headers['content-type'] ?? '')) return out(415, { err: '只收 JSON' });
-        if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return out(403, { err: '来源不对' });
         let raw = ''; for await (const ch of req) { raw += ch; if (raw.length > 1 << 20) return out(413, { err: '太大' }); }
         body = JSON.parse(raw || '{}');
       }
@@ -1542,7 +1593,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

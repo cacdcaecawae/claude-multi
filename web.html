@@ -13,13 +13,34 @@
 <link rel="apple-touch-icon" href="/icon-180.png?spark">
 <meta name="apple-mobile-web-app-title" content="Claude 多账号">
 <link rel="stylesheet" href="/lib/@xterm/xterm/css/xterm.css?6.0.0">
+<script>
+// the look, 跟随系统 (the default) / 亮色 / 暗色, kept in this browser; set before anything is drawn (no dark flash)
+const LOOK = matchMedia('(prefers-color-scheme: light)');
+function look() {
+  let v = null; try { v = localStorage.getItem('cm-look'); } catch {}
+  const light = v ? v === 'light' : LOOK.matches;
+  document.documentElement.dataset.theme = light ? 'light' : 'dark';
+  document.querySelector('meta[name=theme-color]').content = light ? '#f8f8f8' : '#181818';
+  return v ?? 'auto';
+}
+look(); LOOK.addEventListener('change', look);
+</script>
 <style>
   /* VS Code's Dark Modern colors; the account colors are the island's */
   :root { --bg: #1f1f1f; --bar: #181818; --border: #2b2b2b; --hover: #2a2d2e; --sel: #37373d; --input: #313131; --inputB: #3c3c3c;
     --fg: #cccccc; --fg2: #9d9d9d; --fg3: #6e7681; --accent: #0078d4; --link: #4daafc; --green: #3fb950; --orange: #e5a03a; --red: #f85149;
-    --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158;
+    --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; color-scheme: dark;
+    --fgHi: #ffffff; --msg: #d4d4d4; --tint: rgba(255,255,255,.08); --btn: #313131; --btnH: #3c3c3c; --badge: #616161; --badgeFg: #f8f8f8;
+    --pop: #252526; --popB: #454545; --accentH: #026ec1; --accentBg: rgba(0,120,212,.22); --errFg: #ffa198; --cellB: #3c3c3c;
+    --term: #1f1f1f; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
     --ui: -apple-system, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; --mono: "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
     --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 4l4 4-4 4' fill='none' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E"); }
+  /* 亮色: VS Code's Light Modern */
+  :root[data-theme=light] { color-scheme: light; --bg: #ffffff; --bar: #f8f8f8; --border: #e5e5e5; --hover: #f0f0f0; --sel: #e4e6f1; --input: #ffffff;
+    --inputB: #cecece; --fg: #3b3b3b; --fg2: #616161; --fg3: #8b8b8b; --fgHi: #1f1f1f; --msg: #2b2b2b; --accent: #005fb8; --accentH: #0258a8;
+    --accentBg: rgba(0,95,184,.1); --link: #005fb8; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.06);
+    --btn: #e8e8e8; --btnH: #dadada; --badge: #cccccc; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #d4d4d4; --cellB: #d9d9d9;
+    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 13px/1.4 var(--ui); }
   body { display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
@@ -36,6 +57,7 @@
   #app.side #act button.on::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
   #act svg { width: 24px; height: 24px; }
   #act .label { display: none; }
+  #look { margin-top: auto; } /* at the bottom, as VS Code's settings */
   #badge { position: absolute; right: 7px; bottom: 7px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
   #side { width: var(--sideW, 300px); flex: none; display: none; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); }
   #app.side #side { display: flex; }
@@ -50,27 +72,27 @@
   #app:not(.side) #sideSash { display: none; }
   body.dragging { cursor: col-resize; user-select: none; }
   body.dragging .screen { pointer-events: none; }
-  @media (hover: hover) { .ico:hover { background: rgba(255,255,255,.08); color: var(--fg); } }
+  @media (hover: hover) { .ico:hover { background: var(--tint); color: var(--fg); } }
 
   /* the side bar's lists: folding sections, two-line rows */
   .top { padding: 4px 12px 10px; }
-  .btn { background: var(--input); border-radius: 4px; padding: 5px 12px; line-height: 18px; }
+  .btn { background: var(--btn); border-radius: 4px; padding: 5px 12px; line-height: 18px; }
   .btn.primary { background: var(--accent); color: #fff; }
   .btn.wide { width: 100%; padding: 6px; }
   .btn:disabled { opacity: .45; pointer-events: none; }
-  @media (hover: hover) { .btn:hover { background: #3c3c3c; } .btn.primary:hover { background: #026ec1; } }
+  @media (hover: hover) { .btn:hover { background: var(--btnH); } .btn.primary:hover { background: var(--accentH); } }
   details.sec > summary { list-style: none; height: 24px; display: flex; align-items: center; gap: 2px; padding: 0 10px 0 2px; font-size: 11px; font-weight: 700; cursor: pointer; user-select: none; }
   details.sec > summary::-webkit-details-marker, details.tools summary::-webkit-details-marker { display: none; }
   details.sec > summary::before, details.tools summary::before { content: ''; width: 16px; height: 16px; flex: none; background: currentColor;
     -webkit-mask: var(--chev) center / 16px no-repeat; mask: var(--chev) center / 16px no-repeat; transition: transform .1s; }
   details[open] > summary::before { transform: rotate(90deg); }
   details.sec > summary > span { flex: 1; }
-  .count { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 8px; background: #616161; color: #f8f8f8; font-size: 10px; line-height: 16px; }
+  .count { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--badge); color: var(--badgeFg); font-size: 10px; line-height: 16px; }
   .link { color: var(--link); font-size: 11px; font-weight: 400; }
   .row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 4px 8px 4px 20px; cursor: pointer; }
   .row:not([data-open]) { cursor: default; }
   .row.sel { background: var(--sel); }
-  .row.open .t { color: #fff; }
+  .row.open .t { color: var(--fgHi); }
   .row .main { flex: 1; min-width: 0; }
   .row .aside { display: none; }
   @media (hover: hover) { .row:hover { background: var(--hover); } .row.sel:hover { background: var(--sel); } .row:hover .aside { display: grid; } .link:hover { text-decoration: underline; } }
@@ -79,7 +101,9 @@
   .when { font-size: 11.5px; color: var(--fg3); flex: none; }
   .ac { width: 18px; height: 18px; flex: none; border-radius: 4px; display: grid; place-items: center; font: 700 11px/1 var(--ui); font-style: normal;
     color: var(--c); background: color-mix(in srgb, var(--c) 20%, transparent); }
-  .ac.busy { animation: pulse 1.2s infinite; }
+  .spin { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid var(--orange); border-right-color: transparent; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .tab .spin { margin: 0 2px; }
   .chip { font-size: 11px; padding: 0 6px; border-radius: 3px; line-height: 17px; flex: none; }
   .chip.pc { background: rgba(63,185,80,.18); color: var(--green); }
   .chip.web { background: rgba(0,120,212,.28); color: var(--link); }
@@ -95,7 +119,7 @@
   .card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
   .cardHead { display: flex; align-items: center; gap: 8px; }
   .grow { flex: 1; min-width: 0; }
-  .meter { height: 4px; background: rgba(255,255,255,.08); border-radius: 2px; overflow: hidden; flex: 1; }
+  .meter { height: 4px; background: var(--tint); border-radius: 2px; overflow: hidden; flex: 1; }
   .meter > i { display: block; height: 100%; }
   .win { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg2); margin-top: 6px; }
   .win b { width: 36px; text-align: right; color: var(--fg); font-weight: 600; }
@@ -107,7 +131,7 @@
   .rec { color: var(--green); font-size: 11px; background: rgba(63,185,80,.15); padding: 0 6px; border-radius: 3px; line-height: 17px; }
   .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .tile { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
-  .tile .k { font-size: 11.5px; color: var(--fg2); } .tile .v { font-size: 18px; font-weight: 600; color: #e7e7e7; } .tile .u { font-size: 12px; color: var(--fg2); }
+  .tile .k { font-size: 11.5px; color: var(--fg2); } .tile .v { font-size: 18px; font-weight: 600; color: var(--fgHi); } .tile .u { font-size: 12px; color: var(--fg2); }
   .bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-top: 6px; }
   .bars > div { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; height: 100%; }
   .bars i { display: block; border-radius: 2px 2px 0 0; }
@@ -127,7 +151,7 @@
   .tab { position: relative; flex: none; display: flex; align-items: center; gap: 6px; max-width: 220px; height: 100%; padding: 0 4px 0 10px;
     color: var(--fg2); border-right: 1px solid var(--border); cursor: pointer; user-select: none; }
   .tab .tt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tab.on { background: var(--bg); color: #fff; }
+  .tab.on { background: var(--bg); color: var(--fgHi); }
   .group.focus .tab.on::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--accent); }
   .tab.gone .tt { opacity: .6; text-decoration: line-through; }
   .tab .ac { width: 16px; height: 16px; font-size: 10px; }
@@ -139,7 +163,7 @@
   .tab.on .x::after { display: none; }
   .tab:not(.on) .x.ask::after, .tab:not(.on) .x.done::after { content: ''; width: 8px; height: 8px; border-radius: 4px; background: var(--orange); }
   .x.done::after { background: var(--green); }
-  @media (hover: hover) { .tab:hover .x { visibility: visible; } .x:hover { background: rgba(255,255,255,.1); color: var(--fg); }
+  @media (hover: hover) { .tab:hover .x { visibility: visible; } .x:hover { background: var(--tint); color: var(--fg); }
     .tab:hover .x svg { display: block; } .tab:hover .x::after { display: none; } }
   .tabs > .ico { width: 35px; height: 35px; border-radius: 0; }
   .tabs .list, .brand { display: none; }
@@ -158,22 +182,22 @@
   .crumbs .dim { color: var(--fg3); }
   .seg { display: flex; border: 1px solid var(--border); border-radius: 5px; padding: 1px; flex: none; margin-right: 2px; }
   .seg button { padding: 1px 9px; border-radius: 3px; font-size: 12px; color: var(--fg2); }
-  .seg button.on { background: var(--sel); color: #fff; }
+  .seg button.on { background: var(--sel); color: var(--fgHi); }
   .notice { display: none; align-items: center; gap: 10px; padding: 6px 14px; font-size: 12.5px; }
   .pane.gone .notice, .pane.idle .notice { display: flex; }
-  .pane.gone .notice { background: rgba(248,81,73,.1); color: #ffa198; }
-  .pane.idle .notice { background: rgba(255,255,255,.04); color: var(--fg2); }
+  .pane.gone .notice { background: rgba(248,81,73,.1); color: var(--errFg); }
+  .pane.idle .notice { background: var(--bar); color: var(--fg2); }
   .notice span { flex: 1; }
-  .screen { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
+  .screen { flex: 1; min-height: 0; overflow: auto; background: var(--term); }
   .screen .xterm { padding: 6px 2px 4px 10px; } /* on the terminal itself: the fit add-on subtracts it */
-  .screen .xterm-viewport { background: var(--bg) !important; } /* xterm.css paints it black; the theme colors only what's inside */
+  .screen .xterm-viewport { background: var(--term) !important; } /* xterm.css paints it black; the theme colors only what's inside */
   .msgs { flex: 1; min-height: 0; overflow-y: auto; display: none; padding: 12px 20px 18px; }
   .pane.hist .msgs { display: block; }
   .pane.hist .screen, .pane.hist .keys { display: none; }
   .col { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
   .hOld, .hNew, .live { display: contents; } /* their messages sit in the column's flow */
-  .hm { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; line-height: 1.65; color: #d4d4d4; }
-  .hm.user { align-self: flex-end; max-width: 85%; margin-top: 14px; background: rgba(0,120,212,.22); color: #e7e7e7; border-radius: 8px 8px 2px 8px; padding: 7px 12px; }
+  .hm { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; line-height: 1.65; color: var(--msg); }
+  .hm.user { align-self: flex-end; max-width: 85%; margin-top: 14px; background: var(--accentBg); color: var(--fgHi); border-radius: 8px 8px 2px 8px; padding: 7px 12px; }
   .hm.user.pending { opacity: .5; }
   .hm.tool { font: 12px/1.5 var(--mono); color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hm.tool::before { content: '● '; color: var(--green); }
@@ -181,10 +205,10 @@
   .hm pre, .hm .mono { font: 12.5px/1.5 var(--mono); background: var(--bar); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; overflow-x: auto; white-space: pre; margin: 4px 0; }
   .hm .tbl { overflow-x: auto; margin: 4px 0; } /* sideways only when even wrapped it can't fit (a phone, many columns) */
   .hm table { border-collapse: collapse; white-space: normal; font-size: .95em; line-height: 1.55; }
-  .hm th, .hm td { border: 1px solid #3c3c3c; padding: 5px 10px; text-align: left; vertical-align: top; min-width: 4.5em; }
-  .hm th { background: var(--bar); color: #e7e7e7; font-weight: 600; white-space: nowrap; }
-  .hm code { font: .92em var(--mono); background: rgba(255,255,255,.1); border-radius: 3px; padding: 1px 4px; }
-  .hm .h { font-size: 14.5px; color: #fff; }
+  .hm th, .hm td { border: 1px solid var(--cellB); padding: 5px 10px; text-align: left; vertical-align: top; min-width: 4.5em; }
+  .hm th { background: var(--bar); color: var(--fgHi); font-weight: 600; white-space: nowrap; }
+  .hm code { font: .92em var(--mono); background: var(--tint); border-radius: 3px; padding: 1px 4px; }
+  .hm .h { font-size: 14.5px; color: var(--fgHi); }
   .hm.done { font-size: 12px; color: var(--green); }
   /* a turn: Claude's tool calls in a row folded into one line (tap to see each); the end of the answer marked */
   details.tools summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 2px; font-size: 12.5px; color: var(--fg3); }
@@ -196,13 +220,27 @@
   .ask { background: var(--bar); border: 1px solid var(--border); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
   .ask .q { white-space: pre-wrap; font-size: 13px; padding: 0 2px 6px; }
   .ask .pick { text-align: left; padding: 7px 10px; border-radius: 4px; border: 1px solid transparent; }
-  .ask .pick.on { background: rgba(0,120,212,.2); border-color: var(--accent); }
+  .ask .pick.on { background: var(--accentBg); border-color: var(--accent); }
   .ask .row2 { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
-  .ask .row2 button { font-size: 12px; padding: 3px 10px; border-radius: 4px; background: var(--input); }
-  @media (hover: hover) { .ask .pick:hover { background: var(--hover); } .ask .pick.on:hover { background: rgba(0,120,212,.28); } }
+  .ask .row2 button { font-size: 12px; padding: 3px 10px; border-radius: 4px; background: var(--btn); }
+  @media (hover: hover) { .ask .pick:hover { background: var(--hover); } .ask .pick.on:hover { background: var(--accentBg); } }
   .keys { display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; border-top: 1px solid var(--border); scrollbar-width: none; flex: none; }
-  .keys button { flex: none; background: var(--input); border-radius: 5px; padding: 7px 11px; font-size: 13px; font-weight: 600; }
+  .keys button { flex: none; background: var(--btn); border-radius: 5px; padding: 7px 11px; font-size: 13px; font-weight: 600; }
   .send { display: flex; gap: 8px; align-items: flex-end; width: 100%; max-width: 900px; margin: 0 auto; padding: 8px 20px calc(10px + env(safe-area-inset-bottom)); flex: none; }
+  .send { flex-wrap: wrap; }
+  .send .pic { width: 38px; height: 38px; }
+  .send .pic svg { width: 20px; height: 20px; }
+  .atts { flex-basis: 100%; display: flex; gap: 8px; overflow-x: auto; padding: 8px 8px 4px 2px; }
+  .atts:empty { display: none; }
+  .att { position: relative; flex: none; }
+  .att img { height: 56px; width: auto; max-width: 120px; border-radius: 6px; border: 1px solid var(--border); object-fit: cover; display: block; }
+  .att button { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 10px; background: var(--fg2); color: var(--bg); display: grid; place-items: center; }
+  .att button svg { width: 12px; height: 12px; }
+  /* a picture in the conversation: fixed height (nothing jumps as it loads), tap for the whole of it */
+  .hm.img { align-self: flex-end; margin-top: 14px; line-height: 0; }
+  .hm.img + .hm.img, .hm.img + .hm.user { margin-top: 0; } /* a message's pictures and its words together */
+  .hm.img img { height: 200px; width: auto; max-width: 100%; min-width: 60px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; background: var(--bar); }
+  .hm.img.pending { opacity: .5; }
   .send textarea { flex: 1; resize: none; height: 38px; max-height: 160px; }
   .go { height: 38px; min-width: 64px; }
   .go.stop { background: var(--red); }
@@ -221,7 +259,7 @@
   #status .remote svg { width: 14px; height: 14px; }
   #status .grow { padding: 0; }
   #status i { width: 8px; height: 8px; border-radius: 4px; }
-  #sAcct:hover { background: rgba(255,255,255,.1); }
+  #sAcct:hover { background: var(--tint); }
 
   /* a phone: one group; the side bar over it under the tab strip, the activity bar at the bottom */
   @media (max-width: 759px) {
@@ -241,7 +279,7 @@
     .group:not(.focus), .group.blank .hint { display: none; }
     .tabs { height: 44px; }
     .tabs .list { display: grid; width: 44px; height: 44px; }
-    #app.side .tabs .list { color: #fff; background: var(--bg); }
+    #app.side .tabs .list { color: var(--fgHi); background: var(--bg); }
     #app.side .tab.on { background: none; color: var(--fg2); }
     #app.side .group.focus .tab.on::before { display: none; }
     .tab { max-width: 170px; padding: 0 2px 0 12px; }
@@ -259,7 +297,8 @@
     .hm { font-size: 15px; } .hm.tool { font-size: 12.5px; }
     .hm th, .hm td { padding: 4px 7px; min-width: 3.5em; }
     .send { padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
-    .send textarea, .go { height: 42px; }
+    .send textarea, .go, .send .pic { height: 42px; }
+    .hm.img img { height: 160px; }
   }
   @media (pointer: fine) {
     ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -272,18 +311,18 @@
   /* pickers: a quick pick at the top on a computer, a sheet from the bottom on a phone */
   .sheet { position: fixed; inset: 0; z-index: 20; display: none; background: rgba(0,0,0,.5); align-items: flex-end; }
   .sheet.on { display: flex; }
-  .sheet .in { background: #252526; width: 100%; padding: 16px 16px calc(18px + env(safe-area-inset-bottom)); border-radius: 12px 12px 0 0; max-height: 85vh; overflow: auto; border-top: 1px solid #454545; }
+  .sheet .in { background: var(--pop); width: 100%; padding: 16px 16px calc(18px + env(safe-area-inset-bottom)); border-radius: 12px 12px 0 0; max-height: 85vh; overflow: auto; border-top: 1px solid var(--popB); }
   @media (min-width: 760px) {
     .sheet { align-items: flex-start; justify-content: center; background: rgba(0,0,0,.3); }
-    .sheet .in { width: 560px; margin-top: 8vh; border-radius: 8px; border: 1px solid #454545; box-shadow: 0 8px 32px rgba(0,0,0,.55); padding: 16px; }
+    .sheet .in { width: 560px; margin-top: 8vh; border-radius: 8px; border: 1px solid var(--popB); box-shadow: 0 8px 32px rgba(0,0,0,.55); padding: 16px; }
   }
-  .stitle { font-size: 15px; font-weight: 600; color: #fff; }
+  .stitle { font-size: 15px; font-weight: 600; color: var(--fgHi); }
   .opts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 12px; }
-  .opt { padding: 6px 10px; border-radius: 4px; background: var(--input); border: 1px solid transparent; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .opt.on { background: rgba(0,120,212,.22); border-color: var(--accent); color: #fff; }
+  .opt { padding: 6px 10px; border-radius: 4px; background: var(--btn); border: 1px solid transparent; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opt.on { background: var(--accentBg); border-color: var(--accent); color: var(--fgHi); }
   .opt small { color: var(--fg2); font-size: 11.5px; margin-left: 4px; }
   .opt:disabled { opacity: .45; }
-  .toast { position: fixed; z-index: 30; right: 12px; bottom: 34px; max-width: min(420px, calc(100vw - 24px)); background: #252526; border: 1px solid #454545;
+  .toast { position: fixed; z-index: 30; right: 12px; bottom: 34px; max-width: min(420px, calc(100vw - 24px)); background: var(--pop); border: 1px solid var(--popB);
     box-shadow: 0 4px 20px rgba(0,0,0,.5); border-radius: 6px; padding: 10px 14px; white-space: pre-wrap; display: none; }
   @media (max-width: 759px) { .toast { left: 50%; right: auto; transform: translateX(-50%); width: max-content; bottom: calc(80px + env(safe-area-inset-bottom)); } }
 </style>
@@ -295,6 +334,7 @@
     <button data-side="chats" title="对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4z"/></svg><span class="label">对话</span><b id="badge" hidden></b></button>
     <button data-side="usage" title="额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg><span class="label">额度</span></button>
     <button data-side="tokens" title="用量"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 19V11M10 19V6M15 19v-9M20 19v-5"/></svg><span class="label">用量</span></button>
+    <button id="look" title="外观"></button>
   </nav>
   <aside id="side"><div class="sideHead"><span id="sideTitle">对话</span><div id="sideActs"></div></div><div id="view"><div class="empty">加载中…</div></div></aside>
   <div class="sash" id="sideSash"></div>
@@ -325,7 +365,9 @@ const usd = (u) => '$' + (u >= 1000 ? Math.round(u).toLocaleString() : u.toFixed
 const base = (p) => String(p ?? '').split(/[\\/]/).filter(Boolean).pop() ?? '';
 const svg = (d, w = 1.6) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M12 4.5v15"/>', close: '<path d="M7 7l10 10M17 7L7 17"/>',
-  list: '<path d="M4 7h16M4 12h16M4 17h16"/>', plus: '<path d="M12 5v14M5 12h14"/>', refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
+  list: '<path d="M4 7h16M4 12h16M4 17h16"/>', pic: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 15.5l-5-5L6 19"/>',
+  auto: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>', light: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
+  dark: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', plus: '<path d="M12 5v14M5 12h14"/>', refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
   swap: '<path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/>', end: '<path d="M12 4v7M7.4 6.6a7 7 0 1 0 9.2 0"/>' };
 const ac = (n, cls = '') => n ? `<i class="ac${cls}" style="--c:${ACCT[(n - 1) % 4]}">${n}</i>` : ''; // an account's mark, n from 1
 
@@ -392,7 +434,9 @@ function drawSide() {
 }
 function drawStatus() {
   const u = state.usage, w = u.accounts?.[u.rec]?.windows?.find((x) => x.k === 'five_hour'), n = state.sessions.filter((s) => s.pid).length;
-  $('#host').textContent = state.me; $('#conn').textContent = n ? `${n} 个在运行` : '';
+  const b = state.sessions.filter((s) => s.busy).length;
+  $('#host').textContent = state.me;
+  $('#conn').innerHTML = (n ? `${n} 个在运行` : '') + (b ? ` · <span class="spin"></span> ${b} 个在回复` : '');
   $('#sAcct').innerHTML = u.open ? `<i style="background:${ACCT[u.rec % 4]}"></i>推荐 账号 ${u.rec + 1}${w ? ` · 5 小时已用 ${w.pct}%` : ''}` : `都到上限了，${esc(u.ready)} 后恢复`;
 }
 function markRows() { // the side bar's rows: which are open in a tab, which one you're looking at
@@ -406,7 +450,7 @@ function renderChats() {
   const run = state.sessions.filter((s) => s.pid), rest = state.sessions.filter((s) => !s.pid).slice(0, 40);
   const row = (s) => `<div class="row" data-open="${esc(s.id)}" draggable="${FINE}" title="${esc(s.cwd)}">${ac(s.acct + 1)}
     <div class="main"><div class="t">${esc(s.title)}</div><div class="m">${esc(base(s.cwd))}${s.prompt ? ' · ' + esc(s.prompt) : ''}</div></div>
-    ${s.pid ? `<span class="chip ${s.where}">${s.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(s.at)}</span>`}
+    ${s.busy ? '<span class="spin" title="正在回复"></span>' : ''}${s.pid ? `<span class="chip ${s.where}">${s.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(s.at)}</span>`}
     <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button></div>`;
   const sec = (k, head, body) => `<details class="sec" data-sec="${k}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').innerHTML = `<button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
@@ -451,6 +495,15 @@ function narrow() {
   drawTabs(focusG);
 }
 NARROW.addEventListener('change', () => { narrow(); drawSide(); });
+// 外观: 跟随系统 → 亮色 → 暗色, round again
+const LOOKS = { auto: '跟随系统', light: '亮色', dark: '暗色' };
+const drawLook = (v) => { $('#look').innerHTML = `${svg(I[v])}<span class="label">外观</span>`; $('#look').title = `外观：${LOOKS[v]}`; };
+drawLook(look());
+$('#look').onclick = () => {
+  const v = { auto: 'light', light: 'dark', dark: 'auto' }[look()];
+  try { if (v === 'auto') localStorage.removeItem('cm-look'); else localStorage.setItem('cm-look', v); } catch {}
+  look(); drawLook(v); toast(`外观：${LOOKS[v]}`);
+};
 
 // the next renewal (guessed monthly), with how it's paid: the App Store, Google Play, or a card on claude.ai (Stripe).
 // The island draws the same three marks.
@@ -563,26 +616,29 @@ function makeGroup(after) {
     if (t) { drag = { conv: g.tabs[+t.dataset.i] }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); }
   };
   // a tab or a side bar row dropped on a group: moved or opened there; on a tab: before it
-  g.el.ondragover = (e) => { if (drag) { e.preventDefault(); g.el.classList.add('drop'); } };
+  g.el.ondragover = (e) => { if (drag || (g.active && e.dataTransfer.types.includes('Files'))) { e.preventDefault(); g.el.classList.add('drop'); } };
   g.el.ondragleave = (e) => { if (!g.el.contains(e.relatedTarget)) g.el.classList.remove('drop'); };
   g.el.ondrop = (e) => {
     e.preventDefault(); g.el.classList.remove('drop');
     const d = drag, at = e.target.closest('[data-i]');
     drag = null;
     if (d?.conv) moveConv(d.conv, g, at ? +at.dataset.i : g.tabs.length); else if (d?.id) openSession(d.id, g);
+    else if (e.dataTransfer.files.length) g.active?.attach([...e.dataTransfer.files]);
   };
   if (after) after.el.after(g.el); else $('#editor').append(g.el);
   groups.splice(after ? groups.indexOf(after) + 1 : groups.length, 0, g);
   relayout(); drawTabs(g);
   return g;
 }
+for (const t of ['dragover', 'drop']) document.addEventListener(t, (e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
 document.addEventListener('dragend', () => { drag = null; document.querySelectorAll('.drop').forEach((x) => x.classList.remove('drop')); });
 function drawTabs(g) {
-  const note = new Map((state?.notes ?? []).map((n) => [n.id, n.kind]));
+  const note = new Map((state?.notes ?? []).map((n) => [n.id, n.kind])), busy = new Set(state?.sessions.filter((s) => s.busy).map((s) => s.id));
   g.strip.innerHTML = g.tabs.map((c, i) => {
+    const turning = c.ended ? false : c === g.active && c.started ? c.live === 'busy' : busy.has(c.id);
     const dot = c.live === 'ask' || note.get(c.id) === 'ask' ? ' ask' : note.has(c.id) ? ' done' : '';
     return `<div class="tab${c === g.active ? ' on' : ''}${c.ended ? ' gone' : ''}" data-i="${i}" draggable="${FINE}" title="${esc(c.title)}">
-      ${ac(c.acct, c.live === 'busy' ? ' busy' : '')}<span class="tt">${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
+      ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct)}<span class="tt">${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
   }).join('') || '<span class="brand">Claude 多账号</span>';
   g.el.classList.toggle('blank', !g.tabs.length);
 }
@@ -721,7 +777,7 @@ function makeConv(body, title) {
     <div class="notice"><span></span><button class="btn primary" data-act="resume">接着聊</button></div>
     <div class="screen"></div><div class="msgs"></div>
     <div class="keys">${KEYS.map(([l], i) => `<button data-kb="${i}">${l}</button>`).join('')}</div>
-    <div class="send"><textarea placeholder="${FINE ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入，按发送'}" enterkeyhint="send"></textarea><button class="btn primary go">发送</button></div>`;
+    <div class="send"><div class="atts"></div><button class="ico pic" title="发图片（也可以粘贴、拖进来）">${svg(I.pic)}</button><input type="file" accept="image/*" multiple hidden><textarea placeholder="${FINE ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入，按发送'}" enterkeyhint="send"></textarea><button class="btn primary go">发送</button></div>`;
   const $p = (s) => el.querySelector(s), scr = $p('.screen'), hist = $p('.msgs'), line = $p('.send textarea'), go = $p('.go');
   const notice = (cls, text) => { el.classList.remove('gone', 'idle'); if (cls) { el.classList.add(cls); $p('.notice span').textContent = text; } };
   const redraw = () => { c.sync(); if (c.g) drawTabs(c.g); };
@@ -749,22 +805,60 @@ function makeConv(body, title) {
   // while Claude works and nothing's typed, 发送 is 停止 (Esc to Claude); typing makes it 发送 again: a message
   // sent then waits for Claude to take it in
   function goMode() {
-    const stop = view === 'hist' && busyNow && !line.value.trim();
+    if (sending) return;
+    const stop = view === 'hist' && busyNow && !line.value.trim() && !atts.length;
     go.textContent = stop ? '停止' : '发送'; go.classList.toggle('stop', stop);
   }
   const grow = () => { line.style.height = ''; line.style.height = Math.min(line.scrollHeight + 2, 160) + 'px'; };
   line.addEventListener('input', () => { goMode(); grow(); });
-  go.onclick = () => {
+  let atts = [], sending = false; // the pictures waiting to go, each { url: shown here, up: its upload, to the path }
+  const attsEl = $p('.atts'), pick = $p('input[type=file]');
+  c.attach = (files) => {
+    for (const f of files) {
+      if (!/^image\//.test(f.type)) { toast('只能发图片'); continue; }
+      const a = { url: URL.createObjectURL(f) };
+      a.up = shrink(f).then(upload);
+      a.up.catch((e) => { toast('图片没传上去：' + e.message, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
+      atts.push(a);
+    }
+    drawAtts();
+  };
+  const drawAtts = () => { attsEl.innerHTML = atts.map((a, i) => `<div class="att"><img src="${a.url}" alt=""><button data-unatt="${i}" title="不发这张">${svg(I.close, 2)}</button></div>`).join(''); goMode(); };
+  $p('.pic').onclick = () => pick.click();
+  pick.onchange = () => { c.attach([...pick.files]); pick.value = ''; };
+  line.addEventListener('paste', (e) => { // a screenshot pasted, as into Claude itself
+    const fs = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+    if (fs.length) { e.preventDefault(); c.attach(fs); }
+  });
+  const imagesShown = () => { // the [Image #N] on Claude's screen: one more each time it has attached a pasted picture
+    const b = term.buffer.active; let t = '';
+    for (let i = 0; i < term.rows; i++) t += b.getLine(b.baseY + i)?.translateToString(true) ?? '';
+    return (t.match(/\[Image #\d+\]/g) ?? []).length;
+  };
+  go.onclick = async () => {
     if (go.classList.contains('stop')) return input('\x1b');
-    const v = line.value.trim();
-    if (!v) return;
+    const v = line.value.trim(), imgs = atts;
+    if ((!v && !imgs.length) || sending) return;
     if (!key || c.ended) return toast(c.started && !c.ended ? '还在连接，稍等一下再发' : '这个对话没有在运行，先点上面的「接着聊」'); // what you wrote stays
     // a menu waiting: the message would be typed into it, and its Enter pick what's highlighted ("No, exit", say)
     if (menuNow) return toast('Claude 在等你先在上面选一项，选完再发（你写的还在输入框里）', 4000);
     // one message: the text as a paste (its new lines stay in it), then Enter on its own. Typed in one piece with its
     // Enter, a long text was taken for a paste, the Enter with it for a new line, and the message sat there unsent.
-    input(`\x1b[200~${v.replace(/\n/g, '\r')}\x1b[201~`); input('\r'); line.value = ''; grow();
-    if (view === 'hist') { sent.push({ text: v, at: Date.now() }); drawLive(true); }
+    let paths = [];
+    if (imgs.length) { // all uploaded first (most are by now); one that failed has dropped out, the rest wait for another 发送
+      sending = true; go.textContent = '上传中…';
+      try { paths = await Promise.all(imgs.map((a) => a.up)); } catch { return; } finally { sending = false; goMode(); }
+      if (!key || c.ended) return;
+    }
+    line.value = ''; grow(); atts = []; drawAtts();
+    if (view === 'hist') { sent.push({ text: v, imgs: imgs.map((a) => a.url), at: Date.now() }); drawLive(true); }
+    if (paths.length) { // each path pasted: Claude attaches it in well under a second; Enter waits for that (4 s at most)
+      const before = imagesShown();
+      for (const p of paths) input(`\x1b[200~${p}\x1b[201~`);
+      for (const end = Date.now() + 4000; imagesShown() < before + paths.length && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 100));
+    }
+    if (v) input(`\x1b[200~${v.replace(/\n/g, '\r')}\x1b[201~`);
+    input('\r');
     goMode();
   };
   line.onkeydown = (e) => {
@@ -772,10 +866,11 @@ function makeConv(body, title) {
     if (e.key === 'Escape' && busyNow) input('\x1b'); // as in Claude: Esc stops it
   };
   el.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-v], [data-kb], [data-act], [data-pick], [data-key]');
+    const b = e.target.closest('[data-v], [data-kb], [data-act], [data-pick], [data-key], [data-unatt]');
     if (!b) return;
     const d = b.dataset;
-    if (d.v) setView(d.v);
+    if (d.unatt) { atts.splice(+d.unatt, 1); drawAtts(); }
+    else if (d.v) setView(d.v);
     else if (d.kb) input(KEYS[+d.kb][1]);
     else if (d.act === 'swap') swap();
     else if (d.act === 'end') endIt();
@@ -808,7 +903,9 @@ function makeConv(body, title) {
     if (r.err) throw new Error(r.err);
     // a long paste is recorded as Claude Code hands it to the model, in <pasted_content id="N"> … </pasted_content id="N">:
     // shown without them, and so your message sent here is found in the record (not shown twice)
-    for (const m of r.items ?? []) if (m.role === 'user') m.text = m.text.replace(/<pasted_content id="[^"]*">\n?([\s\S]*?)\n?<\/pasted_content id="[^"]*">/g, '$1').trim();
+    // a picture: fetched from the record by where it is in it; the [Image #N] standing for it in your words left out
+    for (const m of r.items ?? []) if (m.role === 'img') m.src = `/api/image?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}&ref=${m.text}`;
+    for (const m of r.items ?? []) if (m.role === 'user') m.text = m.text.replace(/\[Image #\d+\]\s*/g, '').replace(/<pasted_content id="[^"]*">\n?([\s\S]*?)\n?<\/pasted_content id="[^"]*">/g, '$1').trim();
     return r;
   }
   async function loadHist() {
@@ -852,6 +949,7 @@ function makeConv(body, title) {
     if (g === histGen && hist.scrollTop < 300 && histOldest > 0) loadOlder();
   }
   let pinned = true; // at the last message: kept there when the text rewraps (a split, a sash) or the tab comes back
+  hist.addEventListener('load', () => { if (pinned) hist.scrollTop = hist.scrollHeight; }, true); // a picture came in under you
   hist.addEventListener('scroll', () => { pinned = hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80; if (hist.scrollTop < 300) loadOlder(); });
   new ResizeObserver(() => { if (pinned) hist.scrollTop = hist.scrollHeight; }).observe(hist);
   // Off the terminal's screen. Claude at work shows a spinner row, "✻ Gallivanting… (37s · ↓ 2.9k tokens)"; a
@@ -889,7 +987,8 @@ function makeConv(body, title) {
     if (!live) return;
     sent = sent.filter((s) => Date.now() - s.at < 600000); // ponytail: one the record never shows (some slash commands) goes after 10 min
     const { busy, menu } = term && !c.ended ? screen() : {}, took = busy && /(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0];
-    const h = sent.map((s) => `<div class="hm user pending">${esc(s.text)}</div>`).join('') + (menu
+    const h = sent.map((s) => (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
+      + (s.text ? `<div class="hm user pending">${esc(s.text)}</div>` : '')).join('') + (menu
       ? `<div class="ask">${menu.ask ? `<div class="q">${esc(menu.ask)}</div>` : ''}${menu.opts.map((o) =>
         `<button class="pick${o.n === menu.cur ? ' on' : ''}" data-pick="${o.n}">${o.n}. ${esc(o.label)}</button>`).join('')}
         <div class="row2"><button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
@@ -1076,6 +1175,8 @@ const KIND = { Bash: '命令', PowerShell: '命令', Read: '读文件', Edit: '�
 const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${Math.floor(s / 3600)} 小时 ${Math.floor(s / 60) % 60} 分`; };
 function addItems(box, items) {
   for (const m of items) {
+    if (m.role === 'img') { box.insertAdjacentHTML('beforeend', `<a class="hm img" href="${esc(m.src)}" target="_blank"><img src="${esc(m.src)}" loading="lazy" alt="图片"></a>`); continue; }
+    if (m.role === 'user' && !m.text) continue; // pictures only
     if (m.role !== 'tool') {
       box.insertAdjacentHTML('beforeend', m.role === 'done' ? `<div class="hm done">✓ 回复完成 · 用时 ${dur(+m.text)}</div>`
         : `<div class="hm ${m.role}">${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
@@ -1089,6 +1190,24 @@ function addItems(box, items) {
     g.firstElementChild.textContent = `${list.children.length} 个操作：${Object.entries(n).map(([k, v]) => `${k} ${v}`).join('、')}`;
   }
 }
+// A picture made ready to send: a big one (a phone's photo) to 2000 px on its long side as JPEG, on white (Claude
+// scales larger ones down anyway, and it goes up faster over a phone's network); a small PNG/JPEG/GIF/WebP as it is.
+async function shrink(f) {
+  if (/^image\/(png|jpeg|gif|webp)$/.test(f.type) && f.size < 1.5e6) return f;
+  let b;
+  try { b = await createImageBitmap(f); } catch { throw new Error('这张图片打不开'); }
+  const k = Math.min(1, 2000 / Math.max(b.width, b.height)), cv = document.createElement('canvas');
+  cv.width = Math.round(b.width * k); cv.height = Math.round(b.height * k);
+  const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(b, 0, 0, cv.width, cv.height);
+  return new Promise((ok) => cv.toBlob(ok, 'image/jpeg', 0.9));
+}
+async function upload(blob) { // to the computer: where it was saved there
+  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': blob.type }, body: blob });
+  const j = await r.json().catch(() => ({ err: r.status === 413 ? '图片太大了' : `出错了（${r.status}）` }));
+  if (!r.ok) throw new Error(j.err || r.status);
+  return j.path;
+}
+
 // enough Markdown for Claude's replies: code blocks, tables, inline code, bold, headings. A table drawn as one, its
 // cells wrapping to the width as Claude Code's terminal draws it: rows of | cells |, the |---| line under the header
 // (a \| in a cell is a |). Lines of | without that line aren't a table: kept as they are, monospace.
@@ -1108,7 +1227,7 @@ function md(t) {
 focusGroup(makeGroup());
 drawSide();
 load();
-setInterval(() => { if (document.visibilityState === 'visible') load(); }, 10000);
+setInterval(() => { if (document.visibilityState === 'visible') load(); }, 5000);
 </script>
 </body>
 </html>
