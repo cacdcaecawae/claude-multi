@@ -981,16 +981,21 @@ function makeConv(body, title) {
   };
   // 停止: Esc to Claude. Stopped before it took the message in, Claude puts that message back in its own input box, and
   // the next one sent from here was typed on after it. So it comes back to this input box instead, as Claude does in its
-  // terminal, and Claude's is emptied: Ctrl+C empties a filled one (it asks "exit?" only of an empty one).
+  // terminal, and Claude's is emptied: Ctrl+C empties a filled one (it asks "exit?" only of an empty one). A message sent
+  // meanwhile ends the watch (it would be in Claude's box a moment, and taken back). Its pictures stay behind: in the box
+  // they're only [Image #N], which typed again would be words.
+  let stops = 0;
   async function stop() {
+    const me = ++stops;
     input('\x1b');
-    for (const end = Date.now() + 3000; term && Date.now() < end;) {
+    for (const end = Date.now() + 3000; me === stops && term && !c.closed && Date.now() < end;) {
       await new Promise((ok) => setTimeout(ok, 300));
-      const t = typed();
+      const t = me === stops && typed();
       if (!t) continue;
       input('\x03');
-      line.value = line.value.trim() ? `${t}\n${line.value}` : t; grow(); goMode();
-      return toast('已停止。还没执行的那条消息回到了输入框，可以改了再发', 4000);
+      const words = t.replace(/\[Image #\d+\]\s*/g, '').trim(), pics = /\[Image #\d+\]/.test(t);
+      if (words) { line.value = line.value.trim() ? `${words}\n${line.value}` : words; grow(); goMode(); }
+      return toast(`已停止。还没执行的那条消息回到了输入框，可以改了再发${pics ? '（图片要重新选一下）' : ''}`, 4000);
     }
   }
   go.onclick = async () => {
@@ -1008,6 +1013,7 @@ function makeConv(body, title) {
       try { paths = await Promise.all(imgs.map((a) => a.up)); } catch { return; } finally { sending = false; goMode(); }
       if (!key || c.ended) return;
     }
+    stops++; // a 停止 still watching Claude's input box: this message isn't the one to take back
     line.value = ''; grow(); atts = []; drawAtts();
     if (view === 'hist') { sent.push({ text: v, imgs: imgs.map((a) => a.url), at: Date.now() }); drawLive(true); }
     if (paths.length) { // each path pasted: Claude attaches it in well under a second; Enter waits for that (4 s at most)
