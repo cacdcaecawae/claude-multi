@@ -1141,13 +1141,15 @@ function lead(items, lines, more = false) { // more: the record goes back furthe
   for (let r = 0; r < lines.length && cut < 0; r++) {
     const m = /^[❯●]\s+(.*)/.exec(lines[r].replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')), k = m && key(m[1]);
     if (!k || k.length < 4) continue;
-    for (let i = items.length - 1; i >= 0 && cut < 0; i--) if (items[i].role !== 'tool' && key(items[i].text) === k) { cut = i; skip = r; }
+    for (let i = items.length - 1; i >= 0 && cut < 0; i--) if (items[i].role !== 'tool' && items[i].role !== 'img' && key(items[i].text) === k) { cut = i; skip = r; }
   }
   if (cut < 0) { cut = items.length; skip = lines.length; } // not found: from your latest question, no kept lines (the screen stays)
   let start = cut; // the screen starts at a question: nothing before it
   if (items[cut]?.role !== 'user') for (start = cut - 1; start > 0 && items[start].role !== 'user';) start--;
+  while (start > 0 && items[start - 1].role === 'img') start--; // the question's pictures with it (they come just before its words)
   if (start < 0 || start >= cut) return { text: '', skip };
   const draw = (it) => {
+    if (it.role === 'img') return '\x1b[90m❯ [图片]\x1b[39m'; // its text is where it sits in the record, for the page
     const t = it.text.replace(/\*\*([^*\n]+)\*\*/g, '\x1b[1m$1\x1b[22m').split('\n').join('\r\n  ');
     return it.role === 'user' ? `\x1b[90m❯\x1b[39m ${t}` : it.role === 'claude' ? `● ${t}`
       : it.role === 'tool' ? `\x1b[32m●\x1b[39m \x1b[90m${t}\x1b[39m` : it.role === 'done' ? '\x1b[90m✓ 回复完成\x1b[39m' : `\x1b[90m── ${t} ──\x1b[39m`;

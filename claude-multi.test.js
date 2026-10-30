@@ -202,6 +202,10 @@ console.log('tokens ok');
   const none = lead(items, ['● 认不出的', '● 两行']);                           // nothing on it found
   assert.equal(none.skip, 2);
   assert.deepEqual(plain(none), [EARLIER, '❯ 第三个问题', MARK]);
+  // a picture in the record (its text is its place there, for the web page): drawn as [图片], never matched to the screen
+  const pic = [{ role: 'user', text: '先看第一张' }, { role: 'img', text: '1234.0' }, { role: 'user', text: '[Image #1] 这是什么' }, { role: 'claude', text: '那是一只橘猫' }];
+  assert.deepEqual(plain(lead(pic, ['● 那是一只橘猫'])), [EARLIER, '❯ [图片]', '❯ [Image #1] 这是什么', MARK]); // its picture with it
+  assert.equal(lead(pic, ['● 1234.0']).skip, 1);                               // not found: the place isn't text
   console.log('lead ok');
 }
 

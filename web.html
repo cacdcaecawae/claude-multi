@@ -201,13 +201,13 @@ look(); LOOK.addEventListener('change', look);
   .pane.hist .screen, .pane.hist .keys { display: none; }
   .col { max-width: 1600px; margin: 0 auto; /* wide: your messages out to the right, Claude's to the left; capped for a huge screen */ display: flex; flex-direction: column; gap: 10px; }
   .hOld, .hNew, .live { display: contents; } /* their messages sit in the column's flow */
-  .hm { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; line-height: 1.65; color: var(--msg); }
+  .hm { white-space: pre-wrap; word-break: break-word; font-size: 15px; line-height: 1.65; color: var(--msg); } /* the conversation a size up from the frame (13px), for reading */
   .hm.user { align-self: flex-end; max-width: 85%; margin-top: 14px; background: var(--accentBg); color: var(--fgHi); border-radius: 8px 8px 2px 8px; padding: 7px 12px; }
   .hm.user.pending { opacity: .5; }
-  .hm.tool { font: 12px/1.5 var(--mono); color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hm.tool { font: 12.5px/1.5 var(--mono); color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hm.tool::before { content: '● '; color: var(--green); }
   .hm.note { align-self: center; font-size: 12px; color: var(--fg3); }
-  .hm pre, .hm .mono { font: 12.5px/1.5 var(--mono); background: var(--bar); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; overflow-x: auto; white-space: pre; margin: 4px 0; }
+  .hm pre, .hm .mono { font: 13px/1.5 var(--mono); background: var(--bar); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; overflow-x: auto; white-space: pre; margin: 4px 0; }
   .hm .tbl { overflow-x: auto; margin: 4px 0; } /* sideways only when even wrapped it can't fit (a phone, many columns) */
   .hm table { border-collapse: collapse; white-space: normal; font-size: .95em; line-height: 1.55; }
   .hm th, .hm td { border: 1px solid var(--cellB); padding: 5px 10px; text-align: left; vertical-align: top; min-width: 4.5em; }
@@ -220,11 +220,11 @@ look(); LOOK.addEventListener('change', look);
   .who .took { font-weight: 400; color: var(--green); margin-left: 6px; }
   .who img { width: 16px; height: 16px; border-radius: 4px; }
   /* a turn: Claude's tool calls in a row folded into one line (tap to see each); the end of the answer marked */
-  details.tools summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 2px; font-size: 12.5px; color: var(--fg2);
+  details.tools summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: var(--fg2);
     padding: 3px 10px 3px 4px; border-radius: 6px; background: var(--tint); }
   @media (hover: hover) { details.tools summary:hover { color: var(--fg); } }
   details.tools > div { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 4px 7px; padding-left: 11px; border-left: 2px solid var(--border); }
-  .hm.sub { font-size: 12.5px; line-height: 1.6; color: var(--fg2); } /* Claude's words on the way, inside 过程 */
+  .hm.sub { font-size: 13.5px; line-height: 1.6; color: var(--fg2); } /* Claude's words on the way, inside 过程 */
   /* under the messages, live: what you sent (faded until the record has it), Claude at work, a menu to pick from */
   .busy { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--orange); }
   .busy i { width: 7px; height: 7px; border-radius: 4px; background: var(--orange); animation: pulse 1.2s infinite; }
@@ -253,7 +253,7 @@ look(); LOOK.addEventListener('change', look);
   .hm.img + .hm.img, .hm.img + .hm.user { margin-top: 0; } /* a message's pictures and its words together */
   .hm.img img { height: 200px; width: auto; max-width: 100%; min-width: 60px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; background: var(--bar); }
   .hm.img.pending { opacity: .5; }
-  .send textarea { flex: 1; resize: none; height: 38px; max-height: 160px; }
+  .send textarea { font-size: 14px; flex: 1; resize: none; height: 38px; max-height: 160px; }
   .go { height: 38px; min-width: 64px; }
   .go.stop { background: var(--red); }
   input[type=text], textarea { width: 100%; background: var(--input); border: 1px solid var(--inputB); border-radius: 6px; color: var(--fg); font: inherit; padding: 8px 10px; outline: none; }
