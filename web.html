@@ -216,7 +216,8 @@ look(); LOOK.addEventListener('change', look);
   .hm .h { font-size: 1.08em; color: var(--fgHi); }
   .hm.done { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--green); margin: 2px 0 12px; }
   .hm.done::after { content: ''; flex: 1; height: 1px; background: var(--border); } /* the turn ends here */
-  .who { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--fg2); margin-top: 2px; }
+  .who { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--fg2); margin-top: 2px; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
+  .who .took { font-weight: 400; color: var(--green); margin-left: 6px; }
   .who img { width: 16px; height: 16px; border-radius: 4px; }
   /* a turn: Claude's tool calls in a row folded into one line (tap to see each); the end of the answer marked */
   details.tools summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 2px; font-size: 12.5px; color: var(--fg2);
@@ -1234,6 +1235,15 @@ function addItems(box, items) {
       box.insertAdjacentHTML('beforeend', '<div class="who"><img src="/icon-180.png?spark" alt="">Claude</div>');
     if (m.role === 'img') { box.insertAdjacentHTML('beforeend', `<a class="hm img" href="${esc(m.src)}" target="_blank"><img src="${esc(m.src)}" loading="lazy" alt="图片"></a>`); continue; }
     if (m.role === 'user' && !m.text) continue; // pictures only
+    if (m.role === 'done') { // the turn over: how long it took, up front on the line that begins the answer
+      let e = box.lastElementChild;
+      while (e && !e.matches('.who, .hm.user, .hm.img')) e = e.previousElementSibling;
+      const took = `✓ 回复完成 · 用时 ${dur(+m.text)}`;
+      // ponytail: Claude going on by itself (a background task's news) and ending again: the line shows the last time
+      if (e?.matches('.who')) { e.querySelector('.took')?.remove(); e.insertAdjacentHTML('beforeend', `<span class="took">${took}</span>`); }
+      else box.insertAdjacentHTML('beforeend', `<div class="hm done">${took}</div>`); // its start not loaded (or no answer): at the end
+      continue;
+    }
     if (m.role !== 'tool') {
       box.insertAdjacentHTML('beforeend', m.role === 'done' ? `<div class="hm done">✓ 回复完成 · 用时 ${dur(+m.text)}</div>`
         : `<div class="hm ${m.role}">${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
