@@ -32,7 +32,7 @@ look(); LOOK.addEventListener('change', look);
     --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; color-scheme: dark;
     --fgHi: #ffffff; --msg: #d4d4d4; --tint: rgba(255,255,255,.08); --btn: #313131; --btnH: #3c3c3c; --badge: #616161; --badgeFg: #f8f8f8;
     --pop: #252526; --popB: #454545; --accentH: #026ec1; --accentBg: rgba(0,120,212,.22); --errFg: #ffa198; --cellB: #3c3c3c;
-    --term: #1f1f1f; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
+    --split: #4a4a4a; --term: #1f1f1f; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
     --ui: -apple-system, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; --mono: "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
     --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 4l4 4-4 4' fill='none' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E"); }
   /* 亮色: VS Code's Light Modern */
@@ -40,7 +40,7 @@ look(); LOOK.addEventListener('change', look);
     --inputB: #cecece; --fg: #3b3b3b; --fg2: #616161; --fg3: #8b8b8b; --fgHi: #1f1f1f; --msg: #2b2b2b; --accent: #005fb8; --accentH: #0258a8;
     --accentBg: rgba(0,95,184,.1); --link: #005fb8; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.06);
     --btn: #e8e8e8; --btnH: #dadada; --badge: #cccccc; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #d4d4d4; --cellB: #d9d9d9;
-    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; }
+    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --split: #cfcfcf; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 13px/1.4 var(--ui); }
   body { display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
@@ -144,6 +144,7 @@ look(); LOOK.addEventListener('change', look);
   /* editor groups: a tab strip each, the open conversation under it */
   #editor { flex: 1; min-width: 0; display: flex; background: var(--bg); }
   .group { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; position: relative; }
+  .sash + .group { border-left: 1px solid var(--split); } /* groups side by side: a line between them */
   .group.drop::after { content: ''; position: absolute; inset: 35px 0 0; background: rgba(0,120,212,.14); pointer-events: none; z-index: 5; }
   .tabs { height: 35px; flex: none; display: flex; background: var(--bar); box-shadow: inset 0 -1px var(--border); }
   .strip { flex: 1; min-width: 0; display: flex; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
@@ -212,7 +213,8 @@ look(); LOOK.addEventListener('change', look);
   .hm.done { font-size: 12px; color: var(--green); }
   /* a turn: Claude's tool calls in a row folded into one line (tap to see each); the end of the answer marked */
   details.tools summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 2px; font-size: 12.5px; color: var(--fg3); }
-  details.tools > div { display: flex; flex-direction: column; gap: 3px; margin: 4px 0 2px 18px; }
+  details.tools > div { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 4px 7px; padding-left: 11px; border-left: 2px solid var(--border); }
+  .hm.sub { font-size: 12.5px; line-height: 1.6; color: var(--fg2); } /* Claude's words on the way, inside 过程 */
   /* under the messages, live: what you sent (faded until the record has it), Claude at work, a menu to pick from */
   .busy { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--orange); }
   .busy i { width: 7px; height: 7px; border-radius: 4px; background: var(--orange); animation: pulse 1.2s infinite; }
@@ -294,7 +296,7 @@ look(); LOOK.addEventListener('change', look);
     .crumbs .ico { width: 34px; height: 34px; } .crumbs .ico svg { width: 18px; height: 18px; }
     .seg button { padding: 3px 10px; font-size: 13px; }
     .msgs { padding: 12px 14px 16px; }
-    .hm { font-size: 15px; } .hm.tool { font-size: 12.5px; }
+    .hm { font-size: 15px; } .hm.tool { font-size: 12.5px; } .hm.sub { font-size: 13.5px; }
     .hm th, .hm td { padding: 4px 7px; min-width: 3.5em; }
     .send { padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
     .send textarea, .go, .send .pic { height: 42px; }
@@ -1168,8 +1170,10 @@ setInterval(() => shownConvs().forEach((c) => c.tick()), 10000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') shownConvs().forEach((c) => c.back()); });
 window.addEventListener('focus', () => shownConvs().forEach((c) => c.claim())); // this screen takes the size again
 
-// Messages into a box. Tool calls in a row fold into one line saying what they were, "6 个操作：命令 3、读文件 2…"
-// (tap to see each); a turn over ends with how long it took.
+// Messages into a box: your message and Claude's answer. How it got there, its tool calls and its words between them,
+// folds into one line under your message, "过程：6 个操作（命令 3、读文件 2…）" (tap to see it all). Claude's words
+// stay out until its next tool call: then they were on the way, not the answer, and fold in too. A turn over ends
+// with how long it took. Added to piece by piece as the record grows: the box's end says where the turn is.
 const KIND = { Bash: '命令', PowerShell: '命令', Read: '读文件', Edit: '改文件', Write: '改文件', NotebookEdit: '改文件', Grep: '搜索', Glob: '搜索',
   WebSearch: '查网页', WebFetch: '查网页', Agent: '子任务' };
 const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${Math.floor(s / 3600)} 小时 ${Math.floor(s / 60) % 60} 分`; };
@@ -1182,12 +1186,17 @@ function addItems(box, items) {
         : `<div class="hm ${m.role}">${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
       continue;
     }
-    let g = box.lastElementChild;
-    if (!g?.matches('details.tools')) { box.insertAdjacentHTML('beforeend', '<details class="tools"><summary></summary><div></div></details>'); g = box.lastElementChild; }
+    const words = []; // Claude's words since the turn's 过程 (or its start): on the way after all
+    let e = box.lastElementChild;
+    while (e?.matches('.hm.claude')) { words.unshift(e); e = e.previousElementSibling; }
+    let g = e?.matches('details.tools') ? e : null;
+    if (!g) { g = document.createElement('details'); g.className = 'tools'; g.innerHTML = '<summary></summary><div></div>'; if (words[0]) words[0].before(g); else box.append(g); }
     const list = g.lastElementChild, n = {};
+    for (const w of words) { w.classList.add('sub'); list.append(w); }
     list.insertAdjacentHTML('beforeend', `<div class="hm tool" data-k="${KIND[m.text.split(/\s/)[0]] ?? '其他'}">${esc(m.text)}</div>`);
-    for (const t of list.children) n[t.dataset.k] = (n[t.dataset.k] ?? 0) + 1;
-    g.firstElementChild.textContent = `${list.children.length} 个操作：${Object.entries(n).map(([k, v]) => `${k} ${v}`).join('、')}`;
+    const tools = list.querySelectorAll('.hm.tool');
+    for (const t of tools) n[t.dataset.k] = (n[t.dataset.k] ?? 0) + 1;
+    g.firstElementChild.textContent = `过程：${tools.length} 个操作（${Object.entries(n).map(([k, v]) => `${k} ${v}`).join('、')}）`;
   }
 }
 // A picture made ready to send: a big one (a phone's photo) to 2000 px on its long side as JPEG, on white (Claude
