@@ -933,7 +933,9 @@ function makeConv(body, title) {
     clearTimeout(fitT);
     fitT = setTimeout(() => { if (shown && term && key && view === 'term') { if (kind === 'pc') sizeFont(); else claim(); } }, 100);
   });
-  ro.observe(scr);
+  // the outer size: a scroll bar coming or going inside doesn't change it (it did the content size, and with sizeFont
+  // the font went up and down without end: a size up overflowed, a scroll bar came, a size down, the bar went...)
+  ro.observe(scr, { box: 'border-box' });
 
   // while Claude works and nothing's typed, 发送 is 停止 (Esc to Claude); typing makes it 发送 again: a message
   // sent then waits for Claude to take it in
@@ -1213,13 +1215,17 @@ function makeConv(body, title) {
     }
   }
   function sizeFont() { // a window of fixed size (the computer's, or another screen's): a font that shows all of it
+    // The largest font with all of it shown, measured as drawn (the padding and the terminal's scroll bar left out), in
+    // the pane's whole size (offset, not what a scroll bar showing now leaves): the same pane, the same font. A guess
+    // in proportion first, then down while it doesn't fit and up while the next one does: the drawn size goes in steps,
+    // and a guess alone landed one too big from one side, one too small from the other.
     const x = scr.querySelector('.xterm-screen');
-    for (let i = 0; i < 3 && x?.offsetWidth; i++) { // measured as drawn; the padding and the terminal's scroll bar left out
-      const k = Math.min((scr.clientWidth - 26) / x.offsetWidth, (scr.clientHeight - 10) / x.offsetHeight);
-      const f = Math.max(5, Math.min(FONT, Math.floor(term.options.fontSize * k)));
-      if (f === term.options.fontSize) break;
-      term.options.fontSize = f;
-    }
+    if (!x?.offsetWidth) return;
+    const fits = () => x.offsetWidth <= scr.offsetWidth - 26 && x.offsetHeight <= scr.offsetHeight - 10;
+    const k = Math.min((scr.offsetWidth - 26) / x.offsetWidth, (scr.offsetHeight - 10) / x.offsetHeight);
+    term.options.fontSize = Math.max(5, Math.min(FONT, Math.floor(term.options.fontSize * k)));
+    while (!fits() && term.options.fontSize > 5) term.options.fontSize--;
+    while (term.options.fontSize < FONT) { term.options.fontSize++; if (!fits()) { term.options.fontSize--; break; } }
   }
   async function start() {
     c.started = true; c.ended = false; notice();
