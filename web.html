@@ -43,6 +43,10 @@ look(); LOOK.addEventListener('change', look);
     --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 13px/1.4 var(--ui); }
+  /* opened from the home screen, iOS 26 makes the page shorter than the screen by the status bar (WebKit bug 301108):
+     a band left empty under the bottom bar. At least the screen's height, so the page and its fixed bars reach the
+     bottom; the min() keeps it as it was where the status bar takes no room (top inset 0). */
+  @media (display-mode: standalone) { html, body { min-height: min(100lvh, calc(100% + env(safe-area-inset-top))); } } /* body too: the input */
   body { display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
   button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
   svg { display: block; flex: none; }
