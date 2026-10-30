@@ -341,7 +341,7 @@ function claim() { // this screen's size for the conversation, while its termina
 }
 // while Claude works and nothing's typed, 发送 is 停止 (Esc to Claude); typing makes it 发送 again: a message
 // sent then waits for Claude to take it in
-let busyNow = false;
+let busyNow = false, menuNow = false; // menuNow: one of Claude's menus is waiting for a pick
 function goMode() {
   const stop = view === 'hist' && busyNow && !$('#line').value.trim();
   $('#go').textContent = stop ? '停止' : '发送'; $('#go').classList.toggle('stop', stop);
@@ -350,6 +350,8 @@ $('#line').addEventListener('input', goMode);
 $('#go').onclick = () => {
   if ($('#go').classList.contains('stop')) return input('\x1b');
   const v = $('#line').value.trim(); if (!v) return;
+  // a menu waiting: the message would be typed into it, and its Enter pick what's highlighted ("No, exit", say)
+  if (menuNow) return toast('Claude 在等你先在上面选一项，选完再发（你写的还在输入框里）', 4000);
   // one message: the text as a paste (its new lines stay in it), then Enter on its own. Typed in one piece with its
   // Enter, a long text was taken for a paste, the Enter with it for a new line, and the message sat there unsent.
   input(`\x1b[200~${v.replace(/\n/g, '\r')}\x1b[201~`); input('\r'); $('#line').value = '';
@@ -464,6 +466,17 @@ function screen() {
     if (at.size >= 2 && top != null) menu = { cur: c, opts: [...at].sort((x, y) => x[0] - y[0]).map(([n, i]) => ({ n, label: opt(i)[2] })),
       ask: rows.slice(Math.max(0, top - 6), top).map((r) => r.replace(/[│╭╮╰╯─]/g, '').trim()).filter(Boolean).join('\n') };
   }
+  // a menu without numbers, like "Do you trust this folder?" (❯ No, exit / Yes, I trust this folder), which Claude asks
+  // in the home folder every time: its options are the rows around ❯ up to a blank one, "Enter to confirm" under them
+  const foot = rows.findIndex((r) => /Enter to confirm/.test(r)), c = rows.findIndex((r, i) => i < foot && /^\s*❯\s+\S/.test(r));
+  if (!menu && c >= 0) {
+    let a = c, z = c;
+    while (a > 0 && rows[a - 1].trim()) a--;
+    while (z + 1 < foot && rows[z + 1].trim()) z++;
+    if (z > a) menu = { cur: c - a + 1, opts: rows.slice(a, z + 1).map((r, k) => ({ n: k + 1, label: r.replace(/^\s*❯?\s*/, '').trim() })),
+      ask: /Quick safety check/.test(rows.slice(0, a).join(' ')) ? '要信任这个文件夹吗？选「Yes, I trust this folder」，Claude 才能在这里工作。'
+        : rows.slice(Math.max(0, a - 6), a).map((r) => r.trim()).filter(Boolean).join('\n') };
+  }
   return { busy, menu };
 }
 function drawLive(toEnd) {
@@ -476,7 +489,7 @@ function drawLive(toEnd) {
       `<button class="pick${o.n === menu.cur ? ' on' : ''}" data-pick="${o.n}">${o.n}. ${esc(o.label)}</button>`).join('')}
       <div class="row2"><button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
     : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : 'Claude 正在回复'}${took ? ' · ' + took : ''}</div>` : '');
-  busyNow = !!busy && !menu; goMode();
+  busyNow = !!busy && !menu; menuNow = !!menu; goMode();
   if (h === liveHtml && !toEnd) return;
   const hist = $('#hist'), atEnd = toEnd || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
   el.innerHTML = liveHtml = h;
