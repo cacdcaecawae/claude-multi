@@ -135,6 +135,22 @@ function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profi
   try { fs.writeFileSync(stateFile, JSON.stringify(st, null, 2)); } catch {}
 }
 
+// Each config keeps its own trusted folders (.claude.json projects[folder].hasTrustDialogAccepted), so a conversation
+// continued on another account stopped at "Do you trust this folder?". Its Yes/No has no numbers, so the web page
+// didn't show it as a choice, and a message typed there answered it with its default: No, exit. Trusted in one config
+// is trusted in all: the config about to start gets every folder another one trusts.
+function shareTrust(dir, files = [path.join(HOME, '.claude.json'), ...load().profiles.map((p) => path.join(p.configDir, '.claude.json'))]) {
+  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+  const trusted = new Set(files.flatMap((f) => Object.entries(read(f)?.projects ?? {}).filter(([, v]) => v?.hasTrustDialogAccepted).map(([k]) => k)));
+  const f = path.join(dir, '.claude.json'), j = read(f);
+  const add = j ? [...trusted].filter((k) => !j.projects?.[k]?.hasTrustDialogAccepted) : [];
+  if (!add.length) return; // written only on a change: a Claude running there rewrites this file too
+  j.projects ??= {};
+  for (const k of add) j.projects[k] = { ...j.projects[k], hasTrustDialogAccepted: true };
+  try { fs.writeFileSync(`${f}.${process.pid}.tmp`, JSON.stringify(j, null, 2)); fs.renameSync(`${f}.${process.pid}.tmp`, f); }
+  catch { fs.rmSync(`${f}.${process.pid}.tmp`, { force: true }); } // held open: the next start tries again
+}
+
 // What a running Claude hands everything it starts (its Bash tool, its hooks, so the island and the
 // terminals the island opens). A Claude inheriting them takes itself for that one's sub-session: it
 // stops saving its transcript and reports to the parent. claude-multi only starts top-level sessions.
@@ -268,7 +284,7 @@ function start(p, args, source) {
   }
   ensureLinks(p.configDir);
   shareMemory([[p.configDir, projectFolder(process.cwd())]]);
-  shareMcp(p.configDir);
+  shareMcp(p.configDir); shareTrust(p.configDir);
   const reg = update((r) => {
     r.active = p.id;
     const q = r.profiles.find((x) => x.id === p.id);
@@ -1116,7 +1132,7 @@ async function web() {
   function startPty(p, cwd, args, cols = 100, rows = 30) {
     const key = `p${Date.now().toString(36)}`;
     shareMemory([[p.configDir, projectFolder(cwd)]]);
-    shareMcp(p.configDir);
+    shareMcp(p.configDir); shareTrust(p.configDir);
     const proc = pty.spawn(claudeExe, args, { name: 'xterm-256color', cols, rows, cwd, env: childEnv(p.configDir) });
     // pid read live: node-pty only knows it once the pseudo-terminal is ready (it is 0 right after spawn)
     const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, dir: p.configDir };
@@ -1522,7 +1538,7 @@ function statusline(input = {}) {
   return parts.join(paint(2, '  │  '));
 }
 
-module.exports = { pickOpen, keyMatch, keyCookie, childEnv, helpersBusy, statusline, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

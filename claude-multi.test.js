@@ -355,3 +355,22 @@ console.log('tokens ok');
   assert.equal(keyCookie(undefined), undefined);
   console.log('web key ok');
 }
+
+// trusted folders: the config about to start gets every folder another config trusts, nothing else changes
+{
+  const { shareTrust } = require('./claude-multi');
+  const path = require('path'), d = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cm-trust-'));
+  const cfg = (name, projects) => { fs.mkdirSync(path.join(d, name)); fs.writeFileSync(path.join(d, name, '.claude.json'), JSON.stringify({ projects, theme: name })); return path.join(d, name, '.claude.json'); };
+  const files = [cfg('home', { 'C:/a': { hasTrustDialogAccepted: true } }), cfg('one', { 'D:/b': { hasTrustDialogAccepted: true }, 'E:/no': { hasTrustDialogAccepted: false } }),
+    cfg('two', { 'C:/a': { allowedTools: ['x'] }, 'F:/c': { hasTrustDialogAccepted: true } })];
+  shareTrust(path.join(d, 'two'), files);
+  const two = JSON.parse(fs.readFileSync(files[2], 'utf8'));
+  assert.deepEqual(Object.keys(two.projects).filter((k) => two.projects[k].hasTrustDialogAccepted).sort(), ['C:/a', 'D:/b', 'F:/c']);
+  assert.deepEqual(two.projects['C:/a'].allowedTools, ['x']);            // what it had there stays
+  assert.equal(two.projects['E:/no'], undefined);                        // untrusted elsewhere: not added
+  assert.equal(two.theme, 'two');
+  const at = fs.statSync(files[2]).mtimeMs; shareTrust(path.join(d, 'two'), files);
+  assert.equal(fs.statSync(files[2]).mtimeMs, at);                       // nothing new: not written
+  fs.rmSync(d, { recursive: true, force: true });
+  console.log('trust ok');
+}
