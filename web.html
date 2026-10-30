@@ -151,6 +151,7 @@
     <button id="back" class="btn" aria-label="返回">‹</button>
     <div class="main"><div class="t" id="termTitle"></div><div class="m" id="termSub"></div></div>
     <button id="swap" class="btn icon" aria-label="换账号继续" title="换账号继续"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/></svg></button>
+    <button id="end" class="btn icon" aria-label="结束对话" title="结束对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 4v7M7.4 6.6a7 7 0 1 0 9.2 0"/></svg></button>
     <div class="seg" id="seg"><button data-v="hist" class="on">对话</button><button data-v="term">终端</button></div>
   </div>
   <div id="gone">这个对话已经结束</div>
@@ -498,6 +499,14 @@ function md(t) {
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>')).join('');
 }
 $('#back').onclick = closeTerm;
+// 结束: the conversation's Claude exits, as Ctrl+C in its terminal does. Pressed again until it's gone (at most 4, 0.6 s
+// apart): the first one may only stop an answer, clear what's typed or close a question. Its record stays.
+$('#end').onclick = async () => {
+  if (!key || ended || !confirm('结束这个对话？\n和在终端里按 Ctrl+C 一样，Claude 会退出，电脑上它的窗口也会关掉。对话记录会保留，之后可以从列表里接着聊。')) return;
+  for (let k = 0; k < 4 && !ended; k++) { input('\x03'); await new Promise((ok) => setTimeout(ok, 600)); }
+  setTimeout(() => { if (!ended) toast('还没结束，可以再点一次，或者去终端里看看'); }, 2000);
+};
+
 // 换账号继续: the open conversation goes on with the account picked here. While it answers, it can wait for the end of
 // the answer or stop now; nothing is sent, it waits for you there. The service does it (/api/switch) and the page
 // follows: one running in the service comes back as event switched, one in a window on the computer as a new Claude in
