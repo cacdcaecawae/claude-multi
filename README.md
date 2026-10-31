@@ -192,11 +192,13 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 
 **1. 电脑能免密 SSH 登录服务器。**在 `~/.ssh/config` 里给服务器起一个名字，比如 `myserver`，并配好密钥登录。
 
-**2. 改代码里的服务器信息。**`claude-multi.js` 里搜索 `const TUNNEL`：
+**2. 写服务器信息。**在 `%USERPROFILE%\.claude-multi\` 里新建 `tunnel.json`（这个文件不进仓库）：
 
-```js
-const TUNNEL = { ssh: 'myserver', sock: '/run/claude-multi.sock', url: 'https://你的服务器地址:8443' };
+```json
+{ "ssh": "myserver", "url": "https://你的服务器地址:8443" }
 ```
+
+`ssh` 是第 1 步在 `~/.ssh/config` 里起的名字，`url` 是手机上打开的地址。没有这个文件时，网页服务只在本机 `http://127.0.0.1:7788` 能打开，不连服务器。
 
 **3. 服务器上的 sshd。**新建 `/etc/ssh/sshd_config.d/60-claude-multi.conf`，然后运行 `systemctl reload ssh`：
 
