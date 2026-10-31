@@ -418,6 +418,17 @@ console.log('tokens ok');
   const more = history(f).items.slice(4);
   assert.deepEqual(more.map((m) => [m.role, m.role === 'user' ? m.text : '']), [['img', ''], ['user', '[Image #3]这个也是 bug']]);
   assert.deepEqual(recordImage(f, ...ref(more[0])), { type: 'image/png', data: png });
+  // stopped before Claude took it in: the next message hangs on the same line, and only that one is shown (its picture too)
+  const typed = (uuid, content) => JSON.stringify({ type: 'user', uuid, parentUuid: 'turn-end', timestamp: ts, message: { role: 'user', content } });
+  fs.appendFileSync(f, `${typed('s1', [{ type: 'text', text: '[Image #4] 测试' }, pic('image/png', 'AAAA')])}\n${typed('s2', '测')}\n${typed('s3', '真正要问的')}\n`);
+  const last = history(f).items.slice(6);
+  assert.deepEqual(last.map((m) => [m.role, m.text, m.u]), [['user', '真正要问的', 's3']]);
+  assert.equal(last[0].p, 'turn-end');
+  // one Claude answered, then you went back and asked again on the same line: both stay, the answer has its question
+  const said = (uuid, parentUuid, text) => JSON.stringify({ type: 'user', uuid, parentUuid, timestamp: ts, message: { role: 'user', content: text } });
+  const answer = JSON.stringify({ type: 'assistant', uuid: 'a1', parentUuid: 'r1', timestamp: ts, message: { role: 'assistant', content: [{ type: 'text', text: '答' }] } });
+  fs.appendFileSync(f, `${said('r1', 'x', '先问这个')}\n${answer}\n${said('r2', 'x', '改问这个')}\n`);
+  assert.deepEqual(history(f).items.slice(7).map((m) => m.text), ['先问这个', '答', '改问这个']);
   const up = path.join(d, 'up'), old = path.join(up, 'old.png');
   fs.mkdirSync(up); fs.writeFileSync(old, 'x'); fs.utimesSync(old, new Date(0), new Date(0));
   const saved = saveUpload(png, 'png', up);

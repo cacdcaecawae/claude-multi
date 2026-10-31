@@ -993,6 +993,12 @@ function makeConv(body, title) {
       input('\x03');
       const words = t.replace(/\[Image #\d+\]\s*/g, '').trim(), pics = /\[Image #\d+\]/.test(t);
       if (words) { line.value = line.value.trim() ? `${words}\n${line.value}` : words; grow(); goMode(); }
+      // and its bubble goes now: back in the box, it isn't sent (the record keeps it until a later one replaces it)
+      const flat = (s) => s.replace(/\s+/g, ''), last = [...hist.querySelectorAll('.hm.user[data-u]')].pop();
+      const answered = last && [...hist.querySelectorAll('.who, details.tools, .hm.claude, .hm.done')].some((x) => last.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING);
+      if (last && !answered && flat(last.textContent) === flat(words)) hist.querySelectorAll(`[data-u="${CSS.escape(last.dataset.u)}"]`).forEach((e) => e.remove());
+      const i = sent.findIndex((s) => flat(s.text) === flat(words));
+      if (i >= 0) { sent.splice(i, 1); drawLive(); }
       return toast(`已停止。还没执行的那条消息回到了输入框，可以改了再发${pics ? '（图片要重新选一下）' : ''}`, 4000);
     }
   }
@@ -1349,7 +1355,15 @@ function addItems(box, items) {
     // Claude's answer begins (its words or its first tool call right after your message): marked as Claude's
     if ((m.role === 'claude' || m.role === 'tool') && box.lastElementChild?.matches('.hm.user, .hm.img'))
       box.insertAdjacentHTML('beforeend', `<div class="who">${SPARK}Claude</div>`);
-    if (m.role === 'img') { box.insertAdjacentHTML('beforeend', `<a class="hm img" href="${esc(m.src)}" target="_blank"><img src="${esc(m.src)}" loading="lazy" alt="图片"></a>`); continue; }
+    // a message of yours on the line an earlier one hung on, nothing answering that one: it was stopped and taken back
+    // (the record keeps it, Claude doesn't), so it goes (the service leaves such out of what it reads at once)
+    const mark = m.u ? ` data-p="${esc(m.p)}" data-u="${esc(m.u)}"` : '';
+    if (m.u && box.isConnected) {
+      const col = box.closest('.col'), answers = [...col.querySelectorAll('.who, details.tools, .hm.claude, .hm.done')];
+      for (const e of col.querySelectorAll(`[data-p="${CSS.escape(m.p)}"]:not([data-u="${CSS.escape(m.u)}"])`))
+        if (!answers.some((x) => e.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING)) e.remove();
+    }
+    if (m.role === 'img') { box.insertAdjacentHTML('beforeend', `<a class="hm img" href="${esc(m.src)}" target="_blank"${mark}><img src="${esc(m.src)}" loading="lazy" alt="图片"></a>`); continue; }
     if (m.role === 'user' && !m.text) continue; // pictures only
     if (m.role === 'done') { // the turn over: how long it took, up front on the line that begins the answer
       let e = box.lastElementChild;
@@ -1362,7 +1376,7 @@ function addItems(box, items) {
     }
     if (m.role !== 'tool') {
       box.insertAdjacentHTML('beforeend', m.role === 'done' ? `<div class="hm done">✓ 回复完成 · 用时 ${dur(+m.text)}</div>`
-        : `<div class="hm ${m.role}">${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
+        : `<div class="hm ${m.role}"${mark}>${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
       continue;
     }
     const words = []; // Claude's words since the turn's 过程 (or its start): on the way after all

@@ -1073,6 +1073,7 @@ function history(file, { from, end } = {}) {
     if (text) out.push({ role, text: text.length > 20000 ? text.slice(0, 20000) + '…' : text, at });
   };
   let next = a + skip; // where each line starts in the file: a picture in it is fetched from there (recordImage)
+  const byParent = new Map(); // a line your message hangs on → that message's items
   for (const l of lines) {
     const pos = next;
     next += Buffer.byteLength(l) + 1;
@@ -1088,7 +1089,7 @@ function history(file, { from, end } = {}) {
       if (j.subtype === 'turn_duration' && j.durationMs > 0) add('done', String(j.durationMs), at);
     } else if (j.type === 'user' || queued) {
       if (j.isCompactSummary) { add('note', '更早的内容已压缩', at); continue; }
-      const parts = said(j);
+      const parts = said(j), first = out.length;
       // your pictures (pasted, dragged in, sent from the page) above what you wrote: "line.k", the line's place and
       // which picture in it. The text has an [Image #N] for each, the page leaves those out.
       parts.filter((p) => p.type === 'image').forEach((p, k) => add('img', `${pos}.${k}`, at));
@@ -1100,6 +1101,17 @@ function history(file, { from, end } = {}) {
         if (cmd) t = `${cmd[1]} ${/<command-args>([^<]*)<\/command-args>/.exec(t)?.[1] ?? ''}`; // a slash command, as typed
         add('user', t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ''), at);
       }
+      // Stopped before Claude took it in, a message goes back to Claude's input box, and the next one you send hangs on
+      // the same line it did: the record keeps both, Claude counts only the later. So the earlier one is left out here
+      // when nothing answered it (one Claude answered and you went back to rewrite stays, with its answer), and each
+      // message carries its line and parent (p, u) for the page to do the same with one it already shows.
+      const mine = out.slice(first);
+      if (j.type === 'user' && j.parentUuid && j.uuid && mine.length) {
+        const was = byParent.get(j.parentUuid);
+        if (was && !out.slice(was.end, first).some((o) => !o.gone && o.role !== 'user' && o.role !== 'img')) for (const o of was.items) o.gone = true;
+        byParent.set(j.parentUuid, { items: mine, end: out.length });
+        for (const o of mine) Object.assign(o, { p: j.parentUuid, u: j.uuid });
+      }
     } else if (Array.isArray(c)) {
       for (const p of c) {
         if (p.type === 'text') add('claude', p.text, at);
@@ -1110,7 +1122,7 @@ function history(file, { from, end } = {}) {
       }
     }
   }
-  return { items: out, start: a + skip, end: last < skip ? a + skip : a + last + 1 };
+  return { items: out.filter((o) => !o.gone), start: a + skip, end: last < skip ? a + skip : a + last + 1 };
 }
 // The k-th picture of the record's line at byte pos, as history() names it ("pos.k"): its type and bytes.
 function recordImage(file, pos, k) {
