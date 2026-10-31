@@ -420,9 +420,13 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const ACCT = ['var(--a1)', 'var(--a2)', 'var(--a3)', 'var(--a4)'];
+// An error the service answers comes with its words (err). One without them didn't come from it, the relay's own page
+// with the PC away, say: marked away, for a caller to try again rather than give up (as with no network at all).
 const post = async (url, body) => {
   const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
-  const j = await r.json(); if (!r.ok) throw new Error(j.err || r.status); return j;
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j) throw Object.assign(new Error(j?.err || `连不上（${r.status}）`), { away: !j?.err && r.status !== 403 });
+  return j;
 };
 const toast = (t, ms = 2600) => { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = 'none'), ms); };
 const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
@@ -914,11 +918,12 @@ function makeConv(body, title) {
   const redraw = () => { c.sync(); if (c.g) drawTabs(c.g); drawHere(); };
   const stale = (ms) => shown && term && key && !c.ended && Date.now() - lastSeen > ms;
 
-  // in order; when another screen had the size, this one takes it first (you type here, so it decides)
+  // in order; when another screen had the size, this one takes it first (you type here, so it decides). Resolves to
+  // whether Claude got it: a message's steps stop at one that didn't (its Enter would send whatever is in Claude's box)
   const input = (data) => {
-    if (!key) return;
+    if (!key) return Promise.resolve(false);
     const k = key, takeBack = kind === 'pty' && ptySize && mine && (ptySize.w !== mine.cols || ptySize.h !== mine.rows);
-    q = q.then(() => (takeBack ? claim() : null)).then(() => post('/api/input', { key: k, data })).catch((e) => toast(e.message));
+    return (q = q.then(() => (takeBack ? claim() : null)).then(() => post('/api/input', { key: k, data })).then(() => true, (e) => { toast(e.message); return false; }));
   };
   function claim() { // this screen's size for the conversation, while its terminal is shown here
     if (!term || kind !== 'pty' || view !== 'term' || !shown) return Promise.resolve();
@@ -953,7 +958,7 @@ function makeConv(body, title) {
       if (!/^image\//.test(f.type)) { toast('只能发图片'); continue; }
       const a = { url: URL.createObjectURL(f) };
       a.up = shrink(f).then(upload);
-      a.up.catch((e) => { toast('图片没传上去：' + e.message, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
+      a.up.catch((e) => { a.failed = true; toast('图片没传上去：' + e.message, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
       atts.push(a);
     }
     drawAtts();
@@ -1002,32 +1007,47 @@ function makeConv(body, title) {
       return toast(`已停止。还没执行的那条消息回到了输入框，可以改了再发${pics ? '（图片要重新选一下）' : ''}`, 4000);
     }
   }
+  // One message, whole and in order: its pictures (uploaded, each path pasted, Claude attaching it), its text as a paste
+  // (its new lines stay in it), then Enter on its own; the next waits till this one is through. Typed in one piece with
+  // its Enter, a long text was taken for a paste, the Enter with it for a new line, and the message sat there unsent.
   go.onclick = async () => {
     if (go.classList.contains('stop')) return stop();
     const v = line.value.trim(), imgs = atts;
-    if ((!v && !imgs.length) || sending) return;
-    if (!key || c.ended) return toast(c.started && !c.ended ? '还在连接，稍等一下再发' : '这个对话没有在运行，先点上面的「接着聊」'); // what you wrote stays
+    if (!v && !imgs.length) return;
+    if (sending) return toast('上一条还在发，稍等一下'); // what you wrote stays
+    if (!key || c.ended) return toast(c.started && !c.ended ? '还在连接，稍等一下再发' : '这个对话没有在运行，先点上面的「接着聊」');
     // a menu waiting: the message would be typed into it, and its Enter pick what's highlighted ("No, exit", say)
     if (menuNow) return toast('Claude 在等你先在上面选一项，选完再发（你写的还在输入框里）', 4000);
-    // one message: the text as a paste (its new lines stay in it), then Enter on its own. Typed in one piece with its
-    // Enter, a long text was taken for a paste, the Enter with it for a new line, and the message sat there unsent.
-    let paths = [];
-    if (imgs.length) { // all uploaded first (most are by now); one that failed has dropped out, the rest wait for another 发送
-      sending = true; go.dataset.m = 'up'; go.innerHTML = '<span class="spin"></span>'; go.title = '图片上传中';
-      try { paths = await Promise.all(imgs.map((a) => a.up)); } catch { return; } finally { sending = false; goMode(); }
-      if (!key || c.ended) return;
-    }
-    stops++; // a 停止 still watching Claude's input box: this message isn't the one to take back
+    // out of the box at once: what you type while its pictures upload is the next message, not wiped when this one goes
+    sending = true; stops++; // a 停止 still watching Claude's input box: this message isn't the one to take back
     line.value = ''; grow(); atts = []; drawAtts();
-    if (view === 'hist') { sent.push({ text: v, imgs: imgs.map((a) => a.url), at: Date.now() }); drawLive(true); }
-    if (paths.length) { // each path pasted: Claude attaches it in well under a second; Enter waits for that (4 s at most)
-      const before = imagesShown();
-      for (const p of paths) input(`\x1b[200~${p}\x1b[201~`);
-      for (const end = Date.now() + 4000; imagesShown() < before + paths.length && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 100));
-    }
-    if (v) input(`\x1b[200~${v.replace(/\n/g, '\r')}\x1b[201~`);
-    input('\r');
-    goMode();
+    const wait = view === 'hist' && { text: v, imgs: imgs.map((a) => a.url), at: Date.now() };
+    if (wait) { sent.push(wait); drawLive(true); }
+    const back = (why) => { // not sent after all: back in the box, before what you typed since, with its pictures
+      if (wait) { sent = sent.filter((s) => s !== wait); drawLive(); }
+      line.value = [v, line.value.trim()].filter(Boolean).join('\n'); grow();
+      atts = [...imgs.filter((a) => !a.failed), ...atts]; drawAtts();
+      if (why) toast(why, 4000);
+    };
+    try {
+      let paths = [];
+      if (imgs.length) { // most are uploaded by now; one that failed said so in a bubble and drops out
+        go.dataset.m = 'up'; go.innerHTML = '<span class="spin"></span>'; go.title = '图片上传中';
+        try { paths = await Promise.all(imgs.map((a) => a.up)); } catch { return back(); }
+      }
+      // asked again after the wait: the conversation ended, or a menu came up (Enter would pick what's highlighted)
+      if (!key || c.ended) return back('这个对话已经不在运行了，消息放回了输入框');
+      if (menuNow) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
+      const lost = '没发出去，消息放回了输入框'; // a step that didn't reach Claude: no Enter after it
+      if (paths.length) { // Claude attaches each pasted path in well under a second: Enter waits for that (4 s at most)
+        const before = imagesShown();
+        // ponytail: a later step failing leaves the pictures already attached in Claude's box; sent again, they'd go twice
+        for (const p of paths) if (!(await input(`\x1b[200~${p}\x1b[201~`))) return back(lost);
+        for (const end = Date.now() + 4000; imagesShown() < before + paths.length && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 100));
+      }
+      if (v && !(await input(`\x1b[200~${v.replace(/\n/g, '\r')}\x1b[201~`))) return back(lost);
+      await input('\r');
+    } finally { sending = false; goMode(); }
   };
   line.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim()) go.click(); } // only sends; Shift+Enter: a new line
@@ -1104,10 +1124,12 @@ function makeConv(body, title) {
     const t = $p('.hTop');
     if (t) t.textContent = histOldest > 0 ? '往上划，加载更早的记录' : $p('.hOld').innerHTML || $p('.hNew').innerHTML ? '对话开头' : '还没有消息，在下面发一条开始';
   }
+  // on again by itself only once it got further back; a failed read waits 5 s (it was asked again at once, without end)
+  let olderAfter = 0;
   async function loadOlder() {
-    if (histBusy || !histOldest || view !== 'hist' || !shown) return;
+    if (histBusy || !histOldest || view !== 'hist' || !shown || Date.now() < olderAfter) return;
     histBusy = true;
-    const g = histGen;
+    const g = histGen, from = histOldest;
     try {
       const r = await histGet(`&end=${histOldest}`);
       if (g !== histGen || !$p('.hOld')) return;
@@ -1115,8 +1137,8 @@ function makeConv(body, title) {
       addItems(tmp, r.items); $p('.hOld').prepend(...tmp.childNodes);
       histOldest = r.start; topNote();
       hist.scrollTop += hist.scrollHeight - h; // what you were reading stays where it was
-    } catch {} finally { histBusy = false; }
-    if (g === histGen && hist.scrollTop < 300 && histOldest > 0) loadOlder();
+    } catch { olderAfter = Date.now() + 5000; } finally { histBusy = false; }
+    if (g === histGen && histOldest < from && hist.scrollTop < 300 && histOldest > 0) loadOlder();
   }
   let pinned = true; // at the last message: kept there when the text rewraps (a split, a sash) or the tab comes back
   hist.addEventListener('load', () => { if (pinned) hist.scrollTop = hist.scrollHeight; }, true); // a picture came in under you
@@ -1282,7 +1304,11 @@ function makeConv(body, title) {
     if (again && c.id) {
       let r;
       try { r = await post('/api/open', { id: c.id, live: true, cols: term.cols, rows: term.rows }); }
-      catch (e) { if (me === gen) end(); return; }
+      catch (e) { // the service saying it no longer runs ends it; no network, or the PC away (a phone just woken): again soon
+        if (me !== gen) return;
+        if (e instanceof TypeError || e.away) setTimeout(() => { if (me === gen) connect(true); }, 5000); else end();
+        return;
+      }
       if (me !== gen || !term) return;
       ({ key, kind } = r);
     }

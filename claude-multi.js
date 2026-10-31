@@ -70,7 +70,6 @@ const projectFolder = (d) => d.replace(/[^a-zA-Z0-9]/g, '-');
 // the shared copy lacks are added, a note in both keeps its newest version, the MEMORY.md indexes are joined, and the
 // originals (both sides) go to memory-backup\. extra: [config dir, folder] that Claude is about to start in.
 function shareMemory(extra = [], roots = [SHARED, ...load().profiles.map((p) => p.configDir)], backup = path.join(ROOT, 'memory-backup')) {
-  const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
   const lines = (f) => fs.readFileSync(f, 'utf8').split(/\r?\n/).filter((l) => l.trim());
   const note = (l) => /\]\(([^)]+)\)/.exec(l)?.[1] ?? l; // an index line's note file
   const [home, ...accts] = roots, keep = path.join(backup, String(Date.now()));
@@ -480,17 +479,30 @@ function procStarts(pids) {
 }
 
 const readHeads = new Map(); // record file -> { at: its mtime, cwd, title, prompt }
+// The session files (sessions/<pid>.json) of a config dir whose pid still runs: each Claude started on it writes one.
+const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
+function sessionFiles(dir) {
+  const out = [];
+  for (const f of ls(path.join(dir, 'sessions'))) {
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(dir, 'sessions', f), 'utf8'));
+      process.kill(j.pid, 0); // throws once that Claude has exited
+      out.push(j);
+    } catch {}
+  }
+  return out;
+}
+// a Claude that didn't exit cleanly leaves its file, and Windows soon gives its pid to another program:
+// running means that pid also started when Claude wrote down (without PowerShell, the pid alone)
+const stillClaude = (js) => { const starts = procStarts(js.map((j) => j.pid)); return js.filter((j) => !starts || !j.procStart || starts.get(String(j.pid)) === String(j.procStart)); };
+// Whether any Claude runs on an account, for removing it: from its session files, not the conversation list, which
+// leaves out one with nothing said yet (no record), no title, or its folder gone.
+// ponytail: one the web service has just spawned writes its file within a moment; that moment isn't covered
+const runsOn = (dir) => stillClaude(sessionFiles(dir)).length > 0;
 function listSessions(reg) {
-  const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
   const live = new Map(), found = new Map(), alive = [];
   for (const [acct, dir] of reg.profiles.map((p, i) => [i, p.configDir])) {
-    for (const f of ls(path.join(dir, 'sessions'))) {
-      try {
-        const j = JSON.parse(fs.readFileSync(path.join(dir, 'sessions', f), 'utf8'));
-        process.kill(j.pid, 0); // throws once that Claude has exited
-        alive.push(j);
-      } catch {}
-    }
+    alive.push(...sessionFiles(dir));
     for (const folder of ls(path.join(dir, 'projects'))) {
       for (const name of ls(path.join(dir, 'projects', folder))) {
         if (!/^[0-9a-f-]{36}\.jsonl$/.test(name)) continue;
@@ -499,10 +511,7 @@ function listSessions(reg) {
       }
     }
   }
-  // a Claude that didn't exit cleanly leaves its file, and Windows soon gives its pid to another program:
-  // running means that pid also started when Claude wrote down (without PowerShell, the pid alone)
-  const starts = procStarts(alive.map((j) => j.pid));
-  for (const j of alive) if (!starts || !j.procStart || starts.get(String(j.pid)) === String(j.procStart)) live.set(j.sessionId, j);
+  for (const j of stillClaude(alive)) live.set(j.sessionId, j);
   let webPids = new Set(); // the Claudes the web service runs (web-terms.json, written by it)
   try { webPids = new Set(JSON.parse(fs.readFileSync(WEB_TERMS, 'utf8'))); } catch {}
   const tmp = os.tmpdir().toLowerCase(), out = [];
@@ -606,11 +615,20 @@ function atLimit(p, now = Date.now()) {
 }
 // Until the Claude with this pid (of config dir) may be ended: at once with now; else once its session file says it
 // isn't at work (busy, shell: answering, running a command; waiting on you or idle are fine).
+// A status it can't read (the file gone, or caught mid-write) isn't taken for free: read again, and after unknownMs of
+// that, an error (nothing is ended).
 // ponytail: an answer still going after 2 h is ended anyway
-async function untilFree(dir, pid, now) {
+async function untilFree(dir, pid, now, unknownMs = 30000) {
+  let unknownSince = null;
   for (const end = Date.now() + 7200000; !now && Date.now() < end && alive(pid); await sleep(1000)) {
     let st = null;
     try { st = JSON.parse(fs.readFileSync(path.join(dir, 'sessions', `${pid}.json`), 'utf8')).status; } catch {}
+    if (st == null) {
+      unknownSince ??= Date.now();
+      if (Date.now() - unknownSince >= unknownMs) throw new Error('读不到这个 Claude 在不在忙，没有换账号');
+      continue;
+    }
+    unknownSince = null;
     if (st !== 'busy' && st !== 'shell') return;
   }
 }
@@ -642,7 +660,8 @@ async function switchChat(id, n, now) {
     const j = await r.json().catch(() => ({}));
     return console.log(r.ok ? `网页上的这个对话会换到账号 ${n} 接着` : `没换成：${j.err ?? r.status}`);
   }
-  const where = await switchWindow(s, n, now);
+  let where;
+  try { where = await switchWindow(s, n, now); } catch (e) { process.exitCode = 1; return console.log(`没换成：${e.message}`); }
   console.log(where === 'tab' ? `已换到账号 ${n}，在原来的窗口里接着` : `已换到账号 ${n}，在新窗口里接着`);
 }
 // attach ID: this terminal joins a conversation running in the web service (one started or continued from
@@ -717,7 +736,6 @@ function del(id) {
   if (!s) { console.log(`找不到对话 ${id}。`); process.exit(1); }
   if (s.pid) { console.log('这个对话正在运行，先关掉它的窗口再删。'); process.exit(1); }
   tokenStats();
-  const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
   const paths = reg.profiles.flatMap((p) => ls(path.join(p.configDir, 'projects')).flatMap((folder) =>
     [`${id}.jsonl`, id].map((n) => path.join(p.configDir, 'projects', folder, n)))).filter((f) => fs.existsSync(f));
   const r = recycle(paths);
@@ -746,7 +764,7 @@ function unlinkAll(d) {
 function remove(x) {
   const reg = load(), i = /^\d+$/.test(x ?? '') ? Number(x) - 1 : reg.profiles.findIndex((q) => q.id === x), p = reg.profiles[i];
   if (!p) { console.log('用法：claude-multi remove <账号编号或 id，如 acct-20261010-002>'); process.exit(1); }
-  if (listSessions(reg).some((s) => s.acct === i && s.pid)) { console.log('这个账号上有对话正在运行，先关掉再移除。'); process.exit(1); }
+  if (runsOn(p.configDir)) { console.log('这个账号上有 Claude 正在运行，先关掉再移除。'); process.exit(1); }
   tokenStats(); shareMemory(); // while it's still listed
   update((r) => {
     r.profiles = r.profiles.filter((q) => q.id !== p.id);
@@ -896,7 +914,7 @@ function subscription(p, status = null) {
   try { o = JSON.parse(fs.readFileSync(path.join(p.configDir, '.claude.json'), 'utf8')).oauthAccount; } catch {}
   const since = new Date(o?.subscriptionCreatedAt ?? NaN);
   if (isNaN(since)) return null; // no subscription (and nextRenewal would never find an anniversary of no date)
-  const renew = p.renewOn ? nextRenewal(new Date(`${p.renewOn}T00:00:00`), new Date(), true) : nextRenewal(since);
+  const renew = (p.renewOn && nextRenewal(new Date(`${p.renewOn}T00:00:00`), new Date(), true)) || nextRenewal(since); // a day set wrong: guessed
   return { since: ymd(since), renew: ymd(renew), billing: o.billingType ?? null, canceled: status === 'canceled' };
 }
 // Whether the subscription still renews: Claude Code's copy of the profile leaves that out, Anthropic's profile has it
@@ -915,6 +933,7 @@ async function subState(p, cache, now = Date.now()) {
 // The first monthly anniversary of since, today or later (a day the month lacks, like the 31st: its last day). since
 // itself counts only when it's a billing day (onIt), not the day the subscription began.
 function nextRenewal(since, now = new Date(), onIt = false) {
+  if (isNaN(since)) return null; // no date has no anniversary: the loop below would never end
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()), first = new Date(since.getFullYear(), since.getMonth(), since.getDate());
   for (let m = now.getMonth(); ; m++) {
     const d = new Date(now.getFullYear(), m, Math.min(since.getDate(), new Date(now.getFullYear(), m + 1, 0).getDate()));
@@ -1191,15 +1210,20 @@ async function web() {
     if (!sessCache || Date.now() - sessAt > 3000) { sessCache = listSessions(load()); sessAt = Date.now(); }
     return sessCache;
   };
+  // a conversation already being continued here: until its Claude has written its session file the list says it
+  // isn't running, so a second open (a double tap, a second device) would start a second Claude on the same record
+  let ptys = 0;
+  const resuming = (id) => [...terms.values()].find((t) => t.resume === id && !t.gone);
   // a conversation started or continued here: claude in a pseudo-terminal, its output kept (last 256 KB) for
   // whoever opens it later
   function startPty(p, cwd, args, cols = 100, rows = 30) {
-    const key = `p${Date.now().toString(36)}`;
+    const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`; // the count too: two started in one ms were one key
     shareMemory([[p.configDir, projectFolder(cwd)]]);
     shareMcp(p.configDir); shareTrust(p.configDir);
     const proc = pty.spawn(claudeExe, args, { name: 'xterm-256color', cols, rows, cwd, env: childEnv(p.configDir) });
     // pid read live: node-pty only knows it once the pseudo-terminal is ready (it is 0 right after spawn)
-    const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, dir: p.configDir };
+    const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, dir: p.configDir,
+      resume: args[0] === '--resume' ? args[1] : null };
     proc.onData((d) => {
       if (!t.listed && proc.pid) { t.listed = true; saveTerms(); }
       t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
@@ -1218,6 +1242,7 @@ async function web() {
       path.join(ROOT, 'console-bridge.ps1'), String(pid)], { windowsHide: true });
     const t = { kind: 'pc', key, pid, proc, clients: new Set(), frame: null, w: 0, h: 0, hist: [], waiting: [] }; // hist: lines scrolled off, colored
     let line = '';
+    proc.stdout.setEncoding('utf8'); // decoded as one stream: a Chinese character split between two chunks stays whole
     proc.stdout.on('data', (d) => {
       line += d;
       for (let k; (k = line.indexOf('\n')) >= 0; line = line.slice(k + 1)) {
@@ -1326,6 +1351,8 @@ async function web() {
         const s = sessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
         if (s.pid) { const t = where(s) ?? mirror(s.pid); t.file = s.file; return { key: t.key, kind: t.kind }; }
+        const r = resuming(s.id);
+        if (r) return { key: r.key, kind: 'pty' };
         if (b.live) throw new Error('这个对话已经不在运行了'); // the page reconnecting: an ended one isn't started anew
         const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
         copyTo(s, p);
@@ -1347,6 +1374,7 @@ async function web() {
       if (!s) throw new Error('找不到这个对话');
       if (!p) throw new Error('没有这个账号');
       const args = ['--resume', s.id];
+      if (!s.pid && resuming(s.id)) return { key: resuming(s.id).key, kind: 'pty' }; // still starting: that one, not a second
       if (!s.pid) { copyTo(s, p); return { key: startPty(p, s.cwd, args, b.cols | 0 || 100, b.rows | 0 || 30).key, kind: 'pty' }; }
       const t = where(s);
       if (t?.kind !== 'pty') { switchWindow(s, b.acct, !!b.now).catch(() => {}); return { window: true }; }
@@ -1669,7 +1697,8 @@ if (require.main === module) {
   else if (cmd === 'wt-bind') wtBind();
   else if (cmd === 'renew') { // renew N M-D: the day account N renews (or ends) as the store shows it; renew N auto: guessed again
     const [n, v] = process.argv.slice(3), m = /^(?:(\d{4})\D)?(\d{1,2})\D(\d{1,2})\D?$/.exec(v ?? '');
-    if (!load().profiles[n - 1] || (v !== 'auto' && !m)) { console.log('用法：claude-multi renew <账号编号> <月-日，如 10-28；auto 改回推算>'); process.exit(1); }
+    const day = m && new Date(+(m[1] ?? new Date().getFullYear()), m[2] - 1, +m[3]); // a day that exists: 2-30 rolls over to March
+    if (!load().profiles[n - 1] || (v !== 'auto' && !(m && day.getMonth() === m[2] - 1 && day.getDate() === +m[3]))) { console.log('用法：claude-multi renew <账号编号> <月-日，如 10-28；auto 改回推算>'); process.exit(1); }
     update((r) => { const p = r.profiles[n - 1]; if (v === 'auto') delete p.renewOn; else p.renewOn = `${m[1] ?? new Date().getFullYear()}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; });
     console.log(v === 'auto' ? `账号 ${n} 改回按订阅开始时间推算` : `已记下：账号 ${n} 每月 ${+m[3]} 号续费（取消续订的，这天到期）`);
   }

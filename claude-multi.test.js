@@ -298,6 +298,7 @@ console.log('tokens ok');
   const on = (day, now) => { const x = nextRenewal(d(day), d(now), true); return `${x.getMonth() + 1}-${x.getDate()}`; };
   assert.equal(on('2026-10-28', '2026-10-11'), '10-28');         // a billing day you set: itself counts
   assert.equal(on('2026-10-28', '2026-11-02'), '11-28');
+  assert.equal(nextRenewal(new Date('2026-99-99T00:00:00'), d('2026-10-11'), true), null); // a day that isn't: none, at once (it looped forever)
   console.log('renewal ok');
 }
 // 换账号继续: 答完再换 waits while the Claude is at work (busy, shell) and goes once it isn't; now goes at once. A
@@ -318,6 +319,12 @@ console.log('tokens ok');
   assert.ok(Date.now() - t < 200);                                        // now: at once
   status('waiting'); t = Date.now(); await untilFree(dir, process.pid, false);
   assert.ok(Date.now() - t < 200);                                        // waiting on you: nothing to cut
+  fs.rmSync(f); t = Date.now();                                           // its status unreadable: not taken for free,
+  await assert.rejects(untilFree(dir, process.pid, false, 1500), /读不到/);  // asked again, then given up
+  assert.ok(Date.now() - t >= 1400, 'waited for the status before giving up');
+  status('busy'); setTimeout(() => fs.rmSync(f), 300); setTimeout(() => status('idle'), 1200); t = Date.now();
+  await untilFree(dir, process.pid, false, 5000);                         // gone a moment, then idle: waited out
+  assert.ok(Date.now() - t >= 1100);
   const sw = path.join(os.homedir(), '.claude-multi', 'switch');
   fs.mkdirSync(sw, { recursive: true }); fs.writeFileSync(path.join(sw, '999999.json'), JSON.stringify({ id: 'x', n: 2 }));
   assert.deepEqual(takeSwitch(999999), { id: 'x', n: 2 });
