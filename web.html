@@ -108,7 +108,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .m { font-size: 12px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .when { font-size: 11.5px; color: var(--fg3); flex: none; }
-  /* an account's mark: its number in a ring of its color, the ring filled clockwise as far as the account has quota left */
+  /* an account's mark: its number in a ring of its color, the ring filled clockwise as far as its 5-hour window has left */
   .ac { position: relative; width: 20px; height: 20px; flex: none; display: grid; place-items: center; font: 600 10.5px/1 var(--ui); font-style: normal; color: var(--c); }
   .ac::before { content: ''; position: absolute; inset: 0; border-radius: 50%;
     background: conic-gradient(var(--c) calc(var(--p) * 1%), color-mix(in srgb, var(--c) 22%, transparent) 0);
@@ -435,14 +435,12 @@ const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path
   auto: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>', light: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
   dark: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', plus: '<path d="M12 5v14M5 12h14"/>', refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
   swap: '<path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/>', send: '<path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/>', stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>', end: '<path d="M12 4v7M7.4 6.6a7 7 0 1 0 9.2 0"/>' };
-// an account's mark, n from 1: its number in a ring, the ring as full as the account has quota left (the tighter of its
-// 5-hour and 7-day windows), dashed while that's unread
-const WIN = { five_hour: '5 小时', seven_day: '7 天' };
+// an account's mark, n from 1: its number in a ring, the ring as full as its 5-hour window has left, dashed while unread
 const ac = (n, cls = '') => {
   if (!n) return '';
-  const a = state?.usage?.accounts?.[n - 1], ws = a && !a.err ? a.windows ?? [] : [];
-  const left = ws.length ? Math.max(0, 100 - Math.max(...ws.map((w) => w.pct))) : null;
-  const tip = left == null ? `账号 ${n} · 额度没读到` : `账号 ${n} · 还剩 ${left}%（${ws.map((w) => `${WIN[w.k] ?? w.k}已用 ${w.pct}%`).join('，')}）`;
+  const a = state?.usage?.accounts?.[n - 1], w = !a?.err && a?.windows?.find((x) => x.k === 'five_hour');
+  const left = w ? Math.max(0, 100 - w.pct) : null;
+  const tip = left == null ? `账号 ${n} · 额度没读到` : `账号 ${n} · 5 小时额度还剩 ${left}%${w.reset ? `（${w.reset}后重置）` : ''}`;
   return `<i class="ac${cls}${left == null ? ' nq' : ''}" style="--c:${ACCT[(n - 1) % 4]};--p:${left ?? 0}" title="${esc(tip)}">${n}</i>`;
 };
 // Claude's spark, as the icon draws it, in currentColor
