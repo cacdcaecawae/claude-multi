@@ -1374,10 +1374,10 @@ async function web() {
       if (!s) throw new Error('找不到这个对话');
       if (!p) throw new Error('没有这个账号');
       const args = ['--resume', s.id];
-      if (!s.pid && resuming(s.id)) return { key: resuming(s.id).key, kind: 'pty' }; // still starting: that one, not a second
+      if (!s.pid && resuming(s.id)) throw new Error('这个对话还在启动，等它起来再换'); // a second Claude on the record, or the page told it switched
       if (!s.pid) { copyTo(s, p); return { key: startPty(p, s.cwd, args, b.cols | 0 || 100, b.rows | 0 || 30).key, kind: 'pty' }; }
       const t = where(s);
-      if (t?.kind !== 'pty') { switchWindow(s, b.acct, !!b.now).catch(() => {}); return { window: true }; }
+      if (t?.kind !== 'pty') { switchWindow(s, b.acct, !!b.now).catch((e) => t && send(t, 'swapfail', { err: `没换成：${e.message}` })); return { window: true }; }
       (async () => {
         await untilFree(t.dir, t.pid, b.now || atLimit(reg.profiles[s.acct]));
         if (t.gone || t.switching) return; // a second request (the island and the page both): one new Claude, not two
@@ -1386,7 +1386,7 @@ async function web() {
         while (!t.gone) await sleep(100); // it has stopped writing its record: the copy is whole
         copyTo(s, p);
         send(t, 'switched', { key: startPty(p, s.cwd, args, t.w, t.h).key });
-      })().catch(() => {});
+      })().catch((e) => send(t, 'swapfail', { err: `没换成：${e.message}` })); // its pages stop waiting
       return { pty: true };
     },
     'POST /api/input': (q, b) => {

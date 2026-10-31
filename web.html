@@ -1330,6 +1330,7 @@ function makeConv(body, title) {
     });
     on('gone', () => { if (!switching || kind === 'pty') end(); }); // a window's old Claude gone while switching: follow() goes on
     on('switched', (e) => { key = JSON.parse(e.data).key; kind = 'pty'; switched(); connect(); });
+    on('swapfail', (e) => { switching = 0; toast(JSON.parse(e.data).err, 5000); redraw(); }); // it stays on this account (follow() stops)
     s.onerror = () => { // CLOSED: refused (the browser retries the rest itself)
       if (es !== s || s.readyState !== EventSource.CLOSED || c.ended) return;
       if (!c.id || ++fails > 5) return end(); // a brand-new one can't be found again by id; or it keeps failing
