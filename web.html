@@ -125,6 +125,18 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .dot.done { background: rgba(63,185,80,.2); color: var(--green); }
   .dot.ask { background: rgba(229,160,58,.2); color: var(--orange); }
   .empty { color: var(--fg3); text-align: center; padding: 20px 12px; }
+  /* 对话 by folder, as Codex: a folder's icon and name, its conversations under it one line each (the account ring under
+     the folder icon, the title under its name) */
+  details.dir + details.dir { margin-top: 4px; }
+  details.dir + details.dir::before { content: none; }
+  details.dir > summary { color: var(--fg); letter-spacing: 0; font-size: 13px; font-weight: 500; height: 30px; gap: 8px; padding: 0 14px; }
+  details.dir > summary::before { content: none; }
+  details.dir > summary i { display: grid; color: var(--fg2); } details.dir > summary svg { width: 16px; height: 16px; }
+  details.dir[open] .fc, details.dir:not([open]) .fo { display: none; }
+  .row.one { min-height: 30px; padding-left: 4px; }
+  .ico.on { background: var(--sel); color: var(--fgHi); }
+  .ico .bdot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .sideHead .ico { position: relative; }
 
   /* 额度, 用量 in the side bar */
   /* flat, as VS Code's side bar views: sections between thin lines, no boxes */
@@ -438,7 +450,10 @@ const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path
   list: '<path d="M4 7h16M4 12h16M4 17h16"/>', pic: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 15.5l-5-5L6 19"/>',
   auto: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>', light: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
   dark: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', plus: '<path d="M12 5v14M5 12h14"/>', refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
-  swap: '<path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/>', send: '<path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/>', stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>', end: '<path d="M12 4v7M7.4 6.6a7 7 0 1 0 9.2 0"/>' };
+  swap: '<path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/>', send: '<path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/>', stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>', end: '<path d="M12 4v7M7.4 6.6a7 7 0 1 0 9.2 0"/>',
+  bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  folder: '<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H19a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
+  folderOpen: '<path d="M3.5 18V7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H18a1.5 1.5 0 0 1 1.5 1.5v1.5"/><path d="M3.5 18l2.6-6.4a1 1 0 0 1 .9-.6h14l-2.7 6.4a1 1 0 0 1-.9.6z"/>' };
 // an account's mark, n from 1: its number in a ring, the ring as full as its 5-hour window has left, dashed while unread
 const ac = (n, cls = '') => {
   if (!n) return '';
@@ -460,9 +475,10 @@ const FINE = matchMedia('(pointer: fine)').matches, FONT = FINE ? 14 : 13; // FI
 const saved = (() => { try { return JSON.parse(localStorage.getItem('cm-layout')) ?? {}; } catch { return {}; } })();
 let side = ['chats', 'usage', 'tokens'].includes(saved.side) ? saved.side : 'chats', sideOn = saved.sideOn ?? true, sideW = saved.sideW ?? 300;
 let state = null, tokens = null, tokensNow = null, groups = [], focusG = null, drag = null, restored = false;
-const folded = new Set(saved.folded ?? []); // side bar sections closed
+const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
+let listMode = saved.listMode === 'run' ? 'run' : 'dirs'; // 对话: by folder, or (the bell) 提示 and the running ones
 function save() { // not before the tabs are back: a first load that failed would forget them
-  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, folded: [...folded], focus: groups.indexOf(focusG),
+  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, folded: [...folded], listMode, focus: groups.indexOf(focusG),
     groups: groups.map((g) => ({ size: g.size, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
 }
 const allConvs = () => groups.flatMap((g) => g.tabs), convOf = (id) => id && allConvs().find((c) => c.id === id);
@@ -548,27 +564,40 @@ function markRows() { // the side bar's rows: which are open in a tab, which one
   drawHere();
 }
 
+// 对话, newest first (by its record's last write): by folder, the folders by their newest; or, behind the bell, the unread
+// 提示 and the running ones, with their folder on a second line
 function renderChats() {
   const notes = state.notes ?? []; // unread only: the server drops what you've read anywhere or answered since
-  const run = state.sessions.filter((s) => s.pid), rest = state.sessions.filter((s) => !s.pid).slice(0, 40);
-  const row = (s) => `<div class="row" data-open="${esc(s.id)}" draggable="${FINE}" title="${esc(s.cwd)}">${ac(s.acct + 1)}
-    <div class="main"><div class="t">${esc(s.title)}</div><div class="m">${esc(base(s.cwd))}${s.prompt ? ' · ' + esc(s.prompt) : ''}</div></div>
-    ${s.busy ? '<span class="spin" title="正在回复"></span>' : ''}${s.pid ? `<span class="chip ${s.where}">${s.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(s.at)}</span>`}
-    <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button></div>`;
-  const sec = (k, head, body) => `<details class="sec" data-sec="${k}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
-  $('#sideActs').innerHTML = `<button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
-  $('#view').innerHTML = (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
-      notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
-        <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
-        <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
-    + (run.length ? sec('run', `<span>运行中<b class="count">${run.length}</b></span>`, run.map(row).join('')) : '')
-    + sec('rest', '<span>最近</span>', rest.length ? rest.map(row).join('') : '<div class="empty">还没有对话</div>');
+  const S = state.sessions, run = S.filter((x) => x.pid), bell = listMode === 'run';
+  const right = (x) => `${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}${x.pid ? `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(x.at)}</span>`}
+    <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
+  const row = (x) => `<div class="row" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1)}
+    <div class="main"><div class="t">${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${right(x)}</div>`;
+  const line = (x) => `<div class="row one" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1)}
+    <div class="main t">${esc(x.title)}</div>${right(x)}</div>`;
+  const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
+  $('#sideActs').innerHTML = `<button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
+    <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
+  if (bell) {
+    $('#view').innerHTML = (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
+        notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
+          <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
+          <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
+      + sec('run', `<span>运行中<b class="count">${run.length}</b></span>`, run.length ? run.map(row).join('') : '<div class="empty">没有在运行的对话</div>');
+  } else {
+    const dirs = new Map();
+    for (const x of S) dirs.set(x.cwd, [...(dirs.get(x.cwd) ?? []), x]);
+    $('#view').innerHTML = dirs.size ? [...dirs].map(([cwd, list]) => sec('d:' + cwd,
+      `<i class="fc">${svg(I.folder)}</i><i class="fo">${svg(I.folderOpen)}</i><span class="t" title="${esc(cwd)}">${esc(base(cwd) || cwd)}</span>`,
+      list.map(line).join(''), 'dir')).join('') : '<div class="empty">还没有对话</div>';
+  }
   markRows();
 }
 $('#side').onclick = (e) => {
   const b = e.target.closest('button, .row');
   if (!b) return;
   if (b.matches('[data-new]')) return newSheet();
+  if (b.matches('[data-bell]')) { listMode = listMode === 'run' ? 'dirs' : 'run'; save(); return renderChats(); }
   if (b.matches('[data-refresh]')) {
     if (side === 'usage') return refreshUsage();
     if (side === 'chats') return load().then((err) => toast(err ? `刷新失败：${err}` : '列表已刷新'));
