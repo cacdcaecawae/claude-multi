@@ -266,6 +266,13 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .ask .pick.on { background: var(--accentBg); border-color: var(--accent); }
   .ask .row2 { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
   .ask .row2 button { font-size: 12px; padding: 3px 10px; border-radius: 6px; background: var(--btn); }
+  .ask .row2 .push { margin-right: auto; }
+  .ask .tabsQ { font-size: 12px; color: var(--fg2); padding: 0 2px; }
+  .ask .pick small { display: block; margin-top: 2px; font-size: 12px; color: var(--fg2); }
+  .ask .pick .box { display: inline-grid; place-items: center; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; border: 1.5px solid var(--fg2); border-radius: 3px; }
+  .ask .pick .box.on { background: var(--accent); border-color: var(--accent); }
+  .ask .pick .box.on::after { content: '✓'; color: #fff; font-size: 10px; line-height: 1; }
+  .ask .hint2 { font-size: 12px; color: var(--accent); padding: 2px; }
   @media (hover: hover) { .ask .pick:hover { background: var(--hover); } .ask .pick.on:hover { background: var(--accentBg); } }
   .keys { display: flex; gap: 4px; padding: 6px; overflow-x: auto; border-top: 1px solid var(--border); scrollbar-width: none; flex: none; }
   .keys button { flex: 1 0 auto; min-width: 32px; background: var(--btn); border-radius: 6px; padding: 8px 4px; font-size: 13px; font-weight: 600; }
@@ -952,7 +959,7 @@ function makeConv(body, title) {
   const c = { id: body.id ?? null, title, acct: body.acct ?? null, g: null, started: false, ended: false, closed: false, live: '' };
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
-  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, lastSeen = 0, gen = 0, fails = 0;
+  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = 0, typeOpt = new Map(), lastSeen = 0, gen = 0, fails = 0;
   let switching = 0; // the account it's going to, while it goes
   const el = c.el = document.createElement('div');
   el.className = 'pane hist';
@@ -1069,11 +1076,12 @@ function makeConv(body, title) {
     if (sending) return toast('上一条还在发，稍等一下'); // what you wrote stays
     if (!key || c.ended) return toast(c.started && !c.ended ? '还在连接，稍等一下再发' : '这个对话没有在运行，先点上面的「接着聊」');
     // a menu waiting: the message would be typed into it, and its Enter pick what's highlighted ("No, exit", say)
-    if (menuNow) return toast('Claude 在等你先在上面选一项，选完再发（你写的还在输入框里）', 4000);
+    if (menuNow && !typeNow) return toast('Claude 在等你先在上面选一项，选完再发（你写的还在输入框里）', 4000);
+    const answer = typeNow, tick = typeTick; // what you write for Claude's 「Type something」: pasted into it, then Enter (a multi-select's: none, it's ticked)
     // out of the box at once: what you type while its pictures upload is the next message, not wiped when this one goes
     sending = true; stops++; // a 停止 still watching Claude's input box: this message isn't the one to take back
     line.value = ''; grow(); atts = []; drawAtts();
-    const wait = view === 'hist' && { text: v, imgs: imgs.map((a) => a.url), at: Date.now() };
+    const wait = view === 'hist' && !answer && { text: v, imgs: imgs.map((a) => a.url), at: Date.now() };
     if (wait) { sent.push(wait); drawLive(true); }
     const back = (why) => { // not sent after all: back in the box, before what you typed since, with its pictures
       if (wait) { sent = sent.filter((s) => s !== wait); drawLive(); }
@@ -1089,7 +1097,7 @@ function makeConv(body, title) {
       }
       // asked again after the wait: the conversation ended, or a menu came up (Enter would pick what's highlighted)
       if (!key || c.ended) return back('这个对话已经不在运行了，消息放回了输入框');
-      if (menuNow) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
+      if (menuNow && !(answer && typeNow)) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
       const lost = '没发出去，消息放回了输入框'; // a step that didn't reach Claude: no Enter after it
       if (paths.length) { // Claude attaches each pasted path in well under a second: Enter waits for that (4 s at most)
         const before = imagesShown();
@@ -1098,7 +1106,8 @@ function makeConv(body, title) {
         for (const end = Date.now() + 4000; imagesShown() < before + paths.length && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 100));
       }
       if (v && !(await input(`\x1b[200~${v.replace(/\n/g, '\r')}\x1b[201~`))) return back(lost);
-      await input('\r');
+      if (!tick) await input('\r');
+      if (answer && !tick) typing = 0;
     } finally { sending = false; goMode(); }
   };
   line.onkeydown = (e) => {
@@ -1115,12 +1124,18 @@ function makeConv(body, title) {
     else if (d.act === 'swap') swap();
     else if (d.act === 'end') endIt();
     else if (d.act === 'resume') { if (c.id) resume(); else start(); } // a new one that never got a record: started again in its folder
-    else if (d.pick) { // to that option with the arrow keys, then Enter: works for any of Claude's menus
+    else if (d.key === 'next' || d.key === 'prev') { // several questions: the next or the one before (out of 「Type something」 first: there ← → move in the words)
+      if (typeNow) input('\x1b[A');
+      input(d.key === 'next' ? '\x1b[C' : '\x1b[D');
+    }
+    else if (d.pick) { // to that option with the arrow keys, then Enter: works for any of Claude's menus (a check box: ticked or not)
       const m = term && screen().menu;
       if (!m) return;
       const n = +d.pick - m.cur;
       for (let i = 0; i < Math.abs(n); i++) input(n > 0 ? '\x1b[B' : '\x1b[A');
-      input('\r');
+      // 「Type something」 takes typing where it is: what you write below is pasted into it, then Enter
+      if (typeOpt.get(m.ask) === +d.pick || /^Type something/i.test(m.opts.find((o) => o.n === +d.pick)?.label ?? '')) { typing = +d.pick; drawLive(); line.focus(); }
+      else input('\r');
     } else if (d.key === 'term') setView('term'); else input('\x1b');
   });
 
@@ -1210,8 +1225,22 @@ function makeConv(body, title) {
       for (let i = cur - 1, n = c - 1; i >= 0 && n >= 1; i--) if (+opt(i)?.[1] === n) at.set(n--, i);
       for (let i = cur + 1, n = c + 1; i < rows.length; i++) if (+opt(i)?.[1] === n) at.set(n++, i);
       const top = at.get(1);
-      if (at.size >= 2 && top != null) menu = { cur: c, opts: [...at].sort((x, y) => x[0] - y[0]).map(([n, i]) => ({ n, label: opt(i)[2] })),
-        ask: rows.slice(Math.max(0, top - 6), top).map((r) => r.replace(/[│╭╮╰╯─]/g, '').trim()).filter(Boolean).join('\n') };
+      // each option: the rows under it up to the next one (a blank row or a rule ends them) are its description; "[ ]"
+      // or "[✔]" before it, a multi-select's check box. The question: the rows above the options up to a rule, the tabs
+      // of several questions at once (← ☐ Color ☐ Fruit ✔ Submit →) shown apart.
+      const rule = (r) => /[─━]{3}/.test(r) && !/[^\s─━╭╮╰╯├┤]/.test(r), idx = [...at].sort((x, y) => x[0] - y[0]);
+      if (at.size >= 2 && top != null) {
+        const opts = idx.map(([n, i], k) => {
+          const desc = [];
+          for (let j = i + 1; j < (idx[k + 1]?.[1] ?? rows.length) && rows[j].trim() && !rule(rows[j]) && !/^\s*Submit\s*$/.test(rows[j]); j++) desc.push(rows[j].trim());
+          const box = /^\[([ ✔✓xX])\]\s*(.*)$/.exec(opt(i)[2]);
+          return { n, label: box ? box[2] : opt(i)[2], desc: desc.join(' '), check: box ? box[1] !== ' ' : null };
+        });
+        let a = top;
+        while (a > 0 && top - a < 12 && !rule(rows[a - 1])) a--;
+        const lines = rows.slice(a, top).map((r) => r.replace(/[│╭╮╰╯─]/g, '').trim()).filter(Boolean), tabs = lines.find((l) => /^←.*→$/.test(l));
+        menu = { cur: c, opts, tabs: tabs?.replace(/^←\s*|\s*→$/g, ''), ask: lines.filter((l) => l !== tabs).join('\n') };
+      }
     }
     // a menu without numbers, like "Do you trust this folder?" (❯ No, exit / Yes, I trust this folder), which Claude asks
     // in the home folder every time: its options are the rows around ❯ up to a blank one, "Enter to confirm" under them
@@ -1230,13 +1259,21 @@ function makeConv(body, title) {
     const live = $p('.live');
     if (!live) return;
     sent = sent.filter((s) => Date.now() - s.at < 600000); // ponytail: one the record never shows (some slash commands) goes after 10 min
-    const { busy, menu } = term && !c.ended ? screen() : {}, took = busy && /(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0];
+    const { busy, menu } = term && !c.ended ? screen() : {}, here = menu?.opts.find((o) => o.n === menu.cur);
+    // 「Type something」: which option it is, per question, kept from when it still said so (written in, it shows the words)
+    const blank = menu?.opts.find((o) => /^Type something/i.test(o.label));
+    if (blank) typeOpt.set(menu.ask, blank.n);
+    typeNow = !!here && (typing === menu.cur || typeOpt.get(menu.ask) === menu.cur);
+    typeTick = typeNow && here.check != null; // a multi-select's: what you write ticks it, no Enter after
+    const took = busy && /(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0];
     const h = sent.map((s) => (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
       + (s.text ? `<div class="hm user pending">${esc(s.text)}</div>` : '')).join('') + (menu
-      ? `<div class="ask">${menu.ask ? `<div class="q">${esc(menu.ask)}</div>` : ''}${menu.opts.map((o) =>
-        `<button class="pick${o.n === menu.cur ? ' on' : ''}" data-pick="${o.n}">${o.n}. ${esc(o.label)}</button>`).join('')}
-        <div class="row2"><button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
+      ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${menu.ask ? `<div class="q">${esc(menu.ask)}</div>` : ''}${menu.opts.map((o) =>
+        `<button class="pick${o.n === menu.cur ? ' on' : ''}" data-pick="${o.n}">${o.check != null ? `<i class="box${o.check ? ' on' : ''}"></i>` : `${o.n}. `}${esc(o.label)}${o.desc ? `<small>${esc(o.desc)}</small>` : ''}</button>`).join('')}
+        ${typeNow ? '<div class="hint2">在下面的输入框里写你的回答，发送后填进这一项</div>' : ''}
+        <div class="row2">${menu.tabs ? '<button data-key="prev">← 上一题</button><button data-key="next" class="push">下一题 →</button>' : ''}<button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
       : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : 'Claude 正在回复'}${took ? ' · ' + took : ''}</div>` : '');
+    if (!menu) typing = 0;
     busyNow = !!busy && !menu; menuNow = !!menu; goMode();
     const st = menuNow ? 'ask' : busyNow ? 'busy' : ''; // the tab shows it too
     if (c.live !== st) { c.live = st; if (c.g) drawTabs(c.g); }
