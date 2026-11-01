@@ -449,6 +449,9 @@ console.log('tokens ok');
   fs.mkdirSync(up); fs.writeFileSync(old, 'x'); fs.utimesSync(old, new Date(0), new Date(0));
   const saved = saveUpload(png, 'png', up);
   assert.ok(fs.readFileSync(saved).equals(png) && saved.endsWith('.png') && !fs.existsSync(old));
+  const doc = saveUpload(Buffer.from('pdf'), null, up, '..\\..\\报告 v1.pdf');
+  assert.ok(path.dirname(doc) === up && /^\d{8}T\d{6}-[0-9a-f]{6}-报告 v1\.pdf$/.test(path.basename(doc)));
+  assert.ok(/-a_b_\.txt$/.test(saveUpload(Buffer.from(''), null, up, 'a<b>.txt')) && /[0-9a-f]{6}\.bin$/.test(saveUpload(Buffer.from(''), null, up, '..')));
   fs.rmSync(d, { recursive: true, force: true });
   console.log('image ok');
 }

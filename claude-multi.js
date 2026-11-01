@@ -1171,12 +1171,16 @@ function recordImage(file, pos, k) {
   return { type: p.source.media_type, data: Buffer.from(p.source.data, 'base64') };
 }
 // A picture sent from the page, kept for Claude to take in by its path: the page pastes the path, as dragging the file
-// into a terminal does, and Claude attaches it ([Image #1]) and copies it into its record. Kept a week.
+// into a terminal does, and Claude attaches it ([Image #1]) and copies it into its record. Any other file (name: its
+// own) keeps its name, after the time: its path goes in the message, for Claude to read. Kept a week.
 const UPLOADS = path.join(ROOT, 'uploads');
-function saveUpload(data, ext, dir = UPLOADS) {
+function saveUpload(data, ext, dir = UPLOADS, name = null) {
   fs.mkdirSync(dir, { recursive: true });
   for (const f of fs.readdirSync(dir)) try { if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 7 * 864e5) fs.unlinkSync(path.join(dir, f)); } catch {}
-  const file = path.join(dir, `${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${require('crypto').randomBytes(3).toString('hex')}.${ext}`);
+  const stamp = `${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${require('crypto').randomBytes(3).toString('hex')}`;
+  // the name only, no folders; what Windows can't take in a name replaced
+  const safe = name && path.basename(name.replace(/\\/g, '/')).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/^[.\s]+|[.\s]+$/g, '').slice(-120);
+  const file = path.join(dir, safe ? `${stamp}-${safe}` : `${stamp}.${ext ?? 'bin'}`);
   fs.writeFileSync(file, data);
   return file;
 }
@@ -1486,12 +1490,16 @@ async function web() {
       // only from our own page: from the same origin, as JSON or a picture's own type (another site's page can't send
       // either cross-origin without asking first, and nothing here answers that)
       if (req.method === 'POST' && req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return out(403, { err: '来源不对' });
-      if (req.method === 'POST' && url.pathname === '/api/upload') { // a picture's bytes: saved, its path back for the page to paste
-        const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }[req.headers['content-type']];
-        if (!ext) return out(415, { err: '只能发 png、jpg、gif、webp 图片' });
+      // a picture's bytes, or a file's (application/octet-stream, its name in x-name: neither type can come cross-origin
+      // without asking first): saved, its path back for the page to paste
+      if (req.method === 'POST' && url.pathname === '/api/upload') {
+        const ct = req.headers['content-type'], ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }[ct];
+        let name = null;
+        if (ct === 'application/octet-stream') try { name = decodeURIComponent(req.headers['x-name'] ?? '') || 'file'; } catch { name = 'file'; }
+        if (!ext && !name) return out(415, { err: '只能发图片或文件' });
         const parts = []; let size = 0;
-        for await (const ch of req) { if ((size += ch.length) > 20 << 20) return out(413, { err: '图片太大了（最大 20 MB）' }); parts.push(ch); }
-        return out(200, { path: saveUpload(Buffer.concat(parts), ext) });
+        for await (const ch of req) { if ((size += ch.length) > 20 << 20) return out(413, { err: `${name ? '文件' : '图片'}太大了（最大 20 MB）` }); parts.push(ch); }
+        return out(200, { path: saveUpload(Buffer.concat(parts), ext, UPLOADS, name) });
       }
       const fn = api[`${req.method} ${url.pathname}`];
       if (!fn) return out(404, { err: '没有这个地址' });
