@@ -1530,8 +1530,10 @@ async function web() {
   function tunnel() {
     if (!TUNNEL) return; // no tunnel.json: this computer only
     const at = Date.now();
-    tun = require('child_process').spawn('ssh', ['-N', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=5',
-      '-o', 'ServerAliveCountMax=3', '-R', `${TUNNEL.sock}:127.0.0.1:${WEB_PORT}`, TUNNEL.ssh], { windowsHide: true, stdio: 'ignore' });
+    // a session (-tt, a command that never ends) and not -N: only a session makes both ends send small packets at once
+    // (TCP_NODELAY); with -N each new connection through took ~150 ms, not ~50. The tty: the command dies with the link.
+    tun = require('child_process').spawn('ssh', ['-tt', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=5',
+      '-o', 'ServerAliveCountMax=3', '-R', `${TUNNEL.sock}:127.0.0.1:${WEB_PORT}`, TUNNEL.ssh, 'sleep infinity'], { windowsHide: true, stdio: 'ignore' });
     let again = () => { again = () => {}; wait = Date.now() - at > 30000 ? 5000 : Math.min(wait * 2, 60000); setTimeout(tunnel, wait); };
     tun.on('exit', () => again()); tun.on('error', () => again()); // error: no ssh to start (unhandled, it took the service down)
   }

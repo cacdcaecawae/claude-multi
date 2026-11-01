@@ -212,6 +212,11 @@ StreamLocalBindMask 0111
 **4. 服务器上的 nginx。**证书可以用 Let's Encrypt，没有域名也能给 IP 签证书。别忘了在防火墙和云服务商的安全组里放行 8443 端口。
 
 ```nginx
+upstream claude_multi {
+    server unix:/run/claude-multi.sock;
+    keepalive 8;                         # 复用隧道里的连接：每次新开要多 100 毫秒左右，打字会卡
+    keepalive_timeout 4s;                # 比网页服务自己的 5 秒短
+}
 server {
     listen 8443 ssl;
     server_name 你的服务器地址;
@@ -221,7 +226,7 @@ server {
     server_tokens off;
     client_max_body_size 30m;            # 发图片
     location / {
-        proxy_pass http://unix:/run/claude-multi.sock:;
+        proxy_pass http://claude_multi;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header Connection "";
