@@ -182,6 +182,15 @@ console.log('tokens ok');
   const more = history(f, { from: all.end });
   assert.deepEqual(more.items.map((x) => x.text), ['看完了。']);
   assert.equal(history(f, { from: more.end }).items.length, 0);
+  // a long one: the last keep or so, from a message of yours; the ones before it come with end: start, none twice
+  fs.writeFileSync(f, Array.from({ length: 30 }, (_, k) => [u(`问${k}`), a([{ type: 'text', text: `答${k}` }, { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }])])
+    .flat().map((x) => JSON.stringify(x)).join('\n') + '\n');
+  const tail = history(f, { keep: 10 }), head = history(f, { end: tail.start, keep: 1000 });
+  assert.equal(tail.items[0].text, '问26'); // 10 back from the end lands mid-turn: from its question, 12 items
+  assert.equal(tail.items.length, 12);
+  assert.equal(head.items.length + tail.items.length, 90);
+  assert.equal(head.items.at(-1).text, 'Bash  ls');
+  assert.ok(!('pos' in tail.items[0]));
   fs.rmSync(f);
   console.log('history ok');
 }

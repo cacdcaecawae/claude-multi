@@ -1079,7 +1079,9 @@ function said(j) {
   const c = j.type === 'attachment' ? j.attachment?.prompt : j.message?.content;
   return typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : [];
 }
-function history(file, { from, end } = {}) {
+// A first look (no from) gets its last keep items or so, from the start of a message of yours: the page draws them at
+// once (all 16 MB of a long one froze it for a second), and asks for the ones before (end: start) as you scroll up.
+function history(file, { from, end, keep = 120 } = {}) {
   const fd = fs.openSync(file, 'r'), size = fs.fstatSync(fd).size;
   let a, b;
   if (from != null) { a = Math.min(+from, size); b = size; }
@@ -1093,13 +1095,13 @@ function history(file, { from, end } = {}) {
   const out = [];
   const add = (role, text, at) => {
     text = String(text ?? '').trim();
-    if (text) out.push({ role, text: text.length > 20000 ? text.slice(0, 20000) + '…' : text, at });
+    if (text) out.push({ role, text: text.length > 20000 ? text.slice(0, 20000) + '…' : text, at, pos: here });
   };
-  let next = a + skip; // where each line starts in the file: a picture in it is fetched from there (recordImage)
+  let next = a + skip, here = 0; // where each line starts in the file: a picture in it is fetched from there (recordImage)
   const byParent = new Map(); // a line your message hangs on → that message's items
   for (const l of lines) {
     const pos = next;
-    next += Buffer.byteLength(l) + 1;
+    here = pos; next += Buffer.byteLength(l) + 1;
     if (!l.includes('"type":"user"') && !l.includes('"type":"assistant"') && !l.includes('"queued_command"') && !l.includes('"turn_duration"')) continue;
     if (l.includes('"type":"tool_result"')) continue; // tool output, often huge (screenshots): not shown, not parsed
     let j;
@@ -1145,7 +1147,14 @@ function history(file, { from, end } = {}) {
       }
     }
   }
-  return { items: out.filter((o) => !o.gone), start: a + skip, end: last < skip ? a + skip : a + last + 1 };
+  const items = out.filter((o) => !o.gone);
+  let cut = 0;
+  if (from == null && items.length > keep) {
+    cut = items.length - keep;
+    while (cut > 0 && items[cut].role !== 'user' && items[cut].role !== 'img') cut--; // back to a message of yours
+    while (cut > 0 && items[cut - 1].pos === items[cut].pos) cut--; // its pictures, above its words
+  }
+  return { items: items.slice(cut).map(({ pos, ...o }) => o), start: cut ? items[cut].pos : a + skip, end: last < skip ? a + skip : a + last + 1 };
 }
 // The k-th picture of the record's line at byte pos, as history() names it ("pos.k"): its type and bytes.
 function recordImage(file, pos, k) {
