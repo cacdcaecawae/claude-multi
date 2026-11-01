@@ -627,7 +627,11 @@ $('#view').addEventListener('toggle', (e) => {
   if (e.target.open) folded.delete(k); else folded.add(k);
   if (was !== folded.has(k)) save();
 }, true); // toggle doesn't bubble
-$('#view').ondragstart = (e) => { const r = e.target.closest('[data-open]'); if (r) { drag = { id: r.dataset.open }; e.dataTransfer.setData('text/plain', ''); } };
+$('#view').ondragstart = (e) => { const r = e.target.closest('[data-open]'); if (r) { drag = { id: r.dataset.open, x: e.clientX, y: e.clientY }; e.dataTransfer.setData('text/plain', ''); } };
+// a row "dragged" a few pixels and let go where nothing takes it (the side bar): an unsteady click, opened as one
+$('#view').ondragend = (e) => {
+  if (drag?.id && e.dataTransfer.dropEffect === 'none' && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 24) openSession(drag.id);
+};
 $('#act').onclick = (e) => {
   const b = e.target.closest('[data-side]');
   if (!b) return;
@@ -774,6 +778,12 @@ function makeGroup(ref, left) { // after ref (or before it: left), or last
     if (x) closeConv(g.tabs[+x.dataset.x]); else if (t) activate(g, g.tabs[+t.dataset.i]);
   };
   g.strip.onmousedown = (e) => { if (e.button === 1) e.preventDefault(); }; // a middle click closes, doesn't scroll
+  // a tab shows on the press (a mouse's left button), as in VS Code: a hand that moves a few pixels while pressing makes
+  // it the start of a drag, and no click follows. Let go where it was, the tab stays put. Touch: on the tap, as before.
+  g.strip.onpointerdown = (e) => {
+    const t = e.target.closest('[data-i]');
+    if (t && e.pointerType === 'mouse' && e.button === 0 && !e.target.closest('[data-x]')) activate(g, g.tabs[+t.dataset.i]);
+  };
   g.strip.onauxclick = (e) => { const t = e.target.closest('[data-i]'); if (t && e.button === 1) closeConv(g.tabs[+t.dataset.i]); };
   g.strip.onwheel = (e) => { if (e.deltaY && !e.deltaX) { g.strip.scrollLeft += e.deltaY; e.preventDefault(); } }; // the wheel scrolls tabs sideways
   g.strip.ondragstart = (e) => {
