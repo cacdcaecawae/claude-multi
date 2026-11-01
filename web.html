@@ -1444,7 +1444,8 @@ function makeConv(body, title) {
     if (!scr.clientWidth) term.resize(100, 40); // only the chat shown: room for a menu with its question
     term.onData(input);
     term.onWriteParsed(() => { if (shown && view === 'hist' && !liveT) liveT = setTimeout(() => { liveT = 0; drawLive(); }, 200); }); // its screen changed
-    term.onWriteParsed(() => { if (shown && view === 'term' && !txtT) txtT = setTimeout(() => { txtT = 0; drawTxt(); }, 120); });
+    // on the next frame, not after a wait: a key typed shows as soon as the window echoes it (a draw costs ~1 ms)
+    term.onWriteParsed(() => { if (shown && view === 'term' && !txtT) txtT = requestAnimationFrame(() => { txtT = 0; drawTxt(); }); });
     setView(view); redraw();
     try { ({ key, kind } = await post('/api/open', { ...body, cols: term.cols, rows: term.rows })); }
     catch (e) { if (!c.closed) { c.ended = true; notice('gone', e.message); redraw(); } return; }
