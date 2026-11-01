@@ -635,8 +635,11 @@ async function untilFree(dir, pid, now, unknownMs = 30000) {
 // Conversation s, running in a window here, to go on with account n; nothing is sent, it waits for you there.
 // 'tab' or 'new': where it went on.
 async function switchWindow(s, n, now) {
-  const reg = load(), own = reg.profiles[s.acct];
+  const reg = load(), own = reg.profiles[s.acct], to = reg.profiles[n - 1]?.id;
   await untilFree(own.configDir, s.pid, now || atLimit(own));
+  // the account it was asked for, by its id: one removed while this waited (up to 2 h) moved the numbers after it
+  n = load().profiles.findIndex((p) => p.id === to) + 1;
+  if (!n) throw new Error('要换去的账号已经不在了');
   fs.mkdirSync(SWITCH, { recursive: true });
   const f = path.join(SWITCH, `${s.pid}.json`);
   fs.writeFileSync(f, JSON.stringify({ id: s.id, n: Number(n) }));
@@ -1288,7 +1291,10 @@ async function web() {
         t.waiting.splice(0).forEach((f) => f()); // pages that opened before the first frame
       }
     });
-    proc.on('exit', () => { t.gone = true; send(t, 'gone', {}); t.waiting.splice(0).forEach((f) => f()); terms.delete(key); });
+    proc.on('exit', () => { // its own entry only: a new reader of the same window may have its key by now
+      t.gone = true; send(t, 'gone', {}); t.waiting.splice(0).forEach((f) => f());
+      if (terms.get(key) === t) terms.delete(key);
+    });
     setTimeout(() => { if (!t.clients.size) proc.kill(); }, 30000); // opened but nobody came to watch: not left running
     terms.set(key, t);
     return t;

@@ -962,7 +962,7 @@ function makeConv(body, title) {
   const c = { id: body.id ?? null, title, acct: body.acct ?? null, g: null, started: false, ended: false, closed: false, live: '' };
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
-  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = 0, typeOpt = new Map(), lastSeen = 0, gen = 0, fails = 0;
+  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), lastSeen = 0, gen = 0, fails = 0;
   let switching = 0; // the account it's going to, while it goes
   const el = c.el = document.createElement('div');
   el.className = 'pane hist';
@@ -1103,18 +1103,24 @@ function makeConv(body, title) {
       if (!key || c.ended) return back('这个对话已经不在运行了，消息放回了输入框');
       if (menuNow && !(answer && typeNow)) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
       const lost = '没发出去，消息放回了输入框'; // a step that didn't reach Claude: no Enter after it
+      // each step to the terminal the message began on: switched to another account meanwhile, the rest isn't sent
+      const k0 = key, step = (d) => (key === k0 ? input(d) : Promise.resolve(false));
       // the pictures pasted one by one first; the files' paths go at the end of the words, a line each
       const pics = paths.filter((_, i) => !imgs[i].file), files = paths.filter((_, i) => imgs[i].file);
       const text = [v, ...files.map((f) => `附件：${f}`)].filter(Boolean).join('\n');
       if (pics.length) { // Claude attaches each pasted path in well under a second: Enter waits for that (4 s at most)
         const before = imagesShown();
         // ponytail: a later step failing leaves the pictures already attached in Claude's box; sent again, they'd go twice
-        for (const p of pics) if (!(await input(`\x1b[200~${p}\x1b[201~`))) return back(lost);
+        for (const p of pics) if (!(await step(`\x1b[200~${p}\x1b[201~`))) return back(lost);
         for (const end = Date.now() + 4000; imagesShown() < before + pics.length && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 100));
+        // asked again after that wait: a menu up now would take the words and the Enter
+        if (key !== k0 || c.ended) return back('这个对话换了终端或已结束，消息放回了输入框');
+        if (menuNow && !(answer && typeNow)) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
       }
-      if (text && !(await input(`\x1b[200~${text.replace(/\n/g, '\r')}\x1b[201~`))) return back(lost);
-      if (!tick) await input('\r');
-      if (answer && !tick) typing = 0;
+      if (text && !(await step(`\x1b[200~${text.replace(/\n/g, '\r')}\x1b[201~`))) return back(lost);
+      // the Enter not through: back here too (the words may still sit in Claude's own box)
+      if (!tick && !(await step('\r'))) return back('回车没发出去，消息放回了输入框（Claude 那边的输入框里可能还留着这段字）');
+      if (answer && !tick) typing = null;
     } finally { sending = false; goMode(); }
   };
   line.onkeydown = (e) => {
@@ -1141,7 +1147,7 @@ function makeConv(body, title) {
       const n = +d.pick - m.cur;
       for (let i = 0; i < Math.abs(n); i++) input(n > 0 ? '\x1b[B' : '\x1b[A');
       // 「Type something」 takes typing where it is: what you write below is pasted into it, then Enter
-      if (typeOpt.get(m.ask) === +d.pick || /^Type something/i.test(m.opts.find((o) => o.n === +d.pick)?.label ?? '')) { typing = +d.pick; drawLive(); line.focus(); }
+      if (typeOpt.get(m.ask) === +d.pick || /^Type something/i.test(m.opts.find((o) => o.n === +d.pick)?.label ?? '')) { typing = { ask: m.ask, n: +d.pick }; drawLive(); line.focus(); }
       else input('\r');
     } else if (d.key === 'term') setView('term'); else input('\x1b');
   });
@@ -1270,7 +1276,7 @@ function makeConv(body, title) {
     // 「Type something」: which option it is, per question, kept from when it still said so (written in, it shows the words)
     const blank = menu?.opts.find((o) => /^Type something/i.test(o.label));
     if (blank) typeOpt.set(menu.ask, blank.n);
-    typeNow = !!here && (typing === menu.cur || typeOpt.get(menu.ask) === menu.cur);
+    typeNow = !!here && ((typing?.ask === menu.ask && typing.n === menu.cur) || typeOpt.get(menu.ask) === menu.cur); // picked on this question
     typeTick = typeNow && here.check != null; // a multi-select's: what you write ticks it, no Enter after
     const took = busy && /(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0];
     const h = sent.map((s) => (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
@@ -1280,7 +1286,7 @@ function makeConv(body, title) {
         ${typeNow ? '<div class="hint2">在下面的输入框里写你的回答，发送后填进这一项</div>' : ''}
         <div class="row2">${menu.tabs ? '<button data-key="prev">← 上一题</button><button data-key="next" class="push">下一题 →</button>' : ''}<button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
       : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : 'Claude 正在回复'}${took ? ' · ' + took : ''}</div>` : '');
-    if (!menu) typing = 0;
+    if (!menu) typing = null;
     busyNow = !!busy && !menu; menuNow = !!menu; goMode();
     const st = menuNow ? 'ask' : busyNow ? 'busy' : ''; // the tab shows it too
     if (c.live !== st) { c.live = st; if (c.g) drawTabs(c.g); }
