@@ -224,7 +224,15 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pane.gone .notice { background: rgba(248,81,73,.1); color: var(--errFg); }
   .pane.idle .notice { background: var(--bar); color: var(--fg2); }
   .notice span { flex: 1; }
-  .screen { flex: 1; min-height: 0; overflow: auto; background: var(--term); }
+  .screen { flex: 1; min-height: 0; overflow: auto; background: var(--term); position: relative; }
+  /* a window on the computer, as text over its (hidden) terminal: the page's font, rows wrapping */
+  .screen .txt { display: none; position: absolute; inset: 0; z-index: 1; overflow: auto; padding: 8px 12px 14px; background: var(--term); color: #cccccc;
+    font-family: "SF Mono", Menlo, "Cascadia Mono", Consolas, "PingFang SC", "Microsoft YaHei", monospace; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+  .screen.txtmode .txt { display: block; }
+  .screen.txtmode { overflow: hidden; } /* the hidden terminal, a big window's size, would scroll it */
+  .screen.txtmode .xterm { opacity: 0; } /* still there: the keys go to it */
+  .screen .txt > div { min-height: 1.4em; }
+  .screen .txt > .hr { min-height: 0; margin: .55em 0; border-top: 1px solid #444; }
   .screen .xterm { padding: 6px 2px 4px 10px; } /* on the terminal itself: the fit add-on subtracts it */
   .screen .xterm-viewport { background: var(--term) !important; } /* xterm.css paints it black; the theme colors only what's inside */
   .msgs { flex: 1; min-height: 0; overflow-y: auto; display: none; padding: 12px 20px 18px; }
@@ -962,7 +970,7 @@ function makeConv(body, title) {
   const c = { id: body.id ?? null, title, acct: body.acct ?? null, g: null, started: false, ended: false, closed: false, live: '' };
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
-  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), lastSeen = 0, gen = 0, fails = 0;
+  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
   let switching = 0; // the account it's going to, while it goes
   const el = c.el = document.createElement('div');
   el.className = 'pane hist';
@@ -1165,6 +1173,7 @@ function makeConv(body, title) {
     if (!shown) return;
     if (v === 'hist') { loadHist(); histTimer = setInterval(() => { if (document.visibilityState === 'visible') loadHist(); }, 1000); }
     else if (term) { if (kind === 'pc') sizeFont(); else claim(); if (FINE) term.focus(); } // shown: measure again
+    drawTxt();
   }
   async function histGet(qs) { // by the terminal's key once it's open (a new conversation has no id), else the id
     const r = await (await fetch(`/api/history?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}${qs}`)).json();
@@ -1348,6 +1357,60 @@ function makeConv(body, title) {
       } catch {} // between the two Claudes: none runs it for a moment
     }
   }
+  // A window on the computer: its size is the computer's (Claude lays its screen out to it), so here its rows are read as
+  // text and shown in the page's font, long ones wrapping, instead of the whole window shrunk to fit the pane. Only rows
+  // that changed are drawn again. The terminal stays underneath, hidden: the keys still go to it.
+  const PAL = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite'].map((k) => THEME[k]);
+  const rgb = (rgbOn, palOn, v) => { // a cell's color as CSS: 24-bit, or one of the 256 (16 from the theme)
+    if (rgbOn) return '#' + v.toString(16).padStart(6, '0');
+    if (!palOn) return null;
+    if (v < 16) return PAL[v];
+    if (v < 232) { const k = v - 16, c = (x) => (x ? x * 40 + 55 : 0); return `rgb(${c(Math.floor(k / 36))},${c(Math.floor(k / 6) % 6)},${c(k % 6)})`; }
+    const g = (v - 232) * 10 + 8; return `rgb(${g},${g},${g})`;
+  };
+  const isRule = (t) => /^[\s─━═╌┄╭╮╰╯├┤┬┴┼]*$/.test(t) && /[─━═]{3}/.test(t); // a line across (a box's top or bottom too)
+  function rowHtml(line) {
+    const cell = line.getCell(0), at = (x) => line.getCell(x, cell), blank = (x) => !at(x).getChars().trim() && cell.isBgDefault() && !cell.isInverse();
+    let x0 = 0, x1 = line.length, first = 0; // the row's indent kept; its trailing blanks off
+    while (x1 > 0 && blank(x1 - 1)) x1--;
+    while (first < x1 && blank(first)) first++;
+    if (x1 - first > 1 && /[│┃║]/.test(at(first).getChars()) && /[│┃║]/.test(at(x1 - 1).getChars())) { // a box's sides off, its padding with them
+      x0 = first + 1; x1--;
+      while (x1 > x0 && blank(x1 - 1)) x1--;
+    }
+    let out = '', style = null, run = '';
+    const flush = () => { if (run) out += style ? `<span style="${style}">${esc(run)}</span>` : esc(run); run = ''; };
+    for (let x = x0; x < x1; x++) {
+      const c = at(x);
+      if (!c.getWidth()) continue; // the second half of a wide character
+      let fg = rgb(c.isFgRGB(), c.isFgPalette(), c.getFgColor()), bg = rgb(c.isBgRGB(), c.isBgPalette(), c.getBgColor());
+      if (c.isInverse()) [fg, bg] = [bg ?? THEME.background, fg ?? THEME.foreground];
+      const st = [fg && `color:${fg}`, bg && `background:${bg}`, c.isBold() && 'font-weight:600', c.isDim() && 'opacity:.6', c.isItalic() && 'font-style:italic'].filter(Boolean).join(';') || null;
+      if (st !== style) { flush(); style = st; }
+      run += c.getChars() || ' ';
+    }
+    flush();
+    return out;
+  }
+  function drawTxt() {
+    const on = !!term && !!txt && kind === 'pc' && view === 'term' && shown;
+    scr.classList.toggle('txtmode', on);
+    if (!on) return;
+    // ponytail: the last 1,000 rows (with the window's own history above its screen); older ones aren't shown here
+    const b = term.buffer.active, from = Math.max(0, b.length - 1000), end = txt.scrollHeight - txt.scrollTop - txt.clientHeight < 40;
+    let last = b.length - 1; // the window's empty rows under what's on it left out
+    while (last >= from && !b.getLine(last)?.translateToString(true).trim()) last--;
+    const n = last + 1 - from;
+    while (txt.children.length > n) txt.firstChild.remove();
+    while (txt.children.length < n) txt.append(document.createElement('div'));
+    for (let i = 0; i < n; i++) {
+      const line = b.getLine(from + i), t = line?.translateToString(true) ?? '', el = txt.children[i];
+      if (el.dataset.t === t) continue; // unchanged (by its words: a color alone changing waits for them)
+      el.dataset.t = t;
+      const r = isRule(t); el.className = r ? 'hr' : ''; el.innerHTML = r || !line ? '' : rowHtml(line);
+    }
+    if (end) txt.scrollTop = txt.scrollHeight; // at the bottom: kept there
+  }
   function sizeFont() { // a window of fixed size (the computer's, or another screen's): a font that shows all of it
     // The largest font with all of it shown, measured as drawn (the padding and the terminal's scroll bar left out), in
     // the pane's whole size (offset, not what a scroll bar showing now leaves): the same pane, the same font. A guess
@@ -1372,6 +1435,8 @@ function makeConv(body, title) {
     term.loadAddon(new Unicode11Addon.Unicode11Addon()); term.unicode.activeVersion = '11'; // Chinese and emoji two cells wide, as Claude Code counts them
     term.loadAddon(new WebLinksAddon.WebLinksAddon()); // links open in a new tab
     term.open(scr);
+    txt = document.createElement('div'); txt.className = 'txt'; txt.style.fontSize = FONT + 'px'; scr.append(txt);
+    txt.onclick = () => { if (!getSelection().toString()) term.focus(); }; // the keys to Claude; a selection is for copying
     // WebGL on a computer only: sharper and faster there; on phones it drew at the wrong pixel density, and
     // mobile browsers drop its context when the page goes to the background
     if (FINE) try { const gl = new WebglAddon.WebglAddon(); gl.onContextLoss(() => gl.dispose()); term.loadAddon(gl); } catch {}
@@ -1379,6 +1444,7 @@ function makeConv(body, title) {
     if (!scr.clientWidth) term.resize(100, 40); // only the chat shown: room for a menu with its question
     term.onData(input);
     term.onWriteParsed(() => { if (shown && view === 'hist' && !liveT) liveT = setTimeout(() => { liveT = 0; drawLive(); }, 200); }); // its screen changed
+    term.onWriteParsed(() => { if (shown && view === 'term' && !txtT) txtT = setTimeout(() => { txtT = 0; drawTxt(); }, 120); });
     setView(view); redraw();
     try { ({ key, kind } = await post('/api/open', { ...body, cols: term.cols, rows: term.rows })); }
     catch (e) { if (!c.closed) { c.ended = true; notice('gone', e.message); redraw(); } return; }
