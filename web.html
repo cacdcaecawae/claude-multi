@@ -441,6 +441,18 @@ const post = async (url, body) => {
   if (!r.ok || !j) throw Object.assign(new Error(j?.err || `连不上（${r.status}）`), { away: !j?.err && r.status !== 403 });
   return j;
 };
+// el.html = markup: innerHTML, but only when it changed, and not while the mouse is held on something in it. The tabs
+// and the side bar, redrawn every 5 s, swapped the node under a click (pressed on one, released on its replacement:
+// no click, the tab or conversation didn't open). Such a redraw waits for the release (and the click after it).
+let held = null;
+const heldOff = new Map();
+addEventListener('pointerdown', (e) => { held = e.target; }, true);
+for (const t of ['pointerup', 'pointercancel']) addEventListener(t, () => setTimeout(() => { held = null; for (const [el, h] of heldOff) el.html = h; heldOff.clear(); }), true);
+Object.defineProperty(HTMLElement.prototype, 'html', { set(h) {
+  if (held && this.contains(held)) return void heldOff.set(this, h);
+  if (this.$html === h && this.$first === this.firstChild) return; // the same, and nothing else wrote it since
+  this.innerHTML = h; this.$html = h; this.$first = this.firstChild;
+} });
 const toast = (t, ms = 2600) => { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = 'none'), ms); };
 const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
 const fmtTok = (n) => n >= 1e8 ? `${(n / 1e8).toFixed(2)} 亿` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString()} 万` : Math.round(n).toLocaleString();
@@ -513,7 +525,7 @@ async function load(fresh) {
     state = s; $('#status').classList.remove('off');
   } catch (e) {
     $('#status').classList.add('off'); $('#conn').textContent = '连不上：' + e.message;
-    if (!state) $('#view').innerHTML = `<div class="empty">连不上<br>${esc(e.message)}</div>`;
+    if (!state) $('#view').html = `<div class="empty">连不上<br>${esc(e.message)}</div>`;
     return e.message;
   }
   if (!restored) restore();
@@ -577,10 +589,10 @@ function renderChats() {
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1)}
     <div class="main t">${esc(x.title)}</div>${right(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
-  $('#sideActs').innerHTML = `<button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
+  $('#sideActs').html = `<button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   if (bell) {
-    $('#view').innerHTML = (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
+    $('#view').html = (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
         notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
           <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
           <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
@@ -588,7 +600,7 @@ function renderChats() {
   } else {
     const dirs = new Map();
     for (const x of S) dirs.set(x.cwd, [...(dirs.get(x.cwd) ?? []), x]);
-    $('#view').innerHTML = dirs.size ? [...dirs].map(([cwd, list]) => sec('d:' + cwd,
+    $('#view').html = dirs.size ? [...dirs].map(([cwd, list]) => sec('d:' + cwd,
       `<i class="fc">${svg(I.folder)}</i><i class="fo">${svg(I.folderOpen)}</i><span class="t" title="${esc(cwd)}">${esc(base(cwd) || cwd)}</span>`,
       list.map(line).join(''), 'dir')).join('') : '<div class="empty">还没有对话</div>';
   }
@@ -657,8 +669,8 @@ const renew = (s) => {
 };
 function renderUsage() {
   const u = state.usage;
-  $('#sideActs').innerHTML = `<button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
-  $('#view').innerHTML = `<div class="panel"><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : '都到上限了，最早 ' + esc(u.ready) + ' 后恢复'}</div>
+  $('#sideActs').html = `<button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
+  $('#view').html = `<div class="panel"><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : '都到上限了，最早 ' + esc(u.ready) + ' 后恢复'}</div>
     ${u.accounts.map((a, i) => `<div class="card"><div class="cardHead">${ac(i + 1)}<b>账号 ${i + 1}</b>
       <span class="m grow">${esc(a.label)}</span>${renew(a.sub)}${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
       ${a.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(a.err)}</div>` : `
@@ -692,9 +704,9 @@ async function warm() {
   usageBusy = ''; toast(msg, 10000); load(true);
 }
 async function renderTokens() {
-  $('#sideActs').innerHTML = `<button class="ico" data-refresh title="重新统计">${svg(I.refresh)}</button>`;
+  $('#sideActs').html = `<button class="ico" data-refresh title="重新统计">${svg(I.refresh)}</button>`;
   if (!tokens) {
-    $('#view').innerHTML = '<div class="empty">统计中…</div>';
+    $('#view').html = '<div class="empty">统计中…</div>';
     // one count at a time: it takes seconds, and the list's refresh every 10 s asks again meanwhile
     tokensNow ??= fetch('/api/tokens').then((r) => r.json()).finally(() => { tokensNow = null; });
     try { tokens = await tokensNow; } catch (e) { return toast(e.message); }
@@ -706,7 +718,7 @@ async function renderTokens() {
   const days = [...Array(14)].map((_, k) => { const dt = new Date(); dt.setDate(dt.getDate() - 13 + k); return { dt, d: map[key(dt)] }; });
   const week = days.slice(-7), sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
-  $('#view').innerHTML = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
+  $('#view').html = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
     <div class="tiles">
       <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">约 ${usd(t.usd)}</div></div>
       <div class="tile"><div class="k">今天</div><div class="v">${fmtTok(all(today))}</div><div class="u">约 ${usd(today?.usd ?? 0)}</div></div>
@@ -796,7 +808,7 @@ for (const t of ['dragover', 'drop']) document.addEventListener(t, (e) => { if (
 document.addEventListener('dragend', () => { drag = null; document.querySelectorAll('[data-drop]').forEach((x) => delete x.dataset.drop); });
 function drawTabs(g) {
   const note = new Map((state?.notes ?? []).map((n) => [n.id, n.kind])), busy = new Set(state?.sessions.filter((s) => s.busy).map((s) => s.id));
-  g.strip.innerHTML = g.tabs.map((c, i) => {
+  g.strip.html = g.tabs.map((c, i) => {
     const turning = c.ended ? false : c === g.active && c.started ? c.live === 'busy' : busy.has(c.id);
     const dot = c.live === 'ask' || note.get(c.id) === 'ask' ? ' ask' : note.has(c.id) ? ' done' : '';
     return `<div class="tab${c === g.active ? ' on' : ''}${c.ended ? ' gone' : ''}" data-i="${i}" draggable="${FINE}" title="${esc(c.title)}">
