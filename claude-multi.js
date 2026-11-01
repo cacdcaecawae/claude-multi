@@ -999,7 +999,8 @@ const WEB_PORT = 7788;
 // The server, from tunnel.json here (not in the repository): {"ssh": "myserver", "url": "https://<its address>:8443"}.
 // Without it there is no tunnel: the page opens on this computer only. sock: the tunnel's end on the server.
 let TUNNEL = null;
-try { TUNNEL = { sock: '/run/claude-multi.sock', ...JSON.parse(fs.readFileSync(path.join(ROOT, 'tunnel.json'), 'utf8')) }; } catch {}
+try { TUNNEL = { sock: '/run/claude-multi.sock', ...JSON.parse(fs.readFileSync(path.join(ROOT, 'tunnel.json'), 'utf8').replace(/^﻿/, '')) }; } // a BOM: PowerShell 5's files
+catch (e) { if (e.code !== 'ENOENT') console.error(`tunnel.json 读不了，远程访问没开：${e.message}`); }
 const WEB_URL = TUNNEL?.url ?? `http://127.0.0.1:${WEB_PORT}`;
 const WEB_KEY = path.join(ROOT, 'web-key');
 
@@ -1157,7 +1158,11 @@ function history(file, { from, end, keep = 120 } = {}) {
     while (cut > 0 && items[cut].role !== 'user' && items[cut].role !== 'img') cut--; // back to a message of yours
     while (cut > 0 && items[cut - 1].pos === items[cut].pos) cut--; // its pictures, above its words
   }
-  return { items: items.slice(cut).map(({ pos, ...o }) => o), start: cut ? items[cut].pos : a + skip, end: last < skip ? a + skip : a + last + 1 };
+  // a message of yours that replaced stopped ones: the look before ends before those too, not between (it wouldn't see
+  // the replacement, and they'd come back as you scroll up)
+  let start = cut ? items[cut].pos : a + skip;
+  if (cut) for (const o of out) if (o.gone && o.p && o.p === items[cut].p && o.pos < start) start = o.pos;
+  return { items: items.slice(cut).map(({ pos, ...o }) => o), start, end: last < skip ? a + skip : a + last + 1 };
 }
 // The k-th picture of the record's line at byte pos, as history() names it ("pos.k"): its type and bytes.
 function recordImage(file, pos, k) {
@@ -1233,7 +1238,9 @@ async function web() {
   // a conversation already being continued here: until its Claude has written its session file the list says it
   // isn't running, so a second open (a double tap, a second device) would start a second Claude on the same record
   let ptys = 0;
-  const resuming = (id) => [...terms.values()].find((t) => t.resume === id && !t.gone);
+  // only till its Claude has written its session file (then it's listed with its pid): after a /clear or /resume there,
+  // it runs another conversation, and this one, tapped, would open that
+  const resuming = (id) => [...terms.values()].find((t) => t.resume === id && !t.gone && !(t.pid && fs.existsSync(path.join(t.dir, 'sessions', `${t.pid}.json`))));
   // a conversation started or continued here: claude in a pseudo-terminal, its output kept (last 256 KB) for
   // whoever opens it later
   function startPty(p, cwd, args, cols = 100, rows = 30) {
@@ -1306,7 +1313,7 @@ async function web() {
     if (t.kind === 'pty') return t.buf;
     let l = { text: '', skip: 0 };
     const rows = (t.frame ?? '').replace(/^\x1b\[H/, '').split('\r\n');
-    try { if (t.file && t.w) { const h = history(t.file); l = lead(h.items, [...t.hist, ...rows], h.start > 0); } } catch {}
+    try { if (t.file && t.w) { const h = history(t.file, { keep: Infinity }); l = lead(h.items, [...t.hist, ...rows], h.start > 0); } } catch {} // all of it: the window's kept lines reach further back than a page's first look
     const above = (l.text ? [l.text] : []).concat(t.hist.slice(l.skip)).join('\r\n');
     return (above ? above + '\r\n'.repeat(t.h) : '') + (t.frame ?? '');
   }
@@ -1404,6 +1411,8 @@ async function web() {
       (async () => {
         await untilFree(t.dir, t.pid, b.now || atLimit(reg.profiles[s.acct]));
         if (t.gone || t.switching) return; // a second request (the island and the page both): one new Claude, not two
+        // removed while it answered: not started there (its folder gone, no login), the old one left running
+        if (!load().profiles.some((x) => x.id === p.id)) throw new Error('要换去的账号已经移除了');
         t.switching = true;
         t.proc.kill();
         while (!t.gone) await sleep(100); // it has stopped writing its record: the copy is whole
@@ -1518,6 +1527,7 @@ async function web() {
       out(200, await fn(url.searchParams, body));
     } catch (e) { out(500, { err: e.message }); }
   });
+  server.keepAliveTimeout = 5000; // the relay's nginx lets its idle ones go at 4 s, before: it never reuses one closing here
   server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
   server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
   // the way in from outside, kept up: dialed again 5 s after a drop, waiting longer (up to a minute) while each try
@@ -1529,6 +1539,10 @@ async function web() {
   process.on('exit', () => tun?.kill());
   function tunnel() {
     if (!TUNNEL) return; // no tunnel.json: this computer only
+    // the first: a tunnel left by a service killed hard (its 'exit' never ran, nor tun.kill()) ended, or it stays up
+    // for good, with a session on the server. Only this service gets here: a second one quits on the port in use.
+    if (!tun) spawnSync('powershell.exe', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" | `
+      + `? { $_.CommandLine -like '*-R ${TUNNEL.sock}:*' } | % { Stop-Process -Id $_.ProcessId -Force }`], { windowsHide: true });
     const at = Date.now();
     // a session (-tt, a command that never ends) and not -N: only a session makes both ends send small packets at once
     // (TCP_NODELAY); with -N each new connection through took ~150 ms, not ~50. The tty: the command dies with the link.

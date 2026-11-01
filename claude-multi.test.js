@@ -445,6 +445,10 @@ console.log('tokens ok');
   const answer = JSON.stringify({ type: 'assistant', uuid: 'a1', parentUuid: 'r1', timestamp: ts, message: { role: 'assistant', content: [{ type: 'text', text: '答' }] } });
   fs.appendFileSync(f, `${said('r1', 'x', '先问这个')}\n${answer}\n${said('r2', 'x', '改问这个')}\n`);
   assert.deepEqual(history(f).items.slice(7).map((m) => m.text), ['先问这个', '答', '改问这个']);
+  // a first look that starts at the replacement: the look before it ends before the stopped ones (they don't come back)
+  const t4 = history(f, { keep: 4 }), prior = history(f, { end: t4.start, keep: 1000 });
+  assert.equal(t4.items[0].text, '真正要问的');
+  assert.ok(prior.items.length && !prior.items.some((m) => m.u === 's1' || m.u === 's2'));
   const up = path.join(d, 'up'), old = path.join(up, 'old.png');
   fs.mkdirSync(up); fs.writeFileSync(old, 'x'); fs.utimesSync(old, new Date(0), new Date(0));
   const saved = saveUpload(png, 'png', up);

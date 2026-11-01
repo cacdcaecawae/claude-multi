@@ -200,6 +200,8 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 
 `ssh` 是第 1 步在 `~/.ssh/config` 里起的名字，`url` 是手机上打开的地址。没有这个文件时，网页服务只在本机 `http://127.0.0.1:7788` 能打开，不连服务器。
 
+服务器上登录用的账号要有正常的 shell，并且允许分配终端：隧道会在服务器上开一个会话，运行 `sleep infinity` 占着连接，这样两端才会立即发送小数据包，打字不卡。服务器要是 Linux。
+
 **3. 服务器上的 sshd。**新建 `/etc/ssh/sshd_config.d/60-claude-multi.conf`，然后运行 `systemctl reload ssh`：
 
 ```

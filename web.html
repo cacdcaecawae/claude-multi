@@ -462,15 +462,23 @@ const post = async (url, body) => {
 // el.html = markup: innerHTML, but only when it changed, and not while the mouse is held on something in it. The tabs
 // and the side bar, redrawn every 5 s, swapped the node under a click (pressed on one, released on its replacement:
 // no click, the tab or conversation didn't open). Such a redraw waits for the release (and the click after it).
-let held = null;
-const heldOff = new Map();
+// A drag begun cancels the press: its redraw then waits for the drag's end. Done at the cancel, it replaced the node being
+// dragged, whose dragend (fired at that node, gone from the page) never reached the document: `drag` stayed set, and
+// with it the 5-s redraw of the side bar and tabs stayed off.
+let held = null, dragging = false;
+const heldOff = new Map(), letGo = () => setTimeout(() => { if (dragging) return; held = null; for (const [el, h] of heldOff) el.html = h; heldOff.clear(); });
 addEventListener('pointerdown', (e) => { held = e.target; }, true);
-for (const t of ['pointerup', 'pointercancel']) addEventListener(t, () => setTimeout(() => { held = null; for (const [el, h] of heldOff) el.html = h; heldOff.clear(); }), true);
+addEventListener('dragstart', () => (dragging = true), true);
+for (const t of ['pointerup', 'pointercancel']) addEventListener(t, letGo, true);
+for (const t of ['dragend', 'drop']) addEventListener(t, () => { dragging = false; letGo(); }, true);
 Object.defineProperty(HTMLElement.prototype, 'html', { set(h) {
   if (held && this.contains(held)) return void heldOff.set(this, h);
   if (this.$html === h && this.$first === this.firstChild) return; // the same, and nothing else wrote it since
   this.innerHTML = h; this.$html = h; this.$first = this.firstChild;
 } });
+// a message of yours as shown here: its [Image #N] out (the pictures show), a file's path as 📎 and its name, a paste unwrapped
+const shownText = (t) => t.replace(/\[Image #\d+\]\s*/g, '').replace(/^附件：.*?[\\/]\d{8}T\d{6}-[0-9a-f]{6}-(.+)$/gm, '📎 $1')
+  .replace(/<pasted_content id="[^"]*">\n?([\s\S]*?)\n?<\/pasted_content id="[^"]*">/g, '$1').trim();
 const toast = (t, ms = 2600) => { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = 'none'), ms); };
 const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
 const fmtTok = (n) => n >= 1e8 ? `${(n / 1e8).toFixed(2)} 亿` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString()} 万` : Math.round(n).toLocaleString();
@@ -849,7 +857,7 @@ function focusGroup(g) {
   focusG = g; groups.forEach((x) => x.el.classList.toggle('focus', x === g)); markRows(); save();
 }
 function activate(g, c, quiet) { // quiet: neither the focus nor a phone's list moves
-  if (g.active !== c) { g.active?.sleep(); g.active = c; }
+  if (g.active !== c) { g.active?.sleep(); g.prev = g.active; g.active = c; }
   c.wake(); drawTabs(g);
   g.strip.querySelector('.tab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   if (!quiet) { focusGroup(g); if (NARROW.matches && sideOn) { sideOn = false; drawSide(); } if (FINE) c.focus(); } // a computer: type away
@@ -874,7 +882,9 @@ function moveConv(c, g, at = g.tabs.length) {
     return;
   }
   from.tabs.splice(i, 1);
-  if (from.active === c) { from.active = null; const n = from.tabs[Math.min(i, from.tabs.length - 1)]; if (n) activate(from, n, true); }
+  if (from.active === c) { // the tab you were on before (pressing this one to drag it showed it), else its neighbour
+    from.active = null; const n = from.tabs.includes(from.prev) ? from.prev : from.tabs[Math.min(i, from.tabs.length - 1)]; if (n) activate(from, n, true);
+  }
   if (!from.tabs.length && groups.length > 1) dropGroup(from); else drawTabs(from);
   c.g = g; g.tabs.splice(at, 0, c); g.body.append(c.el); activate(g, c);
 }
@@ -1056,9 +1066,9 @@ function makeConv(body, title) {
   // 停止: Esc to Claude. Stopped before it took the message in, Claude puts that message back in its own input box, and
   // the next one sent from here was typed on after it. So it comes back to this input box instead, as Claude does in its
   // terminal, and Claude's is emptied: Ctrl+C empties a filled one (it asks "exit?" only of an empty one). A message sent
-  // meanwhile ends the watch (it would be in Claude's box a moment, and taken back). Its pictures stay behind: in the box
-  // they're only [Image #N], which typed again would be words.
-  let stops = 0;
+  // meanwhile ends the watch (it would be in Claude's box a moment, and taken back). One sent from here comes back whole, its
+  // pictures and files too; any other's pictures stay behind: in the box they're only [Image #N], typed again words.
+  let stops = 0, lastSent = null;
   async function stop() {
     const me = ++stops;
     input('\x1b');
@@ -1067,13 +1077,17 @@ function makeConv(body, title) {
       const t = me === stops && typed();
       if (!t) continue;
       input('\x03');
-      const words = t.replace(/\[Image #\d+\]\s*/g, '').trim(), pics = /\[Image #\d+\]/.test(t);
+      // the last message sent from here, whole in the box (compared without spaces or line breaks: Claude wraps it, a
+      // file's path too): it comes back as it was, with its pictures and files; else the box's words
+      const flat = (s) => s.replace(/\s+/g, ''), m = lastSent && flat(t.replace(/\[Image #\d+\]/g, '')) === flat(lastSent.text) ? lastSent : null;
+      const words = m ? m.v : t.replace(/\[Image #\d+\]\s*/g, '').trim(), pics = !m && /\[Image #\d+\]/.test(t);
       if (words) { line.value = line.value.trim() ? `${words}\n${line.value}` : words; grow(); goMode(); }
+      if (m) { atts = [...m.imgs, ...atts]; drawAtts(); lastSent = null; }
       // and its bubble goes now: back in the box, it isn't sent (the record keeps it until a later one replaces it)
-      const flat = (s) => s.replace(/\s+/g, ''), last = [...hist.querySelectorAll('.hm.user[data-u]')].pop();
+      const last = [...hist.querySelectorAll('.hm.user[data-u]')].pop();
       const answered = last && [...hist.querySelectorAll('.who, details.tools, .hm.claude, .hm.done')].some((x) => last.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING);
-      if (last && !answered && flat(last.textContent) === flat(words)) hist.querySelectorAll(`[data-u="${CSS.escape(last.dataset.u)}"]`).forEach((e) => e.remove());
-      const i = sent.findIndex((s) => flat(s.text) === flat(words));
+      if (last && !answered && flat(last.textContent) === flat(m ? shownText(m.text) : words)) hist.querySelectorAll(`[data-u="${CSS.escape(last.dataset.u)}"]`).forEach((e) => e.remove());
+      const i = m?.wait ? sent.indexOf(m.wait) : sent.findIndex((s) => flat(s.text) === flat(words));
       if (i >= 0) { sent.splice(i, 1); drawLive(); }
       return toast(`已停止。还没执行的那条消息回到了输入框，可以改了再发${pics ? '（图片要重新选一下）' : ''}`, 4000);
     }
@@ -1116,6 +1130,7 @@ function makeConv(body, title) {
       // the pictures pasted one by one first; the files' paths go at the end of the words, a line each
       const pics = paths.filter((_, i) => !imgs[i].file), files = paths.filter((_, i) => imgs[i].file);
       const text = [v, ...files.map((f) => `附件：${f}`)].filter(Boolean).join('\n');
+      if (wait && files.length) { wait.text = shownText(text); drawLive(); } // the files too, as the record will show it (📎 name)
       if (pics.length) { // Claude attaches each pasted path in well under a second: Enter waits for that (4 s at most)
         const before = imagesShown();
         // ponytail: a later step failing leaves the pictures already attached in Claude's box; sent again, they'd go twice
@@ -1129,6 +1144,7 @@ function makeConv(body, title) {
       // the Enter not through: back here too (the words may still sit in Claude's own box)
       if (!tick && !(await step('\r'))) return back('回车没发出去，消息放回了输入框（Claude 那边的输入框里可能还留着这段字）');
       if (answer && !tick) typing = null;
+      else lastSent = { text, v, imgs, wait };
     } finally { sending = false; goMode(); }
   };
   line.onkeydown = (e) => {
@@ -1182,7 +1198,7 @@ function makeConv(body, title) {
     // shown without them, and so your message sent here is found in the record (not shown twice)
     // a picture: fetched from the record by where it is in it; the [Image #N] standing for it in your words left out
     for (const m of r.items ?? []) if (m.role === 'img') m.src = `/api/image?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}&ref=${m.text}`;
-    for (const m of r.items ?? []) if (m.role === 'user') m.text = m.text.replace(/\[Image #\d+\]\s*/g, '').replace(/^附件：.*?[\\/]\d{8}T\d{6}-[0-9a-f]{6}-(.+)$/gm, '📎 $1').replace(/<pasted_content id="[^"]*">\n?([\s\S]*?)\n?<\/pasted_content id="[^"]*">/g, '$1').trim();
+    for (const m of r.items ?? []) if (m.role === 'user') m.text = shownText(m.text);
     return r;
   }
   async function loadHist() {
