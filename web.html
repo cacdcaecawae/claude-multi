@@ -308,10 +308,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .ev { display: flex; gap: 8px; padding: 3px 6px; font-size: 12px; position: relative; }
   .desk .ev .when { flex: none; width: 36px; color: var(--fg3); font-variant-numeric: tabular-nums; }
   .desk .ev i { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; background: var(--fg3); }
-  .desk .ev.k-done i { background: var(--green); } .desk .ev.k-ask i { background: var(--orange); } .desk .ev.k-butler i { background: #d97757; }
-  .desk .ev.k-you i { background: var(--a1); } .desk .ev.k-todo i { background: var(--purple); }
+  .desk .ev.k-butler i { background: #d97757; } .desk .ev.k-todo i { background: var(--purple); }
   .desk .ev .t { flex: 1; min-width: 0; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .desk .ev.new .t { color: var(--fgHi); font-weight: 600; }
   .desk .ev[data-open] { cursor: pointer; border-radius: 6px; }
   .desk .wt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 12px; }
   .desk .wt .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1084,10 +1082,10 @@ function drawDesk() {
     ? `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="when">还有 ${mins(w.until - Date.now())}</span></div>`
     : `<div class="wt"${w.id ? ` data-open="${esc(w.id)}"` : ''}><span>⏳</span><span class="t">等「${esc(w.title ?? '')}」${w.note ? ' · ' + esc(w.note) : ''}</span><span class="when">已等 ${mins(Date.now() - w.at)}</span></div>`).join('')
     : '<div class="none">现在没有。跟管家说「15:40 提醒我看额度」试试</div>'}`;
-  const unread = new Set(notesOut().map((n) => n.id)), mine = butlerIds(), tl = state.timeline ?? [];
-  $('#deskLog').html = `<h4>今天</h4>${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id);
-    return `<div class="ev k-${esc(e.kind)}${e.kind === 'done' && unread.has(e.id) ? ' new' : ''}"${open ? ` data-open="${esc(e.id)}"` : ''}><span class="when">${hm(e.at)}</span><i></i><span class="t" title="${esc(e.text)}">${esc(e.text)}</span></div>`; }).join('')
-    : '<div class="none">今天还没有动静</div>'}`;
+  const mine = butlerIds(), tl = (state.timeline ?? []).filter((e) => e.kind === 'butler' || e.kind === 'todo'); // its own doings (an older service sent more)
+  $('#deskLog').html = `<h4>管家今天做的事</h4>${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id);
+    return `<div class="ev k-${esc(e.kind)}"${open ? ` data-open="${esc(e.id)}"` : ''}><span class="when">${hm(e.at)}</span><i></i><span class="t" title="${esc(e.text)}">${esc(e.text)}</span></div>`; }).join('')
+    : '<div class="none">它今天还没替你做事</div>'}`;
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
   $('#deskPc').html = pc ? `<h4>这台电脑</h4>${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
   const sel = bConv?.el.querySelector('.bsel');

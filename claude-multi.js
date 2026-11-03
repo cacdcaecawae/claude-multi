@@ -1240,11 +1240,11 @@ function waitsNow(dir = WAITS) {
   }
   return out.sort((a, b) => (a.until ?? Infinity) - (b.until ?? Infinity) || a.at - b.at);
 }
-// What the 管家 did (or you, from its cards), for the 操作台's 今天: a line each, the file kept short
+// What the 管家 did, for the 操作台's 今天: a line each, the file kept short
 const BLOG = path.join(ROOT, 'butler-log.jsonl');
-function blog(text, id = null, who = 'butler') {
+function blog(text, id = null) {
   try {
-    fs.appendFileSync(BLOG, JSON.stringify({ at: Date.now(), text, id, who }) + '\n');
+    fs.appendFileSync(BLOG, JSON.stringify({ at: Date.now(), text, id }) + '\n');
     if (fs.statSync(BLOG).size > 262144) fs.writeFileSync(BLOG, fs.readFileSync(BLOG, 'utf8').split('\n').slice(-1000).join('\n'));
   } catch {}
 }
@@ -1715,14 +1715,12 @@ async function web() {
     return { cpu: cpuPct, mem: os.totalmem() - os.freemem(), memAll: os.totalmem() };
   };
   // and what it keeps watching: its 待办.md's sections above 「## 已完成」
-  // today, newest first: the conversations' notes (not the 管家's own), what it did, the 待办 things done (with a time)
+  // today, newest first, the 管家's own doings: what it did (its log), the 待办 things it finished (with a time)
   const timeline = (doneLines) => {
     const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-    const t0 = d0.getTime(), mine = new Set(sessions().filter((x) => sameDir(x.cwd, BUTLER)).map((x) => x.id)), out = [];
-    for (const n of readNotes(200)) if (n.at >= t0 && !mine.has(n.id) && n.title !== '管家')
-      out.push({ at: n.at, kind: n.kind, id: n.id, text: `${n.title || n.project || 'Claude'} ${n.kind === 'ask' ? '在等你确认' : '回复完了'}` });
+    const t0 = d0.getTime(), out = [];
     let log = ''; try { log = fs.readFileSync(BLOG, 'utf8'); } catch {}
-    for (const l of log.split('\n')) try { const j = l && JSON.parse(l); if (j?.at >= t0) out.push({ ...j, kind: j.who }); } catch {}
+    for (const l of log.split('\n')) try { const j = l && JSON.parse(l); if (j?.at >= t0 && j.who !== 'you') out.push({ ...j, kind: 'butler' }); } catch {}
     for (const l of doneLines) { const d = doneAt(l); if (d && d.at >= t0) out.push({ at: d.at, kind: 'todo', text: `完成：${d.text}` }); }
     return out.sort((a, b) => b.at - a.at).slice(0, 30);
   };
@@ -1749,9 +1747,7 @@ async function web() {
     },
     'POST /api/pick': async (q, b) => {
       try {
-        const label = await pickOn(String(b.id), b.n, b.ask, 'you');
-        blog(`你在卡片上给「${sessions().find((x) => x.id === b.id)?.title ?? '一个对话'}」选了「${label}」`, String(b.id), 'you');
-        return { label };
+        return { label: await pickOn(String(b.id), b.n, b.ask, 'you') };
       } finally { asks.delete(String(b.id)); }
     },
     // the quota as last read, at once: reading it again (each account's, over the network) takes a second or
