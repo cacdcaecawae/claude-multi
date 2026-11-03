@@ -1125,7 +1125,8 @@ function history(file, { from, end, keep = 120 } = {}) {
       for (const p of parts) {
         if (p.type !== 'text') continue;
         let t = p.text.trim();
-        if (/^<(task-notification|teammate-message|local-command-stdout|local-command-caveat|system-reminder)/.test(t)) continue;
+        // Claude's own bookkeeping, and what another Claude session (a teammate, a subagent) sent it: not yours
+        if (/^(?:Another Claude session sent a message:\s*)?<(task-notification|teammate-message|local-command-stdout|local-command-caveat|system-reminder)/.test(t)) continue;
         const cmd = /<command-name>([^<]*)<\/command-name>/.exec(t);
         if (cmd) t = `${cmd[1]} ${/<command-args>([^<]*)<\/command-args>/.exec(t)?.[1] ?? ''}`; // a slash command, as typed
         add('user', t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ''), at);

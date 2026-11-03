@@ -449,6 +449,9 @@ console.log('tokens ok');
   const t4 = history(f, { keep: 4 }), prior = history(f, { end: t4.start, keep: 1000 });
   assert.equal(t4.items[0].text, '真正要问的');
   assert.ok(prior.items.length && !prior.items.some((m) => m.u === 's1' || m.u === 's2'));
+  // what another Claude session (a teammate, a subagent) sent this one: not shown as yours
+  fs.appendFileSync(f, `${said('tm1', 'r2', 'Another Claude session sent a message:\n<teammate-message teammate_id="speed-test">\n测速已启动\n</teammate-message>\n\nThis came from another Claude session')}\n`);
+  assert.equal(history(f).items.at(-1).text, '改问这个');
   const up = path.join(d, 'up'), old = path.join(up, 'old.png');
   fs.mkdirSync(up); fs.writeFileSync(old, 'x'); fs.utimesSync(old, new Date(0), new Date(0));
   const saved = saveUpload(png, 'png', up);
