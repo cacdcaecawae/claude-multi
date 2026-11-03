@@ -219,21 +219,13 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hint .spark { width: 96px; height: 96px; color: var(--fg3); opacity: .22; margin-bottom: 4px; }
   #editor > .group:only-child [data-shut] { display: none; }
 
-  /* 管家: its conversation, and a board of the others (who waits for you, who answers, who runs), in place of the side
-     bar and the groups (they stay as they were, asleep, for the way back) */
-  #butler { display: none; flex: 1; min-width: 0; gap: 6px; }
+  /* 管家: its conversation alone, in place of the side bar and the groups (they stay as they were, asleep, for the
+     way back): an assistant, it tells you how the others are */
+  #butler { display: none; flex: 1; min-width: 0; min-height: 0; flex-direction: column; background: var(--bg); }
   #app.butler #butler { display: flex; }
   #app.butler #side, #app.butler #sideSash, #app.butler #editor { display: none !important; }
-  .bHead { display: none; }
-  #bChat { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
-  #bChat.blank > .hint { display: flex; }
+  #butler.blank > .hint { display: flex; }
   .hint .bt { font-size: 18px; font-weight: 600; color: var(--fgHi); margin-top: -6px; }
-  #bBoard { width: 340px; flex: none; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bar); }
-  #bView { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 16px; }
-  #bBoard .sideHead > span { flex: 1; }
-  .quota { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 2px 20px 10px; font-size: 12px; color: var(--fg2); cursor: pointer; }
-  .quota span { display: inline-flex; align-items: center; gap: 6px; }
-  #bView .empty { padding: 8px 20px 10px; text-align: left; font-size: 12px; }
 
   /* a conversation: where it is, the record (对话) or the terminal (终端), the input */
   .pane { flex: 1; min-height: 0; display: none; flex-direction: column; }
@@ -378,7 +370,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     .sash { width: 6px; margin: 0; background: none !important; }
     .sash::after { content: ''; position: absolute; top: 12px; bottom: 12px; left: 2px; width: 2px; border-radius: 1px; transition: background .1s .1s; }
     .sash:hover::after, .sash.drag::after { background: var(--accent); }
-    #bChat, #bBoard { border: 1px solid var(--cardB); border-radius: 10px; overflow: hidden; }
+    #butler { border: 1px solid var(--cardB); border-radius: 10px; overflow: hidden; }
     #app.butler #act { margin-right: 6px; border-right: 1px solid var(--cardB); border-radius: 10px; } /* on its own: the side bar's hidden */
   }
 
@@ -392,16 +384,10 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     /* 管家: the bottom bar's first item, and the bar stays while in it (but under the keyboard, typing) */
     #act .logo { margin: 0; } #act .logo .spark { width: 22px; height: 22px; } #act .logo .label { color: var(--fg3); }
     #app.butler #act { display: flex; } #app.butler #act .logo .label { color: var(--fg); }
-    #butler { flex-direction: column; gap: 0; padding-bottom: calc(53px + env(safe-area-inset-bottom)); }
+    #butler { padding-bottom: calc(53px + env(safe-area-inset-bottom)); }
     #app.butler:has(#butler textarea:focus) #act { display: none; }
     #app.butler:has(#butler textarea:focus) #butler { padding-bottom: 0; }
     #butler .send { padding-bottom: 8px; }
-    .bHead { display: flex; align-items: center; justify-content: space-between; height: 46px; flex: none; padding: 0 10px 0 16px; background: var(--bar); border-bottom: 1px solid var(--border); }
-    .bHead b { font-size: 16px; color: var(--fgHi); }
-    #bBoard { width: auto; flex: 1; }
-    #bBoard .sideHead { display: none; }
-    #butler:not(.board) #bBoard, #butler.board #bChat { display: none; }
-    #bView { padding-top: 10px; }
     #act button { flex: 1; height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
     #act .label { display: block; font-size: 11px; }
     #act svg { width: 22px; height: 22px; }
@@ -481,9 +467,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <aside id="side"><div class="sideHead"><span id="sideTitle">对话</span><div id="sideActs"></div></div><div id="view"><div class="empty">加载中…</div></div></aside>
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
-  <main id="butler"><div class="bHead"><b>管家</b><div class="seg"><button data-bv="chat" class="on">对话</button><button data-bv="board">看板</button></div></div>
-    <section id="bChat" class="blank"><div class="hint"></div></section>
-    <aside id="bBoard"><div class="sideHead"><span>看板</span><div id="bActs"></div></div><div id="bView"></div></aside></main>
+  <main id="butler" class="blank"><div class="hint"></div></main>
 </div>
 <footer id="status"><span class="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span id="host">…</span></span>
   <span id="conn"></span><span class="grow"></span><span id="here"></span><button id="sAcct" title="看额度"></button></footer>
@@ -699,11 +683,6 @@ function markRows() { // the side bar's rows: which are open in a tab, which one
   drawHere();
 }
 
-// a folding section (kept folded across redraws), and an unread notification's row
-const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
-const noteRow = (n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
-  <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
-  <span class="when">${ago(n.at)}</span></div>`;
 // 对话, newest first (by its record's last write): by folder, the folders by their newest; or, behind the bell, the unread
 // 提示 and the running ones, with their folder on a second line
 function renderChats() {
@@ -715,11 +694,14 @@ function renderChats() {
     <div class="main"><div class="t">${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${right(x)}</div>`;
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1)}
     <div class="main t">${esc(x.title)}</div>${right(x)}</div>`;
+  const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').html = `<button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   if (bell) {
     $('#view').html = (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
-        notes.map(noteRow).join('')) : '')
+        notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
+          <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
+          <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
       + sec('run', `<span>运行中<b class="count">${run.length}</b></span>`, run.length ? run.map(row).join('') : '<div class="empty">没有在运行的对话</div>');
   } else {
     const dirs = new Map();
@@ -745,7 +727,7 @@ $('#side').onclick = (e) => {
   const r = e.target.closest('[data-open]'); // ctrl/⌘-click or its icon: to the side, as in VS Code
   if (r) openSession(r.dataset.open, e.target.closest('[data-aside]') || e.ctrlKey || e.metaKey ? 'aside' : undefined);
 };
-for (const v of ['#view', '#bView']) $(v).addEventListener('toggle', (e) => {
+$('#view').addEventListener('toggle', (e) => {
   const k = e.target.dataset?.sec, was = folded.has(k);
   if (!k) return;
   if (e.target.open) folded.delete(k); else folded.add(k);
@@ -766,8 +748,8 @@ $('#act').onclick = (e) => {
 };
 $('#sAcct').onclick = () => { setButler(false); side = 'usage'; sideOn = true; drawSide(); save(); };
 
-// --- 管家: the newest conversation in its folder (state.butler) is the 管家, shown on the left; the board on the right
-// lists the others, from the same state the side bar draws. Out of it, the groups are as they were, woken again.
+// --- 管家: the newest conversation in its folder (state.butler) is the 管家, the one every screen shows; in its mode,
+// it alone. Out of it, the groups are as they were, woken again.
 const norm = (p) => String(p ?? '').replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
 const isButler = (s) => !!state?.butler && norm(s.cwd) === norm(state.butler);
 function setButler(on) {
@@ -778,52 +760,22 @@ function setButler(on) {
   if (on) { drawButler(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
   markRows(); save();
 }
-function mountButler(c) { bConv = c; $('#bChat').append(c.el); if (butler) { c.wake(); if (FINE) c.focus(); } }
+function mountButler(c) { bConv = c; $('#butler').append(c.el); if (butler) { c.wake(); if (FINE) c.focus(); } }
 function drawButler() {
   if (!butler || !state) return;
   const bs = state.sessions.find(isButler); // the newest
   if (!bConv && bs) mountButler(makeConv({ id: bs.id }, bs.title));
-  $('#bChat').classList.toggle('blank', !bConv);
-  if (!bConv) $('#bChat > .hint').html = `${SPARK}<div class="bt">管家</div><div>替你看着所有对话：谁在等你、谁在回复、谁做完了。</div>
+  $('#butler').classList.toggle('blank', !bConv);
+  if (!bConv) $('#butler > .hint').html = `${SPARK}<div class="bt">管家</div><div>你的助理：替你看着所有对话，谁在等你、谁做完了，问它就行。</div>
     <div class="btns"><button class="btn primary" data-bstart>用账号 ${(state.usage.rec ?? 0) + 1} 启动管家</button></div>`;
-  const S = state.sessions.filter((s) => !isButler(s)), mine = new Set(state.sessions.filter(isButler).map((s) => s.id));
-  const notes = (state.notes ?? []).filter((n) => !mine.has(n.id)), busy = S.filter((s) => s.busy), idle = S.filter((s) => s.pid && !s.busy);
-  const row = (x) => `<div class="row" data-open="${esc(x.id)}" title="${esc(x.cwd)}">${ac(x.acct + 1)}
-    <div class="main"><div class="t">${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>
-    ${x.busy ? '<span class="spin" title="正在回复"></span>' : `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>`}</div>`;
-  const u = state.usage, list = (a, none) => (a.length ? a.map(row).join('') : `<div class="empty">${none}</div>`);
-  $('#bActs').html = `<button class="ico" data-brefresh title="刷新">${svg(I.refresh)}</button>`;
-  $('#bView').html = `<div class="quota" data-quota title="看额度"><span>5 小时已用</span>${u.accounts.map((a, i) => {
-      const w = a.windows?.find((x) => x.k === 'five_hour');
-      return `<span>${ac(i + 1)}${a.err ? '读不到' : `${w?.pct ?? 0}%`}${u.rec === i && u.open ? '<b class="rec">推荐</b>' : ''}</span>`;
-    }).join('')}</div>`
-    + sec('b:notes', `<span>等你处理<b class="count">${notes.length}</b></span>${notes.length ? '<button class="link" data-readall>全部已读</button>' : ''}`,
-      notes.length ? notes.map(noteRow).join('') : '<div class="empty">没有要你处理的</div>')
-    + sec('b:busy', `<span>正在回复<b class="count">${busy.length}</b></span>`, list(busy, '没有在回复的'))
-    + sec('b:run', `<span>在运行<b class="count">${idle.length}</b></span>`, list(idle, '没有空闲的'));
-  $('[data-bv=board]').html = `看板${notes.length ? ` <b class="count">${notes.length}</b>` : ''}`; // a phone's switch
 }
 function startButler() {
   if (!state?.butler) return toast('网页服务还是旧版本，重启后才能启动管家', 4000);
   mountButler(makeConv({ dir: state.butler, acct: (state.usage.rec ?? 0) + 1 }, '管家')); drawButler();
 }
-$('#bChat > .hint').onclick = (e) => { if (e.target.closest('[data-bstart]')) startButler(); };
-$('#bChat').ondragover = (e) => { if (bConv && !drag && e.dataTransfer.types.includes('Files')) e.preventDefault(); };
-$('#bChat').ondrop = (e) => { e.preventDefault(); if (!drag) bConv?.attach([...e.dataTransfer.files]); };
-$('.bHead').onclick = (e) => {
-  const b = e.target.closest('[data-bv]');
-  if (!b) return;
-  $('#butler').classList.toggle('board', b.dataset.bv === 'board');
-  document.querySelectorAll('[data-bv]').forEach((x) => x.classList.toggle('on', x === b));
-};
-$('#bBoard').onclick = (e) => {
-  const b = e.target.closest('button, .row, [data-quota]');
-  if (!b) return;
-  if (b.matches('[data-brefresh]')) return load().then((err) => toast(err ? `刷新失败：${err}` : '已刷新'));
-  if (b.matches('[data-readall]')) { e.preventDefault(); return post('/api/read', { all: true }).then(() => load(), (x) => toast(x.message)); } // not the fold
-  if (b.matches('[data-quota]')) { setButler(false); side = 'usage'; sideOn = true; drawSide(); return save(); }
-  if (b.dataset.open) openSession(b.dataset.open);
-};
+$('#butler > .hint').onclick = (e) => { if (e.target.closest('[data-bstart]')) startButler(); };
+$('#butler').ondragover = (e) => { if (bConv && !drag && e.dataTransfer.types.includes('Files')) e.preventDefault(); };
+$('#butler').ondrop = (e) => { e.preventDefault(); if (!drag) bConv?.attach([...e.dataTransfer.files]); };
 // narrowed to a phone's width (a tablet split, a window made small): one group, the others' tabs moved into it
 function narrow() {
   if (!NARROW.matches) return;
@@ -1110,7 +1062,7 @@ function sideGroup() {
   return groups[i + 1] ?? (groups.length < 3 ? makeGroup(focusG) : groups[i - 1]);
 }
 async function openSession(id, where) {
-  setButler(false); // from the 管家's board, or a notification tapped there: to the conversation
+  setButler(false); // a notification tapped while in 管家: to the conversation
   const s = state?.sessions.find((x) => x.id === id), have = convOf(id);
   if (!s) return toast('这个对话已经不在列表里了');
   if (have) return where && where !== 'aside' && where !== have.g ? moveConv(have, where) : activate(have.g, have); // open already: that tab
@@ -1710,7 +1662,8 @@ function makeConv(body, title) {
   c.sync = () => { // from the list: its title and account; and where it runs
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null;
     if (s) { c.title = s.title; c.acct = s.pid ? s.acct + 1 : body.acct ?? s.acct + 1; }
-    const cwd = s?.cwd ?? body.dir ?? '', parts = cwd.split(/[\\/]/).filter(Boolean), dir = parts.length > 3 ? ['…', ...parts.slice(-2)] : parts;
+    const cwd = s?.cwd ?? body.dir ?? '', parts = cwd.split(/[\\/]/).filter(Boolean);
+    const dir = isButler({ cwd }) ? ['管家'] : parts.length > 3 ? ['…', ...parts.slice(-2)] : parts;
     const where = c.ended ? '已结束' : key ? (kind === 'pc' ? '在电脑窗口里运行' : '在网页上运行') : c.started ? '连接中…' : '没有在运行';
     $p('.path').innerHTML = dir.map((p, i) => i === dir.length - 1 ? `<b>${esc(p)}</b>` : esc(p)).join(' › ') + ` <span class="dim">· 账号 ${c.acct ?? '?'} · ${where}</span>`;
     $p('.path').title = cwd;
