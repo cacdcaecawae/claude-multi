@@ -535,8 +535,8 @@ function listSessions(reg) {
     const { cwd, title, prompt, req } = r;
     if (!cwd || !title || cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)) continue; // nothing to go back to
     const pid = live.get(s.id)?.pid ?? null, st = live.get(s.id)?.status;
-    // busy: answering or running a command (its session file's status), for 换账号继续's 答完再换
-    out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell',
+    // busy: answering or running a command (its session file's status), for 换账号继续's 答完再换; wait: on a question for you
+    out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell', wait: st === 'waiting',
       who: reg.profiles[s.acct].label.split('@')[0] });
   }
   return out.sort((a, b) => b.at - a.at);
@@ -844,17 +844,24 @@ async function chatSay(ref, text) {
   const went = await typeIn(key, live, text);
   console.log(went ? `已发给「${s.title}」，它开始干活了。` : `已发给「${s.title}」，但它还没动，稍后用 chat look 看看。`);
 }
-// a single-choice question: from the option the cursor is on to the one chosen, then Enter (as the page's card does)
-async function chatPick(ref, n) {
-  const s = findChat(ref), menu = s.pid ? (await screenOf(s.id))?.menu : null, o = menu?.opts.find((x) => x.n === Number(n));
+// a single-choice question: from the option the cursor is on to the one chosen, then Enter (as the page's card does).
+// ask: the question it was picked on; another one up by now (the first answered) isn't answered with it.
+async function pickOn(id, n, ask, by = 'butler') {
+  const menu = (await screenOf(id))?.menu, o = menu?.opts.find((x) => x.n === Number(n));
   if (!menu) throw new Error('它现在没在问选择题');
+  if (ask != null && menu.ask !== ask) throw new Error('它问的已经变了，再看一下');
   if (menu.tabs || menu.opts.some((x) => x.check != null)) throw new Error('这是多选题，或者一次问了好几题，请用户在网页上点卡片回答');
   if (!o) throw new Error(`选项号要在 1 到 ${menu.opts.length} 之间`);
   if (/^Type something/i.test(o.label)) throw new Error('「自己输入」这一项请用户在网页上回答');
-  const { key } = await webPost('/api/open', { id: s.id });
-  for (let i = 0; i < Math.abs(o.n - menu.cur); i++) await webPost('/api/input', { key, by: 'butler', data: o.n > menu.cur ? '\x1b[B' : '\x1b[A' });
-  await webPost('/api/input', { key, by: 'butler', data: '\r' });
-  console.log(`已替用户选了「${o.label}」。`);
+  const { key } = await webPost('/api/open', { id });
+  for (let i = 0; i < Math.abs(o.n - menu.cur); i++) await webPost('/api/input', { key, by, data: o.n > menu.cur ? '\x1b[B' : '\x1b[A' });
+  await webPost('/api/input', { key, by, data: '\r' });
+  return o.label;
+}
+async function chatPick(ref, n) {
+  const s = findChat(ref);
+  if (!s.pid) throw new Error('它现在没在问选择题');
+  console.log(`已替用户选了「${await pickOn(s.id, n)}」。`);
 }
 async function chatNew(dir, text, n) {
   dir = path.resolve(dir ?? '');
@@ -1643,7 +1650,17 @@ async function web() {
       } catch {}
   }, 2000);
 
+  const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
   const api = {
+    // the questions other conversations wait on, as their screens show them (管家 mode has them as cards): each read again
+    // 3 s after the last read at most, one read for every page asking
+    'GET /api/asks': async () => Promise.all(sessions().filter((s) => s.wait && s.pid && !(BUTLER && sameDir(s.cwd, BUTLER))).map(async (s) => {
+      let a = asks.get(s.id);
+      if (!a || Date.now() - a.at > 3000) asks.set(s.id, a = { at: Date.now(), menu: screenOf(s.id).then((r) => r?.menu ?? null, () => null) });
+      return { id: s.id, title: s.title, acct: s.acct + 1, menu: await a.menu };
+    })),
+    // one answered from such a card: by you, so it isn't held back as the 管家's typing is
+    'POST /api/pick': async (q, b) => { try { return { label: await pickOn(String(b.id), b.n, b.ask, 'you') }; } finally { asks.delete(String(b.id)); } },
     // the quota as last read, at once: reading it again (each account's, over the network) takes a second or
     // more, so one over a minute old is read again in the background, for the next look. That read goes abroad
     // through this computer's proxy, and hung the page for up to 20 s while its node was bad: 刷新 (?fresh) waits
@@ -2065,7 +2082,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { parseUntil, todoOpen, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { parseUntil, todoOpen, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

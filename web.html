@@ -225,6 +225,11 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #app.butler #butler { display: flex; }
   #app.butler #side, #app.butler #sideSash, #app.butler #editor { display: none !important; }
   #butler.blank > .hint { display: flex; }
+  /* the others' questions, above it: answered here, or opened */
+  #asks { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 0; max-height: 50%; overflow: auto; flex: none; }
+  #asks:empty { display: none; }
+  #asks .from { font-size: 12px; color: var(--fg2); padding: 0 2px; }
+  #asks .from b { color: var(--fgHi); font-weight: 600; }
   .hint .bt { font-size: 18px; font-weight: 600; color: var(--fgHi); margin-top: -6px; }
 
   /* a conversation: where it is, the record (对话) or the terminal (终端), the input */
@@ -467,7 +472,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <aside id="side"><div class="sideHead"><span id="sideTitle">对话</span><div id="sideActs"></div></div><div id="view"><div class="empty">加载中…</div></div></aside>
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
-  <main id="butler" class="blank"><div class="hint"></div></main>
+  <main id="butler" class="blank"><div id="asks"></div><div class="hint"></div></main>
 </div>
 <footer id="status"><span class="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span id="host">…</span></span>
   <span id="conn"></span><span class="grow"></span><span id="here"></span><button id="sAcct" title="看额度"></button></footer>
@@ -639,7 +644,7 @@ async function load(fresh) {
   for (const c of allConvs()) c.sync();
   bConv?.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
-  drawButler(); drawStatus(); drawHere();
+  drawButler(); drawAsks(); drawStatus(); drawHere();
   return ''; // read: no error
 }
 function drawSide() {
@@ -759,7 +764,7 @@ function setButler(on) {
   butler = on; $('#app').classList.toggle('butler', on);
   for (const g of groups) if (g.active) on ? g.active.sleep() : g.active.wake();
   if (bConv) on ? bConv.wake() : bConv.sleep();
-  if (on) { drawButler(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
+  if (on) { drawButler(); drawAsks(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
   markRows(); save();
 }
 function mountButler(c) { bConv = c; $('#butler').append(c.el); if (butler) { c.wake(); if (FINE) c.focus(); } }
@@ -772,6 +777,36 @@ function drawButler() {
   if (!bConv) $('#butler > .hint').html = `${SPARK}<div class="bt">管家</div><div>你的助理：替你看着所有对话，谁在等你、谁做完了，问它就行。</div>
     <div class="btns"><button class="btn primary" data-bstart>用账号 ${(state.usage.rec ?? 0) + 1} 启动管家</button></div>`;
 }
+// The questions other conversations wait on (the service reads them off their screens), as cards: a single choice
+// answered here; a multi-select, several questions or one to write in, in that conversation (its own card has them).
+let asksBusy = false, askOf = new Map(); // conversation id → the question its card shows (a pick says which one it meant)
+async function drawAsks() {
+  if (!butler || asksBusy) return;
+  if (!state.sessions.some((s) => s.wait && s.pid && !isButler(s))) { askOf.clear(); $('#asks').html = ''; return; }
+  asksBusy = true;
+  let list = [];
+  try { list = await (await fetch('/api/asks')).json(); } catch {} finally { asksBusy = false; }
+  if (!Array.isArray(list)) return;
+  askOf = new Map(list.map((a) => [a.id, a.menu?.ask]));
+  $('#asks').html = list.map(({ id, title, acct, menu }) => {
+    const simple = menu && !menu.tabs && !menu.opts.some((o) => o.check != null);
+    return `<div class="ask" data-id="${esc(id)}"><div class="from"><b>${esc(title)}</b> · 账号 ${acct} · 在等你回答</div>${menu
+      ? `${menu.ask ? `<div class="q">${esc(menu.ask)}</div>` : ''}${simple ? menu.opts.map((o) =>
+        `<button class="pick${o.n === menu.cur ? ' on' : ''}" data-n="${o.n}"${/^Type something/i.test(o.label) ? ' data-open="1"' : ''}>${o.n}. ${esc(o.label)}${o.desc ? `<small>${esc(o.desc)}</small>` : ''}</button>`).join('')
+        : '<div class="q">多选，或者一次问了好几题，打开对话回答</div>'}`
+      : '<div class="q">它在等你处理，打开看看</div>'}<div class="row2"><button data-open="1">打开对话</button></div></div>`;
+  }).join('');
+}
+$('#asks').onclick = async (e) => {
+  const b = e.target.closest('button'), card = b?.closest('[data-id]');
+  if (!card) return;
+  const id = card.dataset.id;
+  if (b.dataset.open) return openSession(id); // its own card there, with the words box
+  b.disabled = true;
+  try { toast(`已选「${(await post('/api/pick', { id, n: +b.dataset.n, ask: askOf.get(id) })).label}」`); }
+  catch (er) { toast('没选上：' + er.message, 4000); }
+  setTimeout(drawAsks, 800);
+};
 function startButler() {
   if (!state?.butler) return toast('网页服务还是旧版本，重启后才能启动管家', 4000);
   mountButler(makeConv({ dir: state.butler, acct: (state.usage.rec ?? 0) + 1 }, '管家')); drawButler();
