@@ -1044,7 +1044,7 @@ function notify(kind) {
     pid: Number(process.env.CLAUDE_PID) || null })); // Claude's own pid: lets a click find its terminal window
   fs.renameSync(`${f}.tmp`, `${f}.json`);
   // and for the phone page, which lists the latest ones (the file is trimmed to its last 200 now and then)
-  fs.appendFileSync(NOTES, JSON.stringify({ at: Date.now(), kind, project: dir ? path.basename(dir) : '', msg, title, gist: gist(tail), id: j.session_id ?? null }) + '\n');
+  fs.appendFileSync(NOTES, JSON.stringify({ at: Date.now(), kind, project: dir ? path.basename(dir) : '', msg, title, id: j.session_id ?? null }) + '\n');
   try { if (fs.statSync(NOTES).size > 262144) fs.writeFileSync(NOTES, readNotes(200).reverse().map((x) => JSON.stringify(x)).join('\n') + '\n'); } catch {}
   island();
 }
@@ -1603,13 +1603,22 @@ async function web() {
   // A new notification to the phones, but none for a conversation a page shows you right now: each page in front says
   // which ones it shows with its look every 5 s (a page in the background, or a locked phone, stops looking).
   const viewing = new Map(); // conversation id → when a page last said it shows it
+  // Its text has Claude's last words (gist), read from the record here a moment after the note: the hook runs before
+  // Claude has written them (the hook found the words before them).
   let pushedTo = Date.now(); // the ones before the service started were for the island
+  const lastWords = (id) => {
+    const f = id && sessions().find((s) => s.id === id)?.file;
+    if (!f) return '';
+    const fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size, tail = slice(fd, Math.max(0, size - 4194304), 4194304);
+    fs.closeSync(fd);
+    return gist(tail);
+  };
   setInterval(() => {
-    const fresh = readNotes(20).filter((n) => n.at > pushedTo).reverse();
+    const fresh = readNotes(20).filter((n) => n.at > pushedTo && Date.now() - n.at > 1500).reverse();
     if (!fresh.length) return;
     pushedTo = fresh.at(-1).at;
     for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000))
-      pushAll({ ...pushText(n), id: n.id }).catch(() => {});
+      try { pushAll({ ...pushText({ ...n, gist: lastWords(n.id) }), id: n.id }).catch(() => {}); } catch {}
   }, 2000);
 
   const api = {
