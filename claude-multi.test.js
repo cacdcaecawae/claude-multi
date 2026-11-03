@@ -502,3 +502,21 @@ console.log('tokens ok');
   assert.ok(crypto.verify('sha256', Buffer.from(`${h}.${c}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(s, 'base64url')));
   console.log('push ok');
 }
+
+// A phone notification: what happened in its title, Claude's answer (its opening words) under it
+{
+  const { gist, pushText } = require('./claude-multi'), l = (o) => JSON.stringify(o);
+  const say = (text, x = {}) => l({ type: 'assistant', ...x, message: { content: [{ type: 'text', text }] } });
+  const tool = l({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't', name: 'Bash', input: {} }] } });
+  const tail = [say('我先看看代码'), tool, l({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't' }] } }),
+    say('改好了，刷新网页就能看到，服务不用重启。\n\n| a | b |\n|---|---|\n| 1 | 2 |')].join('\n');
+  assert.equal(gist(tail), '改好了，刷新网页就能看到，服务不用重启。');               // the answer's opening, not the table
+  assert.equal(gist(say('好的。\n\n**原因**\n\n文件已经存好了，在 **E:\a.md**。')), '好的。 文件已经存好了，在 E:\a.md。'); // a short one: the next words, not the heading
+  assert.equal(gist([say('真正的回答在这里，写得够长。'), say('No response requested.')].join('\n')), '真正的回答在这里，写得够长。');
+  assert.equal(gist([say('主对话的回答，写得够长一些。'), say('子任务的话', { isSidechain: true })].join('\n')), '主对话的回答，写得够长一些。');
+  assert.ok(gist(say('长'.repeat(400))).endsWith('…'));
+  assert.deepEqual(pushText({ kind: 'done', title: 'rag检索', gist: '跑完了' }), { title: '✅ rag检索', body: '跑完了' });
+  assert.deepEqual(pushText({ kind: 'ask', title: 'rag检索', msg: '想使用 Bash，等你确认', gist: '要删旧文件' }), { title: '⏸ rag检索 等你确认', body: '想用 Bash。要删旧文件' });
+  assert.deepEqual(pushText({ kind: 'ask', project: 'helper', msg: 'Claude needs your permission' }), { title: '⏸ helper 等你确认', body: '打开看看它在问什么' });
+  console.log('push text ok');
+}

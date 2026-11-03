@@ -822,6 +822,35 @@ function helpersBusy(tail, since = 0) {
   return [...busy.values()].some((at) => at >= since && Date.now() - at < 6 * 3600e3);
 }
 
+// What Claude said last, for a notification: its answer (its words after its last tool call), the opening paragraph
+// where it says how it went (the next ones too while that's a few words, "好的。"), without Markdown, cut short. Its
+// "No response requested." to a background message isn't an answer.
+function gist(tail, max = 150) {
+  const lines = tail.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"assistant"')) continue;
+    let j; try { j = JSON.parse(lines[i]); } catch { continue; }
+    const t = j.type === 'assistant' && !j.isSidechain ? (j.message?.content ?? []).filter((p) => p.type === 'text').map((p) => p.text).join('\n') : '';
+    const paras = t.replace(/```[\s\S]*?```/g, '').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+    const flat = (p) => p.replace(/[*`#>|]/g, '').replace(/^\s*[-•]\s+/gm, '').replace(/\s+/g, ' ').trim();
+    if (!paras.length || /^No response requested\.?$/i.test(flat(paras.join(' ')))) continue;
+    let s = flat(paras[0]);
+    for (const p of paras.slice(1)) { // after "好的。": the next words, not a heading or a table
+      if (s.length >= 12) break;
+      if (!/^(#|\|)|^\*\*[^*\n]+\*\*[:：]?$/.test(p)) s += ` ${flat(p)}`;
+    }
+    return s.length > max ? s.slice(0, max) + '…' : s;
+  }
+  return '';
+}
+// a note as a phone shows it: what happened in the title, with the conversation's name; what it said under it. Claude
+// asks "needs your permission" for a question as for a tool, mostly without saying which: one case, waiting for you.
+function pushText(n) {
+  const name = n.title || n.project || 'Claude', tool = /^想使用 (.+)，等你确认$/.exec(n.msg ?? '')?.[1];
+  if (n.kind !== 'ask') return { title: `✅ ${name}`, body: n.gist || '回复完了' };
+  return { title: `⏸ ${name} 等你确认`, body: `${tool && tool !== 'AskUserQuestion' ? `想用 ${tool}。` : ''}${n.gist || '打开看看它在问什么'}` };
+}
+
 // Claude Code hook (Stop / Notification): drops the message in the island's inbox and makes sure the
 // island runs. Written to .tmp then renamed, so the island never reads half a file.
 function notify(kind) {
@@ -851,7 +880,7 @@ function notify(kind) {
     pid: Number(process.env.CLAUDE_PID) || null })); // Claude's own pid: lets a click find its terminal window
   fs.renameSync(`${f}.tmp`, `${f}.json`);
   // and for the phone page, which lists the latest ones (the file is trimmed to its last 200 now and then)
-  fs.appendFileSync(NOTES, JSON.stringify({ at: Date.now(), kind, project: dir ? path.basename(dir) : '', msg, title, id: j.session_id ?? null }) + '\n');
+  fs.appendFileSync(NOTES, JSON.stringify({ at: Date.now(), kind, project: dir ? path.basename(dir) : '', msg, title, gist: gist(tail), id: j.session_id ?? null }) + '\n');
   try { if (fs.statSync(NOTES).size > 262144) fs.writeFileSync(NOTES, readNotes(200).reverse().map((x) => JSON.stringify(x)).join('\n') + '\n'); } catch {}
   island();
 }
@@ -1413,7 +1442,7 @@ async function web() {
     if (!fresh.length) return;
     pushedTo = fresh.at(-1).at;
     for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000))
-      pushAll({ title: n.title || n.project || 'Claude', body: `${n.project ? `${n.project} · ` : ''}${n.msg}`, id: n.id }).catch(() => {});
+      pushAll({ ...pushText(n), id: n.id }).catch(() => {});
   }, 2000);
 
   const api = {
@@ -1815,7 +1844,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
