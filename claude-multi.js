@@ -1222,6 +1222,71 @@ function lead(items, lines, more = false) { // more: the record goes back furthe
   return { text: text.filter(Boolean).join('\r\n\r\n'), skip };
 }
 
+// Phone notifications (Web Push). The page, opened from the home screen, subscribes; each new notification (the ones
+// the island gets) goes to every subscription through its browser's push service (Apple's for an iPhone). push.json
+// keeps this service's key (VAPID, RFC 8292: a push service takes pushes only from the key a subscription was made
+// for) and the subscriptions. What's pushed is encrypted for the phone alone (aes128gcm, RFC 8291).
+const PUSH = path.join(ROOT, 'push.json');
+const pushStore = () => { try { return JSON.parse(fs.readFileSync(PUSH, 'utf8')); } catch { return null; } };
+const savePush = (s) => fs.writeFileSync(PUSH, JSON.stringify(s));
+function pushKeys() { // made on first use
+  const s = pushStore();
+  if (s) return s;
+  const n = { jwk: require('crypto').generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ format: 'jwk' }), subs: [] };
+  savePush(n);
+  return n;
+}
+const pushPublic = (jwk) => Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]).toString('base64url');
+// text encrypted for a subscription's keys (p256dh, auth), as one record; asPriv and salt fixed only by the test
+function pushBody(keys, text, asPriv, salt = require('crypto').randomBytes(16)) {
+  const crypto = require('crypto'), e = crypto.createECDH('prime256v1');
+  if (asPriv) e.setPrivateKey(asPriv); else e.generateKeys();
+  const ua = Buffer.from(keys.p256dh, 'base64url'), as = e.getPublicKey();
+  const hk = (ikm, s, info, n) => Buffer.from(crypto.hkdfSync('sha256', ikm, s, info, n));
+  const ikm = hk(e.computeSecret(ua), Buffer.from(keys.auth, 'base64url'), Buffer.concat([Buffer.from('WebPush: info\0'), ua, as]), 32);
+  const c = crypto.createCipheriv('aes-128-gcm', hk(ikm, salt, Buffer.from('Content-Encoding: aes128gcm\0'), 16), hk(ikm, salt, Buffer.from('Content-Encoding: nonce\0'), 12));
+  const data = Buffer.concat([c.update(Buffer.concat([Buffer.from(text), Buffer.from([2])])), c.final(), c.getAuthTag()]); // 2: the last record
+  const head = Buffer.alloc(21); salt.copy(head); head.writeUInt32BE(4096, 16); head[20] = as.length;
+  return Buffer.concat([head, as, data]);
+}
+// this service's signature for a push service (the origin of the subscription's endpoint), good for 12 hours
+function pushAuth(endpoint, jwk) {
+  const part = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const t = `${part({ typ: 'JWT', alg: 'ES256' })}.${part({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 43200, sub: 'https://github.com/cacdcaecawae/claude-multi' })}`;
+  const sig = require('crypto').sign('sha256', Buffer.from(t), { key: require('crypto').createPrivateKey({ key: jwk, format: 'jwk' }), dsaEncoding: 'ieee-p1363' });
+  return `vapid t=${t}.${sig.toString('base64url')}, k=${pushPublic(jwk)}`;
+}
+// {title, body, id} to every subscription; one its push service says is gone (404, 410: the app removed, notifications
+// turned off) is dropped. The push services' answers back: 201 is delivered to them.
+async function pushAll(msg) {
+  const s = pushStore();
+  if (!s?.subs.length) return [];
+  const out = await Promise.all(s.subs.map((sub) => fetch(sub.endpoint, {
+    method: 'POST', body: pushBody(sub.keys, JSON.stringify(msg)), signal: AbortSignal.timeout(15000),
+    headers: { authorization: pushAuth(sub.endpoint, s.jwk), 'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: '86400', urgency: 'high' },
+  }).then((r) => r.status, (e) => e.message)));
+  const gone = new Set(s.subs.filter((_, i) => out[i] === 404 || out[i] === 410).map((x) => x.endpoint));
+  if (gone.size) { const now = pushStore(); now.subs = now.subs.filter((x) => !gone.has(x.endpoint)); savePush(now); }
+  return out;
+}
+// The page's helper, run by the browser apart from it: shows what's pushed (iOS takes a push away from a page that shows
+// nothing), and a tap opens the page at that conversation.
+const PUSH_SW = `self.addEventListener('push', (e) => {
+  const d = e.data ? e.data.json() : {};
+  e.waitUntil(self.registration.showNotification(d.title || 'Claude', { body: d.body || '', tag: d.id || undefined, data: { id: d.id }, icon: '/icon-180.png' }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const id = e.notification.data && e.notification.data.id;
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((ws) => {
+    if (ws[0]) { if (id) ws[0].postMessage({ open: id }); return ws[0].focus(); }
+    return clients.openWindow(id ? '/?open=' + encodeURIComponent(id) : '/');
+  }));
+});`;
+// what the home screen keeps of the page: a manifest of its own, which Web Push on iOS asks of a web app
+const MANIFEST = JSON.stringify({ name: 'Claude 多账号', short_name: 'Claude', start_url: '/', display: 'standalone', background_color: '#181818', theme_color: '#181818',
+  icons: [{ src: '/icon-180.png', sizes: '180x180', type: 'image/png' }] });
+
 async function web() {
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
@@ -1332,12 +1397,25 @@ async function web() {
     return { t, file: t?.file ?? sessions().find((x) => x.id === q.get('id'))?.file };
   }
 
+  // A new notification to the phones, but none for a conversation a page shows you right now: each page in front says
+  // which ones it shows with its look every 5 s (a page in the background, or a locked phone, stops looking).
+  const viewing = new Map(); // conversation id → when a page last said it shows it
+  let pushedTo = Date.now(); // the ones before the service started were for the island
+  setInterval(() => {
+    const fresh = readNotes(20).filter((n) => n.at > pushedTo).reverse();
+    if (!fresh.length) return;
+    pushedTo = fresh.at(-1).at;
+    for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000))
+      pushAll({ title: n.title || n.project || 'Claude', body: `${n.project ? `${n.project} · ` : ''}${n.msg}`, id: n.id }).catch(() => {});
+  }, 2000);
+
   const api = {
     // the quota as last read, at once: reading it again (each account's, over the network) takes a second or
     // more, so one over a minute old is read again in the background, for the next look. That read goes abroad
     // through this computer's proxy, and hung the page for up to 20 s while its node was bad: 刷新 (?fresh) waits
     // 3 s at most, then shows the last numbers; the page's next look (10 s) has the new ones.
     'GET /api/state': async (q) => {
+      for (const id of (q.get('view') ?? '').split(',').filter(Boolean)) viewing.set(id, Date.now()); // shown in a page in front
       if (!usageCache || q.has('fresh') || Date.now() - usageAt > 60000) usageNow ??= usageState().then((r) => {
         usageCache = r.json; usageAt = Date.now();
         fs.writeFile(WEB_USAGE, JSON.stringify(r.json), () => {});
@@ -1350,6 +1428,19 @@ async function web() {
       return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname() };
     },
     'GET /api/tokens': () => tokenStats(),
+    'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
+    'POST /api/push/sub': (q, b) => { // a page's subscription, one per endpoint
+      if (!/^https:\/\/[^/]+\//.test(b.endpoint ?? '') || !b.keys?.p256dh || !b.keys?.auth) throw new Error('通知订阅不完整');
+      const s = pushKeys();
+      s.subs = [...s.subs.filter((x) => x.endpoint !== b.endpoint), { endpoint: b.endpoint, keys: { p256dh: b.keys.p256dh, auth: b.keys.auth }, at: Date.now() }];
+      savePush(s);
+      return { n: s.subs.length };
+    },
+    'POST /api/push/off': (q, b) => { const s = pushStore(); if (s) { s.subs = s.subs.filter((x) => x.endpoint !== b.endpoint); savePush(s); } return {}; },
+    'POST /api/push/test': async () => {
+      const r = await pushAll({ title: 'Claude 多账号', body: '测试通知：手机通知开好了。对话回复完、等你确认时，会这样提醒你。' });
+      return { sent: r.filter((x) => x === 201).length, results: r };
+    },
     // asked every second while shown, mostly from where the last answer ended. By the open terminal's key: one
     // started here has a record once Claude wrote the first message (its session file, named by its pid, says
     // which conversation it is), until then none.
@@ -1455,6 +1546,9 @@ async function web() {
       // the island's logo, to anyone: a phone adding the page to its home screen fetches it without the cookie
       const icon = { '/favicon.ico': ['island.ico', 'image/x-icon'], '/icon-180.png': ['icon-180.png', 'image/png'] }[url.pathname];
       if (req.method === 'GET' && icon) { res.writeHead(200, { 'content-type': icon[1], 'cache-control': 'max-age=86400' }); return res.end(fs.readFileSync(path.join(ROOT, icon[0]))); }
+      // the notifications' helper and the home screen's manifest, to anyone too: the browser fetches them on its own
+      const own = { '/sw.js': [PUSH_SW, 'text/javascript; charset=utf-8'], '/manifest.json': [MANIFEST, 'application/manifest+json; charset=utf-8'] }[url.pathname];
+      if (req.method === 'GET' && own) return out(200, own[0], own[1]);
       if (req.method === 'GET' && url.pathname === '/' && url.searchParams.has('key')) { // the link: kept as a cookie, a year
         if (!keyMatch(url.searchParams.get('key'), webKey())) return out(403, '这个链接的钥匙不对，或者已经换了新的。在电脑上运行 claude-multi web-link 拿新链接。', text);
         res.writeHead(303, { location: '/', 'cache-control': 'no-store', 'set-cookie': `cm=${webKey()}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax` });
@@ -1714,7 +1808,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

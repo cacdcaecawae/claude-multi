@@ -482,3 +482,20 @@ console.log('tokens ok');
   assert.equal(lastReq('{"type":"assistant"}'), null);
   console.log('line ok');
 }
+
+// Phone notifications: the encryption is RFC 8291's own example (Appendix A), byte for byte; the signature checks out
+// with the public key the page subscribes with.
+{
+  const { pushBody, pushAuth, pushPublic } = require('./claude-multi');
+  const keys = { p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', auth: 'BTBZMqHH6r4Tts7J_aSIgg' };
+  const body = pushBody(keys, 'When I grow up, I want to be a watermelon', Buffer.from('yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw', 'base64url'), Buffer.from('DGv6ra1nlYgDCS1FRnbzlw', 'base64url'));
+  assert.equal(body.toString('base64url'), 'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN');
+  const crypto = require('crypto'), jwk = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ format: 'jwk' });
+  const [, t, k] = /^vapid t=(.+), k=(.+)$/.exec(pushAuth('https://web.push.apple.com/abc', jwk));
+  const [h, c, s] = t.split('.'), claims = JSON.parse(Buffer.from(c, 'base64url'));
+  assert.equal(k, pushPublic(jwk));
+  assert.equal(claims.aud, 'https://web.push.apple.com');
+  const pub = crypto.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y }, format: 'jwk' });
+  assert.ok(crypto.verify('sha256', Buffer.from(`${h}.${c}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(s, 'base64url')));
+  console.log('push ok');
+}
