@@ -253,32 +253,40 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hint .pickRow > span { color: var(--fg2); margin-right: 2px; }
   .hint .pickRow .opt { color: var(--fg); }
   #app.butler #desk { display: flex; }
-  #desk:empty, #desk > div:empty, #deskLine { display: none; }
-  #desk h4 { margin: 0 0 6px; padding: 0 6px; font-size: 11px; font-weight: 600; color: var(--fg2); }
-  #desk .me { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
-  #desk .me .spark { width: 34px; height: 34px; flex: none; color: #d97757; }
-  #desk .me.busy .spark { animation: spin 6s linear infinite; }
-  #desk .me b { font-size: 15px; color: var(--fgHi); }
-  #desk .sub { font-size: 12px; color: var(--fg2); }
-  #desk .mood { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--cardB); border-radius: 10px; background: var(--bg); color: var(--fg); }
-  #desk .mood span { font-size: 18px; line-height: 1; }
-  #desk .item { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; min-width: 0; }
-  #desk .item[data-open] { cursor: pointer; }
-  #desk .item .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #desk .item .ad { flex: none; width: 8px; height: 8px; border-radius: 50%; }
-  #desk .item .pt { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #d97757; }
-  #desk .item .when, #desk .tag { flex: none; font-size: 11px; color: var(--fg3); }
-  #desk .tag.wait { color: var(--orange); font-weight: 600; }
-  #desk .counts { display: flex; gap: 6px; padding: 0 6px 6px; }
-  #desk .counts span { flex: 1; text-align: center; padding: 4px 0; border-radius: 6px; background: var(--tint); font-size: 11px; color: var(--fg2); }
-  #desk .counts b { display: block; font-size: 15px; color: var(--fgHi); }
-  #desk .counts .wait b { color: var(--orange); }
-  #desk .none { padding: 0 6px; font-size: 12px; color: var(--fg3); }
-  #desk .gauge { padding: 2px 6px 8px; font-size: 12px; }
-  #desk .gauge .k { display: flex; justify-content: space-between; color: var(--fg2); margin-bottom: 5px; }
-  #desk .meter > i { background: var(--green); transition: width .4s; }
-  #desk .meter > i.warn { background: var(--orange); } #desk .meter > i.bad { background: var(--red); }
-  @media (hover: hover) { #desk .item[data-open]:hover { background: var(--hover); } }
+  .desk:empty, .desk > div:empty, #deskLine { display: none; }
+  .desk h4 { margin: 0 0 6px; padding: 0 6px; font-size: 11px; font-weight: 600; color: var(--fg2); }
+  .desk .me { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
+  .desk .me .spark { width: 34px; height: 34px; flex: none; color: #d97757; }
+  .desk .me.busy .spark { animation: spin 6s linear infinite; }
+  .desk .me b { font-size: 15px; color: var(--fgHi); }
+  .desk .sub { font-size: 12px; color: var(--fg2); }
+  .desk .mood { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--cardB); border-radius: 10px; background: var(--bg); color: var(--fg); }
+  .desk .mood span { font-size: 18px; line-height: 1; }
+  .desk .item { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; min-width: 0; }
+  .desk .item[data-open] { cursor: pointer; }
+  .desk .item .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .item .ad { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+  .desk .item .pt { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #d97757; }
+  .desk .item .when, .desk .tag { flex: none; font-size: 11px; color: var(--fg3); }
+  .desk .tag.wait { color: var(--orange); font-weight: 600; }
+  .desk .counts { display: flex; gap: 6px; padding: 0 6px 6px; }
+  .desk .counts span { flex: 1; text-align: center; padding: 4px 0; border-radius: 6px; background: var(--tint); font-size: 11px; color: var(--fg2); }
+  .desk .counts b { display: block; font-size: 15px; color: var(--fgHi); }
+  .desk .counts .wait b { color: var(--orange); }
+  .desk .none { padding: 0 6px; font-size: 12px; color: var(--fg3); }
+  .desk .gauge { padding: 2px 6px 8px; font-size: 12px; }
+  .desk .gauge .k { display: flex; justify-content: space-between; color: var(--fg2); margin-bottom: 5px; }
+  .desk .meter > i { background: var(--green); transition: width .4s; }
+  .desk .meter > i.warn { background: var(--orange); } .desk .meter > i.bad { background: var(--red); }
+  @media (hover: hover) { .desk .item[data-open]:hover { background: var(--hover); } }
+  #deskR { display: none; width: 280px; flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: var(--bar); }
+  @media (min-width: 1280px) { #app.butler #deskR { display: flex; } }
+  .desk .acct { padding: 8px 6px 4px; }
+  .desk .acct + .acct { border-top: 1px solid var(--border); }
+  .desk .ah { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .desk .ah b { color: var(--fgHi); }
+  .desk .acct .gauge { padding: 0 0 6px; }
+  .desk .acct .m { font-size: 11.5px; color: var(--fg3); }
   /* the others' questions, above it: answered here, or opened */
   #asks { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 0; max-height: 50%; overflow: auto; flex: none; }
   #asks:empty { display: none; }
@@ -438,6 +446,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     #butler { border: 1px solid var(--cardB); border-radius: 10px; overflow: hidden; }
     #app.butler #act { margin-right: 6px; border-right: 1px solid var(--cardB); border-radius: 10px; } /* on its own: the side bar's hidden */
     #desk { border: 1px solid var(--cardB); border-radius: 10px; margin-right: 6px; }
+    #deskR { border: 1px solid var(--cardB); border-radius: 10px; margin-left: 6px; }
   }
 
   /* a phone: one group; the side bar over it under the tab strip, the activity bar at the bottom */
@@ -537,8 +546,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <aside id="side"><div class="sideHead"><span id="sideTitle">对话</span><div id="sideActs"></div></div><div id="view"><div class="empty">加载中…</div></div></aside>
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
-  <aside id="desk"><div id="deskMe"></div><div id="deskTodo"></div><div id="deskRun"></div><div id="deskDone"></div><div id="deskPc"></div></aside>
+  <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><div id="deskRun"></div><div id="deskAcct"></div><div id="deskDone"></div><div id="deskPc"></div></aside>
   <main id="butler" class="blank"><div id="deskLine"></div><div id="asks"></div><div class="hint"></div></main>
+  <aside id="deskR" class="desk"></aside>
 </div>
 <footer id="status"><span class="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span id="host">…</span></span>
   <span id="conn"></span><span class="grow"></span><span id="here"></span><button id="sAcct" title="看额度"></button></footer>
@@ -959,16 +969,24 @@ function drawDesk() {
   const tag = (x) => (x.wait ? '<span class="tag wait">等你</span>' : x.busy ? '<span class="spin" title="正在回复"></span>' : '<span class="tag">空闲</span>');
   $('#deskRun').html = `<h4>对话</h4><div class="counts"><span class="wait"><b>${wait.length}</b>等你</span><span><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
     ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" title="${esc(x.cwd)}"><i class="ad" style="background:${ACCT[x.acct % 4]}"></i><span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
+  const u = state.usage, gauge = (k, p, v) => `<div class="gauge"><div class="k"><span>${k}</span><span>${v}</span></div><div class="meter"><i class="${p >= 85 ? 'bad' : p >= 60 ? 'warn' : ''}" style="width:${Math.min(100, p)}%"></i></div></div>`;
+  $('#deskAcct').html = u.accounts?.length ? `<h4>账号</h4>${u.accounts.map((a, i) => {
+    const on = state.sessions.filter((x) => x.pid && x.acct === i).length;
+    return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}<span class="grow"></span><span class="m">${a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
+      ${a.err ? '' : (a.windows ?? []).filter((w) => w.k === 'five_hour' || w.k === 'seven_day').map((w) => gauge(w.k === 'five_hour' ? '5 小时' : '7 天', w.pct, `${w.pct}% · ${esc(w.reset)}后重置`)).join('')}
+      <div class="m">${on ? `${on} 个对话在用` : '没有对话在用'}</div></div>`;
+  }).join('')}` : '';
   const done = notesOut().filter((n) => n.kind === 'done' && n.id).slice(0, 5);
   $('#deskDone').html = done.length ? `<h4>刚做完</h4>${done.map((n) => `<div class="item" data-open="${esc(n.id)}"><span class="t">${esc(n.title || n.project || 'Claude')}</span><span class="when">${ago(n.at)}</span></div>`).join('')}` : '';
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
-  const meter = (k, p, v) => `<div class="gauge"><div class="k"><span>${k}</span><span>${v}</span></div><div class="meter"><i class="${p >= 85 ? 'bad' : p >= 60 ? 'warn' : ''}" style="width:${p}%"></i></div></div>`;
-  $('#deskPc').html = pc ? `<h4>这台电脑</h4>${meter('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${meter('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
+  $('#deskPc').html = pc ? `<h4>这台电脑</h4>${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
   const sel = bConv?.el.querySelector('.bsel');
   if (sel) { sel.children[0].textContent = `账号 ${acct ?? (me ? me.acct + 1 : '?')}`; sel.children[1].textContent = modelName(state.butlerModel ?? me?.line?.model); }
   $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${todo.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
 }
-$('#desk').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
+$('#desk').onclick = $('#deskR').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
+const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskAcct', 'deskDone', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id)); };
+WIDE.addEventListener('change', placeDesk); placeDesk();
 function startButler(acct = startAcct || (state.usage.rec ?? 0) + 1) {
   if (!state?.butler) return toast('网页服务还是旧版本，重启后才能启动管家', 4000);
   mountButler(makeConv({ dir: state.butler, acct }, '管家')); drawButler();
