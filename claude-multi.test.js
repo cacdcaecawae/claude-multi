@@ -558,3 +558,28 @@ console.log('tokens ok');
   assert.ok(!('subtitle' in ask) && !('icon' in ask)); // no line under the title when there's nothing to say; no page link off https
   console.log('bark ok');
 }
+
+// The 管家's 待办 as its 操作台 reads it: each thing's lines, the done ones newest first with their times; its waits,
+// a file each, one whose process is gone dropped
+{
+  const { todoParts, doneAt, waitsNow, todoOpen } = require('./claude-multi'), os = require('os'), path = require('path');
+  const md = ['# 待办', '', '## rag检索 跑完告诉我', '- 盯着：rag检索（智能体rag）', '- 等：它回复完', '- 然后：告诉用户结果', '- 状态：等待中（11-03 记下）', '',
+    '## 15:40 提醒看额度', '- 状态：进行中', '', '## 二次返修 部署', '- 盯着：二次返修', '', '## 已完成', '- 11-02 09:10 早一件', '- 11-03 15:20 undt-sim 跑完：已转告', '- 没写时间的一件'].join('\n');
+  const { todos, lines } = todoParts(md);
+  assert.deepEqual(todos.map((t) => t.t), ['rag检索 跑完告诉我', '15:40 提醒看额度', '二次返修 部署']);
+  assert.deepEqual(todos[0], { t: 'rag检索 跑完告诉我', watch: 'rag检索（智能体rag）', wait: '它回复完', then: '告诉用户结果', st: '等待中（11-03 记下）' });
+  assert.equal(todos[1].watch, ''); assert.equal(todos[1].st, '进行中');
+  assert.deepEqual(lines, ['没写时间的一件', '11-03 15:20 undt-sim 跑完：已转告', '11-02 09:10 早一件']);
+  const d = doneAt(lines[1], new Date(2026, 10, 3, 18));
+  assert.deepEqual([new Date(d.at).getMonth(), new Date(d.at).getDate(), new Date(d.at).getHours(), new Date(d.at).getMinutes(), d.text], [10, 3, 15, 20, 'undt-sim 跑完：已转告']);
+  assert.equal(doneAt(lines[0]), null);
+  assert.ok(todoOpen(md) && !todoOpen('## 已完成\n- x')); // still agrees
+  assert.deepEqual(todoParts(''), { todos: [], lines: [] });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'waits-'));
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ pid: process.pid, at: 1, until: null, note: '活的' }));
+  fs.writeFileSync(path.join(dir, 'b.json'), JSON.stringify({ pid: 999999, at: 2, until: 5, note: '死的' }));
+  assert.deepEqual(waitsNow(dir).map((w) => w.note), ['活的']);
+  assert.ok(!fs.existsSync(path.join(dir, 'b.json'))); // dropped
+  fs.rmSync(dir, { recursive: true });
+  console.log('butler desk ok');
+}

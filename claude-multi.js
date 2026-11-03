@@ -818,21 +818,27 @@ async function chatLook(ref) {
   else if (st === 'waiting') out += '\n\n它在等人处理，但屏幕上没认出选择题，让用户在网页上打开它看一下。';
   console.log(out);
 }
-async function chatWait(ref, until, maxMin) {
-  if (until) {
-    const t = parseUntil(until);
-    await sleep(Math.max(0, t - Date.now()));
-    console.log(`到点了（${new Date(t).toLocaleString('zh-CN', { hour12: false })}）。`);
-    return ref ? chatLook(ref) : undefined;
-  }
-  const s = findChat(ref), live = s.pid ? await waitLive((j) => j.pid === s.pid) : null;
-  let done = !live;
-  for (const end = Date.now() + maxMin * 60000; !done && Date.now() < end; await sleep(3000)) {
-    const st = statusOf(live);
-    done = st === 'gone' || (st != null && st !== 'busy' && st !== 'shell'); // idle, or waiting on someone
-  }
-  if (!done) console.log(`等了 ${maxMin} 分钟，它还在忙。\n`);
-  await chatLook(s.id);
+async function chatWait(ref, until, maxMin, note) {
+  const t = until ? parseUntil(until) : null, s = ref ? findChat(ref) : null, wf = path.join(WAITS, `${process.pid}.json`);
+  fs.mkdirSync(WAITS, { recursive: true });
+  fs.writeFileSync(wf, JSON.stringify({ pid: process.pid, at: Date.now(), until: t, id: s?.id ?? null, title: s?.title ?? null, note: note ?? null }));
+  try {
+    if (t) {
+      await sleep(Math.max(0, t - Date.now()));
+      blog(`提醒到点：${note || new Date(t).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })}`, s?.id);
+      console.log(`到点了（${new Date(t).toLocaleString('zh-CN', { hour12: false })}）。`);
+      return s ? chatLook(s.id) : undefined;
+    }
+    const live = s.pid ? await waitLive((j) => j.pid === s.pid) : null;
+    let done = !live;
+    for (const end = Date.now() + maxMin * 60000; !done && Date.now() < end; await sleep(3000)) {
+      const st = statusOf(live);
+      done = st === 'gone' || (st != null && st !== 'busy' && st !== 'shell'); // idle, or waiting on someone
+    }
+    if (!done) console.log(`等了 ${maxMin} 分钟，它还在忙。\n`);
+    else blog(`等到了「${s.title}」${note ? '：' + note : ''}`, s.id);
+    await chatLook(s.id);
+  } finally { fs.rmSync(wf, { force: true }); }
 }
 async function chatSay(ref, text) {
   if (!text) throw new Error('要说什么？');
@@ -842,6 +848,7 @@ async function chatSay(ref, text) {
   if (!live) throw new Error('它没能启动起来');
   await untilReady(live);
   const went = await typeIn(key, live, text);
+  blog(`给「${s.title}」发了消息：${text.length > 40 ? text.slice(0, 40) + '…' : text}`, s.id);
   console.log(went ? `已发给「${s.title}」，它开始干活了。` : `已发给「${s.title}」，但它还没动，稍后用 chat look 看看。`);
 }
 // a single-choice question: from the option the cursor is on to the one chosen, then Enter (as the page's card does).
@@ -861,7 +868,9 @@ async function pickOn(id, n, ask, by = 'butler') {
 async function chatPick(ref, n) {
   const s = findChat(ref);
   if (!s.pid) throw new Error('它现在没在问选择题');
-  console.log(`已替用户选了「${await pickOn(s.id, n)}」。`);
+  const label = await pickOn(s.id, n);
+  blog(`替你给「${s.title}」选了「${label}」`, s.id);
+  console.log(`已替用户选了「${label}」。`);
 }
 async function chatNew(dir, text, n) {
   dir = path.resolve(dir ?? '');
@@ -878,17 +887,18 @@ async function chatNew(dir, text, n) {
   if (!live) throw new Error('它没能启动起来');
   await untilReady(live, 60000);
   const went = await typeIn(key, live, text);
+  blog(`新开了对话（${path.basename(dir)}，账号 ${n}）：${text.length > 40 ? text.slice(0, 40) + '…' : text}`, live.sessionId);
   console.log(`已在账号 ${n} 新建对话，编号 ${live.sessionId}（文件夹 ${dir}）。${went ? '第一句已发出，它开始干活了。' : '第一句已发出，但它还没动，稍后用 chat look 看看。'}`);
 }
 async function chat([sub, ...a]) {
   const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a.splice(i, 2)[1] : undefined; };
   try {
     if (sub === 'look') await chatLook(a[0]);
-    else if (sub === 'wait') { const until = opt('--until'), max = Number(opt('--max')) || 120; await chatWait(a[0], until, max); }
+    else if (sub === 'wait') { const until = opt('--until'), max = Number(opt('--max')) || 120, note = opt('--note'); await chatWait(a[0], until, max, note); }
     else if (sub === 'say') await chatSay(a[0], a.slice(1).join(' '));
     else if (sub === 'pick') await chatPick(a[0], a[1]);
     else if (sub === 'new') { const n = Number(opt('--acct')) || 0; await chatNew(a[0], a.slice(1).join(' '), n); }
-    else console.log('claude-multi chat look <对话> | wait <对话> [--max 分钟] | wait [<对话>] --until 15:40 | say <对话> <消息> | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N]');
+    else console.log('claude-multi chat look <对话> | wait <对话> [--max 分钟] [--note 备注] | wait [<对话>] --until 15:40 [--note 备注] | say <对话> <消息> | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N]');
   } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
 }
 // Before account p continues conversation s: its newest record (and side folder) into p's config dir.
@@ -1200,6 +1210,42 @@ const WEB_PORT = 7788;
 const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus', 'haiku']; // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
 // its 待办.md has something still to do: a "## " section above "## 已完成"
 const todoOpen = (text) => /^## (?!已完成)/m.test(String(text ?? '').split(/^## 已完成/m)[0]);
+// and its parts for the 操作台: each open thing (its 盯着 / 等 / 然后 / 状态 lines), the 已完成 lines (newest first)
+function todoParts(text) {
+  const [open, done = ''] = String(text ?? '').split(/^## 已完成.*$/m);
+  const todos = open.split(/^## /m).slice(1).map((sec) => {
+    const [t, ...ls] = sec.split('\n'), f = (k) => ls.map((l) => new RegExp(`^-\\s*${k}[：:]\\s*(.+)`).exec(l.trim())?.[1]).find(Boolean) ?? '';
+    return { t: t.trim(), watch: f('盯着'), wait: f('等'), then: f('然后'), st: f('状态') };
+  });
+  const lines = [...done.matchAll(/^-\s*(.+)$/gm)].map((m) => m[1].trim()).reverse();
+  return { todos, lines };
+}
+// a 已完成 line's time, "11-03 15:20 …": that moment this year; null without one
+function doneAt(line, now = new Date()) {
+  const m = /^(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})\s+(.+)$/.exec(line);
+  return m ? { at: new Date(now.getFullYear(), m[1] - 1, +m[2], +m[3], +m[4]).getTime(), text: m[5] } : null;
+}
+// The 管家's waits in the background (chat wait), a file each while it runs; one whose process is gone (a restart
+// ended it) is dropped. The soonest first.
+const WAITS = path.join(ROOT, 'waits');
+function waitsNow(dir = WAITS) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch {}
+  const out = [];
+  for (const n of names) {
+    const p = path.join(dir, n);
+    try { const j = JSON.parse(fs.readFileSync(p, 'utf8')); if (alive(j.pid)) out.push(j); else fs.rmSync(p, { force: true }); } catch {}
+  }
+  return out.sort((a, b) => (a.until ?? Infinity) - (b.until ?? Infinity) || a.at - b.at);
+}
+// What the 管家 did (or you, from its cards), for the 操作台's 今天: a line each, the file kept short
+const BLOG = path.join(ROOT, 'butler-log.jsonl');
+function blog(text, id = null, who = 'butler') {
+  try {
+    fs.appendFileSync(BLOG, JSON.stringify({ at: Date.now(), text, id, who }) + '\n');
+    if (fs.statSync(BLOG).size > 262144) fs.writeFileSync(BLOG, fs.readFileSync(BLOG, 'utf8').split('\n').slice(-1000).join('\n'));
+  } catch {}
+}
 // The server, from tunnel.json here (not in the repository): {"ssh": "myserver", "url": "https://<its address>:8443"}.
 // Without it there is no tunnel: the page opens on this computer only. sock: the tunnel's end on the server.
 let TUNNEL = null;
@@ -1664,7 +1710,18 @@ async function web() {
     return { cpu: cpuPct, mem: os.totalmem() - os.freemem(), memAll: os.totalmem() };
   };
   // and what it keeps watching: its 待办.md's sections above 「## 已完成」
-  const todoList = () => { try { return [...fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8').split(/^## 已完成/m)[0].matchAll(/^## (.+)$/gm)].map((m) => m[1].trim()); } catch { return []; } };
+  // today, newest first: the conversations' notes (not the 管家's own), what it did, the 待办 things done (with a time)
+  const timeline = (doneLines) => {
+    const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+    const t0 = d0.getTime(), mine = new Set(sessions().filter((x) => sameDir(x.cwd, BUTLER)).map((x) => x.id)), out = [];
+    for (const n of readNotes(200)) if (n.at >= t0 && !mine.has(n.id) && n.title !== '管家')
+      out.push({ at: n.at, kind: n.kind, id: n.id, text: `${n.title || n.project || 'Claude'} ${n.kind === 'ask' ? '在等你确认' : '回复完了'}` });
+    let log = ''; try { log = fs.readFileSync(BLOG, 'utf8'); } catch {}
+    for (const l of log.split('\n')) try { const j = l && JSON.parse(l); if (j?.at >= t0) out.push({ ...j, kind: j.who }); } catch {}
+    for (const l of doneLines) { const d = doneAt(l); if (d && d.at >= t0) out.push({ at: d.at, kind: 'todo', text: `完成：${d.text}` }); }
+    return out.sort((a, b) => b.at - a.at).slice(0, 30);
+  };
+  let tokAt = 0, tokCache = null;
   // the model it starts with: its folder's settings.local.json (chosen on the page) over settings.json
   const butlerModel = () => { for (const n of ['settings.local.json', 'settings.json']) try { const m = JSON.parse(fs.readFileSync(path.join(BUTLER, '.claude', n), 'utf8')).model; if (m) return m; } catch {} return null; };
   const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
@@ -1685,7 +1742,13 @@ async function web() {
       fs.writeFileSync(f, JSON.stringify({ ...j, model: b.model }, null, 2));
       return { model: b.model };
     },
-    'POST /api/pick': async (q, b) => { try { return { label: await pickOn(String(b.id), b.n, b.ask, 'you') }; } finally { asks.delete(String(b.id)); } },
+    'POST /api/pick': async (q, b) => {
+      try {
+        const label = await pickOn(String(b.id), b.n, b.ask, 'you');
+        blog(`你在卡片上给「${sessions().find((x) => x.id === b.id)?.title ?? '一个对话'}」选了「${label}」`, String(b.id), 'you');
+        return { label };
+      } finally { asks.delete(String(b.id)); }
+    },
     // the quota as last read, at once: reading it again (each account's, over the network) takes a second or
     // more, so one over a minute old is read again in the background, for the next look. That read goes abroad
     // through this computer's proxy, and hung the page for up to 20 s while its node was bad: 刷新 (?fresh) waits
@@ -1701,9 +1764,12 @@ async function web() {
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerModel(), todo: todoList(), pc: pcNow() };
+      let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
+      const tp = todoParts(tx);
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerModel(), pc: pcNow(),
+        todo: tp.todos.map((x) => x.t), todos: tp.todos, todoDone: tp.lines.slice(0, 5), timeline: timeline(tp.lines), waits: waitsNow() };
     },
-    'GET /api/tokens': () => tokenStats(),
+    'GET /api/tokens': () => { if (!tokCache || Date.now() - tokAt > 30000) { tokCache = tokenStats(); tokAt = Date.now(); } return tokCache; },
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
     'POST /api/push/sub': (q, b) => { // a page's subscription, one per endpoint
       if (!/^https:\/\/[^/]+\//.test(b.endpoint ?? '') || !b.keys?.p256dh || !b.keys?.auth) throw new Error('通知订阅不完整');
@@ -2060,8 +2126,8 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   fs.writeFileSync(tmp, JSON.stringify({ v: 3, files: next }));
   try { fs.renameSync(tmp, cacheFile); } catch { fs.rmSync(tmp, { force: true }); } // held open by another run: it saves
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
-  const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0 });
-  const add = (t, x, usd) => { t.i += x[2]; t.o += x[3]; t.cw += x[4] + x[5]; t.cr += x[6]; t.usd += usd; };
+  const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 });
+  const add = (t, x, usd) => { t.i += x[2]; t.o += x[3]; t.cw += x[4] + x[5]; t.cr += x[6]; t.usd += usd; t.n++; };
   const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0 }));
   for (const { x, ri } of best.values()) {
     const usd = replyCost(x), t = (days[x[1]] ??= { d: x[1], ...zero(), by: roots.map(zero) });
@@ -2108,7 +2174,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { parseUntil, todoOpen, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { parseUntil, todoOpen, todoParts, doneAt, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

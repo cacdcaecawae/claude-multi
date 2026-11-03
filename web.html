@@ -289,6 +289,36 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .meter > i { background: var(--green); transition: width .4s; }
   .desk .meter > i.warn { background: var(--orange); } .desk .meter > i.bad { background: var(--red); }
   @media (hover: hover) { .desk .item[data-open]:hover { background: var(--hover); } }
+  .desk .todo { margin: 0 0 8px; padding: 9px 10px; border: 1px solid var(--cardB); border-radius: 10px; background: var(--bg); }
+  .desk .todo .tt { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 4px; }
+  .desk .todo .tt b { flex: 1; min-width: 0; color: var(--fgHi); font-weight: 600; }
+  .desk .todo .ln { display: flex; gap: 6px; font-size: 12px; color: var(--fg2); margin-top: 2px; min-width: 0; }
+  .desk .todo .ln > span:first-child { flex: none; color: var(--fg3); width: 2.4em; }
+  .desk .todo .ln > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .todo [data-open] { color: var(--link); cursor: pointer; }
+  .desk .st { flex: none; font-size: 11px; padding: 0 6px; border-radius: 8px; line-height: 18px; background: var(--tint); color: var(--fg2); }
+  .desk .st.wait { color: var(--a1); } .desk .st.run { color: var(--orange); } .desk .st.bad { color: var(--red); } .desk .st.ok { color: var(--green); }
+  .desk .doneL { font-size: 12px; color: var(--fg3); padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #deskAdd { display: flex; gap: 6px; margin-top: -10px; padding: 0 2px; }
+  #deskAdd input { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 6px 9px; border-radius: 8px; border: 1px dashed var(--inputB); background: var(--bg); color: var(--fg); }
+  #deskAdd input:focus { outline: none; border-style: solid; border-color: var(--accent); }
+  #deskAdd button { flex: none; font-size: 12px; padding: 0 10px; border-radius: 8px; background: var(--btn); }
+  .desk .ev { display: flex; gap: 8px; padding: 3px 6px; font-size: 12px; position: relative; }
+  .desk .ev .when { flex: none; width: 36px; color: var(--fg3); font-variant-numeric: tabular-nums; }
+  .desk .ev i { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; background: var(--fg3); }
+  .desk .ev.k-done i { background: var(--green); } .desk .ev.k-ask i { background: var(--orange); } .desk .ev.k-butler i { background: #d97757; }
+  .desk .ev.k-you i { background: var(--a1); } .desk .ev.k-todo i { background: var(--purple); }
+  .desk .ev .t { flex: 1; min-width: 0; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .ev.new .t { color: var(--fgHi); font-weight: 600; }
+  .desk .ev[data-open] { cursor: pointer; border-radius: 6px; }
+  .desk .wt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 12px; }
+  .desk .wt .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .wt .when { flex: none; color: var(--fg3); }
+  .desk .acct .today { font-size: 11.5px; color: var(--fg2); margin-bottom: 2px; }
+  /* quick questions over the 管家's input box */
+  .send .quick { display: flex; gap: 6px; padding: 0 2px 6px; overflow-x: auto; scrollbar-width: none; }
+  .send .quick button { flex: none; font-size: 12px; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--cardB); background: var(--bg); color: var(--fg2); }
+  @media (hover: hover) { .send .quick button:hover { color: var(--fgHi); border-color: var(--accent); } .desk .ev[data-open]:hover { background: var(--hover); } }
   #deskR { display: none; width: 280px; flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: var(--bar); }
   @media (min-width: 1280px) { #app.butler #deskR { display: flex; } }
   .desk .acct { padding: 8px 6px 4px; }
@@ -556,7 +586,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <aside id="side"><div class="sideHead"><span id="sideTitle">对话</span><div id="sideActs"></div></div><div id="view"><div class="empty">加载中…</div></div></aside>
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
-  <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><div id="deskRun"></div><div id="deskAcct"></div><div id="deskDone"></div><div id="deskPc"></div></aside>
+  <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form><div id="deskRun"></div><div id="deskAcct"></div><div id="deskWait"></div><div id="deskLog"></div><div id="deskPc"></div></aside>
   <main id="butler" class="blank"><div id="deskLine"></div><div id="asks"></div><div class="hint"></div></main>
   <aside id="deskR" class="desk"></aside>
 </div>
@@ -638,11 +668,12 @@ const NARROW = matchMedia('(max-width: 759px)');
 const FINE = matchMedia('(pointer: fine)').matches, FONT = FINE ? 14 : 13; // FINE: a computer's mouse and keyboard
 const saved = (() => { try { return JSON.parse(localStorage.getItem('cm-layout')) ?? {}; } catch { return {}; } })();
 let side = ['chats', 'usage', 'tokens'].includes(saved.side) ? saved.side : 'chats', sideOn = saved.sideOn ?? true, sideW = saved.sideW ?? 300;
-let state = null, tokens = null, tokensNow = null, groups = [], focusG = null, drag = null, restored = false;
+let state = null, tokens = null, tokensNow = null, tokensAt = 0, groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
 let listMode = saved.listMode === 'run' ? 'run' : 'dirs'; // 对话: by folder, or (the bell) 提示 and the running ones
 let butler = !!saved.butler, bConv = null; // 管家 mode (the spark), and its conversation once there is one
 $('#app').classList.toggle('butler', butler);
+$('#act .logo .label').textContent = butler ? '退出管家' : '管家'; // reloaded in it: says what the spark does
 function save() { // not before the tabs are back: a first load that failed would forget them
   if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, folded: [...folded], listMode, butler, focus: groups.indexOf(focusG),
     groups: groups.map((g) => ({ size: g.size, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
@@ -882,9 +913,28 @@ function flipButler(on) {
   logo.querySelector('.ring circle').onanimationend = () => { if (logo.classList.contains('hold')) { letGo(); heldAt = Date.now(); flipButler(!butler); } };
   logo.title = '长按进入管家';
 }
+const QUICK = ['大家都怎么样', '谁在等我', '今天做了什么', '额度还够吗'], HAND = '请记进待办并盯着：';
+$('#deskAdd').onsubmit = (e) => {
+  e.preventDefault();
+  const i = $('#deskAdd input'), v = i.value.trim();
+  if (!v) return i.focus();
+  if (!bConv || bConv.ended || !bConv.started) return toast('管家没在运行：先启动它，或点「接着聊」');
+  bConv.say(HAND + v); i.value = '';
+};
 function mountButler(c) {
   // its account and model, by its input box (drawn in drawDesk)
-  if (!c.el.querySelector('.bsel')) c.el.querySelector('.send .box').insertAdjacentHTML('beforeend', '<div class="bsel"><button data-act="acct"></button><button data-act="model"></button></div>'); bConv = c; $('#butler').append(c.el); if (butler) { c.wake(); if (FINE) c.focus(); } }
+  if (!c.el.querySelector('.bsel')) {
+    c.el.querySelector('.send .box').insertAdjacentHTML('beforeend', '<div class="bsel"><button data-act="acct"></button><button data-act="model"></button></div>');
+    c.el.querySelector('.send').insertAdjacentHTML('afterbegin', `<div class="quick">${QUICK.map((q) => `<button>${q}</button>`).join('')}<button data-hand>交代一件事…</button></div>`);
+    c.el.querySelector('.quick').onclick = (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.hand == null) return c.say(b.textContent);
+      const t = c.el.querySelector('.send textarea'); // a phone has no 操作台: the words to begin with, yours after
+      if (!t.value.startsWith(HAND)) t.value = HAND + t.value; // what you'd written becomes the thing
+      t.focus(); t.setSelectionRange(t.value.length, t.value.length);
+    };
+  } bConv = c; $('#butler').append(c.el); if (butler) { c.wake(); if (FINE) c.focus(); } }
 function drawButler() {
   if (!butler || !state) return;
   const bs = state.sessions.find(isButler); // the newest
@@ -976,21 +1026,41 @@ function drawDesk() {
   const status = !up ? '没在运行' : bConv?.live === 'ask' || me?.wait ? '在等你回答' : thinking ? '在回复' : '空闲';
   $('#deskMe').html = `<div class="me${thinking ? ' busy' : ''}">${SPARK}<div><b>管家</b><div class="sub">${status}${up && acct ? ` · 账号 ${acct}` : ''}</div></div></div>
     <div class="mood"><span>${face}</span>${esc(word)}</div>`;
-  $('#deskTodo').html = `<h4>在管的事${todo.length ? `<b class="count">${todo.length}</b>` : ''}</h4>${todo.length
-    ? todo.map((t) => `<div class="item"><i class="pt"></i><span class="t" title="${esc(t)}">${esc(t)}</span></div>`).join('')
-    : '<div class="none">还没交代它盯什么。跟它说「盯着某个对话，做完告诉我」试试</div>'}`;
+  // each thing it keeps: watching what (a link when it's a conversation's name), waiting for what, then what, how far
+  const todos = state.todos ?? todo.map((t) => ({ t })), byName = (w) => { const n = String(w ?? '').replace(/[（(].*$/, '').trim(); return n && state.sessions.find((x) => x.title === n); };
+  const stCls = (st) => (/卡|失败|出错|问题/.test(st) ? 'bad' : /等/.test(st) ? 'wait' : /进行|正在|在跑|跑着/.test(st) ? 'run' : /完成|好了/.test(st) ? 'ok' : '');
+  const ln = (k, v, open) => (v ? `<div class="ln"><span>${k}</span><span${open ? ` data-open="${esc(open.id)}"` : ''} title="${esc(v)}">${esc(v)}</span></div>` : '');
+  $('#deskTodo').html = `<h4>在管的事${todos.length ? `<b class="count">${todos.length}</b>` : ''}</h4>${todos.length
+    ? todos.map((x) => `<div class="todo"><div class="tt"><b>${esc(x.t)}</b>${x.st ? `<span class="st ${stCls(x.st)}">${esc(x.st.replace(/[（(].*$/, ''))}</span>` : ''}</div>
+      ${ln('盯着', x.watch, byName(x.watch))}${ln('等', x.wait)}${ln('然后', x.then)}</div>`).join('')
+    : '<div class="none">还没交代它盯什么。在下面写一件，或者跟它说「盯着某个对话，做完告诉我」</div>'}
+    ${(state.todoDone ?? []).slice(0, 3).map((l) => `<div class="doneL" title="${esc(l)}">✓ ${esc(l)}</div>`).join('')}`;
   const tag = (x) => (x.wait ? '<span class="tag wait">等你</span>' : x.busy ? '<span class="spin" title="正在回复"></span>' : '<span class="tag">空闲</span>');
   $('#deskRun').html = `<h4>对话</h4><div class="counts"><span class="wait"><b>${wait.length}</b>等你</span><span><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
     ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" title="${esc(x.cwd)}"><i class="ad" style="background:${ACCT[x.acct % 4]}"></i><span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
+  if (!tokensNow && Date.now() - tokensAt > 120000) {
+    tokensAt = Date.now();
+    tokensNow = fetch('/api/tokens').then((r) => r.json()).then((t) => { tokens = t; setTimeout(drawDesk); return t; }).finally(() => { tokensNow = null; });
+  }
+  const today = tokens?.days?.find((d) => d.d === tokens.today), all = (d) => (d ? d.i + d.o + d.cw + d.cr : 0);
   const u = state.usage, gauge = (k, p, v) => `<div class="gauge"><div class="k"><span>${k}</span><span>${v}</span></div><div class="meter"><i class="${p >= 85 ? 'bad' : p >= 60 ? 'warn' : ''}" style="width:${Math.min(100, p)}%"></i></div></div>`;
-  $('#deskAcct').html = u.accounts?.length ? `<h4>账号</h4>${u.accounts.map((a, i) => {
+  $('#deskAcct').html = u.accounts?.length ? `<h4>账号${today ? ` · 今天共 ${fmtTok(all(today))} token` : ''}</h4>${u.accounts.map((a, i) => {
     const on = state.sessions.filter((x) => x.pid && x.acct === i).length;
     return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}<span class="grow"></span><span class="m">${a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
       ${a.err ? '' : (a.windows ?? []).filter((w) => w.k === 'five_hour' || w.k === 'seven_day').map((w) => gauge(w.k === 'five_hour' ? '5 小时' : '7 天', w.pct, `${w.pct}% · ${esc(w.reset)}后重置`)).join('')}
+      ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · 约 ${usd(today.by[i].usd)}</div>` : ''}
       <div class="m">${on ? `${on} 个对话在用` : '没有对话在用'}</div></div>`;
   }).join('')}` : '';
-  const done = notesOut().filter((n) => n.kind === 'done' && n.id).slice(0, 5);
-  $('#deskDone').html = done.length ? `<h4>刚做完</h4>${done.map((n) => `<div class="item" data-open="${esc(n.id)}"><span class="t">${esc(n.title || n.project || 'Claude')}</span><span class="when">${ago(n.at)}</span></div>`).join('')}` : '';
+  const hm = (t) => new Date(t).toTimeString().slice(0, 5), mins = (ms) => (ms < 60000 ? '不到 1 分钟' : ms < 3600000 ? `${Math.round(ms / 60000)} 分钟` : `${(ms / 3600000).toFixed(1)} 小时`);
+  const waits = state.waits ?? [];
+  $('#deskWait').html = `<h4>提醒和后台等待${waits.length ? `<b class="count">${waits.length}</b>` : ''}</h4>${waits.length ? waits.map((w) => w.until
+    ? `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="when">还有 ${mins(w.until - Date.now())}</span></div>`
+    : `<div class="wt"${w.id ? ` data-open="${esc(w.id)}"` : ''}><span>⏳</span><span class="t">等「${esc(w.title ?? '')}」${w.note ? ' · ' + esc(w.note) : ''}</span><span class="when">已等 ${mins(Date.now() - w.at)}</span></div>`).join('')
+    : '<div class="none">现在没有。跟管家说「15:40 提醒我看额度」试试</div>'}`;
+  const unread = new Set(notesOut().map((n) => n.id)), mine = butlerIds(), tl = state.timeline ?? [];
+  $('#deskLog').html = `<h4>今天</h4>${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id);
+    return `<div class="ev k-${esc(e.kind)}${e.kind === 'done' && unread.has(e.id) ? ' new' : ''}"${open ? ` data-open="${esc(e.id)}"` : ''}><span class="when">${hm(e.at)}</span><i></i><span class="t" title="${esc(e.text)}">${esc(e.text)}</span></div>`; }).join('')
+    : '<div class="none">今天还没有动静</div>'}`;
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
   $('#deskPc').html = pc ? `<h4>这台电脑</h4>${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
   const sel = bConv?.el.querySelector('.bsel');
@@ -998,7 +1068,7 @@ function drawDesk() {
   $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${todo.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
 }
 $('#desk').onclick = $('#deskR').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
-const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskAcct', 'deskDone', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id)); };
+const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskAcct', 'deskWait', 'deskLog', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id)); };
 WIDE.addEventListener('change', placeDesk); placeDesk();
 function startButler(acct = startAcct || (state.usage.rec ?? 0) + 1) {
   if (!state?.butler) return toast('网页服务还是旧版本，重启后才能启动管家', 4000);
@@ -1896,6 +1966,7 @@ function makeConv(body, title) {
     setView(view);
   };
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(histTimer); gen++; es?.close(); es = null; c.live = ''; readNote(c.id); };
+  c.say = (text) => { const d = line.value, a = atts; line.value = text; atts = []; go.onclick(); line.value = d; atts = a; drawAtts(); grow(); };
   c.close = () => { c.closed = true; c.sleep(); ro.disconnect(); clearTimeout(liveT); clearTimeout(fitT); term?.dispose(); term = null; key = null; switching = 0; el.remove(); };
   c.claim = claim;
   c.where = () => (key && !c.ended ? kind : null); // 'pc' a window on the computer, 'pty' the web service
