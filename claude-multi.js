@@ -1430,7 +1430,8 @@ async function web() {
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname() };
+      // butler: the folder the page's 管家 runs in (its CLAUDE.md beside this file); its newest conversation is the 管家
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: path.join(__dirname, 'butler') };
     },
     'GET /api/tokens': () => tokenStats(),
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),

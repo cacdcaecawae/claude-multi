@@ -58,7 +58,10 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 
   /* activity bar | side bar | editor groups, a status bar under them */
   #act { width: 48px; flex: none; display: flex; flex-direction: column; align-items: center; border-right: 1px solid var(--border); background: var(--act); }
-  #act .logo { width: 24px; height: 24px; margin: 12px 0 8px; color: #d97757; }
+  #act .logo { margin: 6px 0 4px; color: #d97757 !important; } /* 管家: in and out of it */
+  #act .logo .spark { width: 24px; height: 24px; }
+  #app.butler #act .logo { background: var(--tint); }
+  #app.butler #act button[data-side].on { background: none; color: var(--fg3); }
   .spark { display: block; width: 100%; height: 100%; }
   #act button { position: relative; width: 40px; height: 40px; margin: 2px 0; border-radius: 8px; display: grid; place-items: center; color: var(--fg3); }
   #act button:hover, #act button.on { color: var(--fg); }
@@ -216,6 +219,22 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hint .spark { width: 96px; height: 96px; color: var(--fg3); opacity: .22; margin-bottom: 4px; }
   #editor > .group:only-child [data-shut] { display: none; }
 
+  /* 管家: its conversation, and a board of the others (who waits for you, who answers, who runs), in place of the side
+     bar and the groups (they stay as they were, asleep, for the way back) */
+  #butler { display: none; flex: 1; min-width: 0; gap: 6px; }
+  #app.butler #butler { display: flex; }
+  #app.butler #side, #app.butler #sideSash, #app.butler #editor { display: none !important; }
+  .bHead { display: none; }
+  #bChat { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+  #bChat.blank > .hint { display: flex; }
+  .hint .bt { font-size: 18px; font-weight: 600; color: var(--fgHi); margin-top: -6px; }
+  #bBoard { width: 340px; flex: none; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bar); }
+  #bView { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 16px; }
+  #bBoard .sideHead > span { flex: 1; }
+  .quota { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 2px 20px 10px; font-size: 12px; color: var(--fg2); cursor: pointer; }
+  .quota span { display: inline-flex; align-items: center; gap: 6px; }
+  #bView .empty { padding: 8px 20px 10px; text-align: left; font-size: 12px; }
+
   /* a conversation: where it is, the record (对话) or the terminal (终端), the input */
   .pane { flex: 1; min-height: 0; display: none; flex-direction: column; }
   .pane.on { display: flex; }
@@ -359,6 +378,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     .sash { width: 6px; margin: 0; background: none !important; }
     .sash::after { content: ''; position: absolute; top: 12px; bottom: 12px; left: 2px; width: 2px; border-radius: 1px; transition: background .1s .1s; }
     .sash:hover::after, .sash.drag::after { background: var(--accent); }
+    #bChat, #bBoard { border: 1px solid var(--cardB); border-radius: 10px; overflow: hidden; }
+    #app.butler #act { margin-right: 6px; border-right: 1px solid var(--cardB); border-radius: 10px; } /* on its own: the side bar's hidden */
   }
 
   /* a phone: one group; the side bar over it under the tab strip, the activity bar at the bottom */
@@ -368,7 +389,19 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     #act { position: fixed; z-index: 7; left: 0; right: 0; bottom: 0; width: auto; flex-direction: row; display: none; border: 0;
       border-top: 1px solid var(--border); background: var(--bar); padding-bottom: env(safe-area-inset-bottom); }
     #app.side #act { display: flex; }
-    #act .logo { display: none; }
+    /* 管家: the bottom bar's first item, and the bar stays while in it (but under the keyboard, typing) */
+    #act .logo { margin: 0; } #act .logo .spark { width: 22px; height: 22px; } #act .logo .label { color: var(--fg3); }
+    #app.butler #act { display: flex; } #app.butler #act .logo .label { color: var(--fg); }
+    #butler { flex-direction: column; gap: 0; padding-bottom: calc(53px + env(safe-area-inset-bottom)); }
+    #app.butler:has(#butler textarea:focus) #act { display: none; }
+    #app.butler:has(#butler textarea:focus) #butler { padding-bottom: 0; }
+    #butler .send { padding-bottom: 8px; }
+    .bHead { display: flex; align-items: center; justify-content: space-between; height: 46px; flex: none; padding: 0 10px 0 16px; background: var(--bar); border-bottom: 1px solid var(--border); }
+    .bHead b { font-size: 16px; color: var(--fgHi); }
+    #bBoard { width: auto; flex: 1; }
+    #bBoard .sideHead { display: none; }
+    #butler:not(.board) #bBoard, #butler.board #bChat { display: none; }
+    #bView { padding-top: 10px; }
     #act button { flex: 1; height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
     #act .label { display: block; font-size: 11px; }
     #act svg { width: 22px; height: 22px; }
@@ -439,7 +472,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 <body>
 <div id="app" class="side">
   <nav id="act">
-    <span class="logo"></span>
+    <button class="logo" title="管家"><span class="label">管家</span></button>
     <button data-side="chats" title="对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4z"/></svg><span class="label">对话</span><b id="badge" hidden></b></button>
     <button data-side="usage" title="额度"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg><span class="label">额度</span></button>
     <button data-side="tokens" title="用量"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 19V11M10 19V6M15 19v-9M20 19v-5"/></svg><span class="label">用量</span></button>
@@ -448,6 +481,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <aside id="side"><div class="sideHead"><span id="sideTitle">对话</span><div id="sideActs"></div></div><div id="view"><div class="empty">加载中…</div></div></aside>
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
+  <main id="butler"><div class="bHead"><b>管家</b><div class="seg"><button data-bv="chat" class="on">对话</button><button data-bv="board">看板</button></div></div>
+    <section id="bChat" class="blank"><div class="hint"></div></section>
+    <aside id="bBoard"><div class="sideHead"><span>看板</span><div id="bActs"></div></div><div id="bView"></div></aside></main>
 </div>
 <footer id="status"><span class="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span id="host">…</span></span>
   <span id="conn"></span><span class="grow"></span><span id="here"></span><button id="sAcct" title="看额度"></button></footer>
@@ -516,7 +552,7 @@ const ac = (n, cls = '') => {
 // Claude's spark, as the icon draws it, in currentColor
 const SPARK = `<svg class="spark" viewBox="-32 -32 64 64" fill="currentColor">${[29, 24, 27, 23, 30, 25, 27, 23, 28, 24, 27, 22].map((l, k) =>
   `<path transform="rotate(${k * 30 + 8 + [0, 2, -1, 1, -1, -2, 1, 1, -1, 2, 0, -1][k]})" d="M-4.7 0L-2.5 -${l}A2.5 2.5 0 0 1 2.5 -${l}L4.7 0z"/>`).join('')}<circle r="7.6"/></svg>`;
-$('#act .logo').innerHTML = SPARK;
+$('#act .logo').insertAdjacentHTML('afterbegin', SPARK);
 
 // --- the layout, as in VS Code: the activity bar picks what the side bar shows (对话, 额度, 用量); conversations open as
 // tabs in an editor group, and 向右拆分 puts groups side by side (three at most). A phone shows one group, the side bar
@@ -528,12 +564,14 @@ let side = ['chats', 'usage', 'tokens'].includes(saved.side) ? saved.side : 'cha
 let state = null, tokens = null, tokensNow = null, groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
 let listMode = saved.listMode === 'run' ? 'run' : 'dirs'; // 对话: by folder, or (the bell) 提示 and the running ones
+let butler = !!saved.butler, bConv = null; // 管家 mode (the spark), and its conversation once there is one
+$('#app').classList.toggle('butler', butler);
 function save() { // not before the tabs are back: a first load that failed would forget them
-  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, folded: [...folded], listMode, focus: groups.indexOf(focusG),
+  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, folded: [...folded], listMode, butler, focus: groups.indexOf(focusG),
     groups: groups.map((g) => ({ size: g.size, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
 }
 const allConvs = () => groups.flatMap((g) => g.tabs), convOf = (id) => id && allConvs().find((c) => c.id === id);
-const shownConvs = () => groups.map((g) => g.active).filter(Boolean);
+const shownConvs = () => (butler ? [bConv] : groups.map((g) => g.active)).filter(Boolean); // live: in 管家, its conversation only
 
 // Like the island: one account to the end, a conversation continues on its own account. Only when that one has
 // under an hour left and the recommended one has more, a sheet asks first (accounts don't share their prompt
@@ -601,7 +639,7 @@ async function pushDisable() {
 
 async function load(fresh) {
   try {
-    const view = document.visibilityState === 'visible' && !(NARROW.matches && sideOn) ? shownConvs().map((c) => c.id).filter(Boolean).join(',') : '';
+    const view = document.visibilityState === 'visible' && (butler || !(NARROW.matches && sideOn)) ? shownConvs().map((c) => c.id).filter(Boolean).join(',') : '';
     const s = await (await fetch('/api/state?' + new URLSearchParams({ ...(fresh && { fresh: 1 }), ...(view && { view }) }))).json();
     if (s.err) throw new Error(s.err);
     state = s; $('#status').classList.remove('off');
@@ -613,8 +651,9 @@ async function load(fresh) {
   if (!restored) restore();
   if (openAsked) { const id = openAsked; openAsked = null; openSession(id); } // a notification tapped
   for (const c of allConvs()) c.sync();
+  bConv?.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
-  drawStatus(); drawHere();
+  drawButler(); drawStatus(); drawHere();
   return ''; // read: no error
 }
 function drawSide() {
@@ -638,7 +677,7 @@ function drawStatus() {
 // request; past it the next message writes the conversation to the cache again, at more quota).
 const HOUR = 3600000;
 function drawHere() {
-  const c = focusG?.active, s = c?.id ? state?.sessions.find((x) => x.id === c.id) : null, el = $('#here');
+  const c = butler ? bConv : focusG?.active, s = c?.id ? state?.sessions.find((x) => x.id === c.id) : null, el = $('#here');
   if (!c || !state) return void (el.innerHTML = '');
   const tone = (p) => (p >= 80 ? 'bad' : p >= 50 ? 'warn' : 'ok'), w = c.where(), line = s?.line;
   const a = state.usage.accounts?.[c.acct - 1], five = a?.windows?.find((x) => x.k === 'five_hour')?.pct;
@@ -656,10 +695,15 @@ setInterval(drawHere, 30000);
 function markRows() { // the side bar's rows: which are open in a tab, which one you're looking at
   const sel = focusG?.active?.id;
   document.querySelectorAll('#view [data-open]').forEach((r) => { r.classList.toggle('sel', r.dataset.open === sel); r.classList.toggle('open', !!convOf(r.dataset.open)); });
-  document.title = focusG?.active ? `${focusG.active.title} — Claude 多账号` : 'Claude 多账号';
+  document.title = butler ? '管家 — Claude 多账号' : focusG?.active ? `${focusG.active.title} — Claude 多账号` : 'Claude 多账号';
   drawHere();
 }
 
+// a folding section (kept folded across redraws), and an unread notification's row
+const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
+const noteRow = (n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
+  <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
+  <span class="when">${ago(n.at)}</span></div>`;
 // 对话, newest first (by its record's last write): by folder, the folders by their newest; or, behind the bell, the unread
 // 提示 and the running ones, with their folder on a second line
 function renderChats() {
@@ -671,14 +715,11 @@ function renderChats() {
     <div class="main"><div class="t">${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${right(x)}</div>`;
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1)}
     <div class="main t">${esc(x.title)}</div>${right(x)}</div>`;
-  const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').html = `<button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   if (bell) {
     $('#view').html = (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
-        notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
-          <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
-          <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
+        notes.map(noteRow).join('')) : '')
       + sec('run', `<span>运行中<b class="count">${run.length}</b></span>`, run.length ? run.map(row).join('') : '<div class="empty">没有在运行的对话</div>');
   } else {
     const dirs = new Map();
@@ -704,7 +745,7 @@ $('#side').onclick = (e) => {
   const r = e.target.closest('[data-open]'); // ctrl/⌘-click or its icon: to the side, as in VS Code
   if (r) openSession(r.dataset.open, e.target.closest('[data-aside]') || e.ctrlKey || e.metaKey ? 'aside' : undefined);
 };
-$('#view').addEventListener('toggle', (e) => {
+for (const v of ['#view', '#bView']) $(v).addEventListener('toggle', (e) => {
   const k = e.target.dataset?.sec, was = folded.has(k);
   if (!k) return;
   if (e.target.open) folded.delete(k); else folded.add(k);
@@ -716,13 +757,73 @@ $('#view').ondragend = (e) => {
   if (drag?.id && e.dataTransfer.dropEffect === 'none' && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 24) openSession(drag.id);
 };
 $('#act').onclick = (e) => {
+  if (e.target.closest('.logo')) return setButler(!butler);
   const b = e.target.closest('[data-side]');
   if (!b) return;
-  if (b.dataset.side === side && sideOn && !NARROW.matches) sideOn = false; // the shown one again: the side bar closes
+  if (b.dataset.side === side && sideOn && !NARROW.matches && !butler) sideOn = false; // the shown one again: the side bar closes
   else { if (b.dataset.side === 'tokens' && side !== 'tokens') tokens = null; side = b.dataset.side; sideOn = true; }
-  drawSide(); save();
+  setButler(false); drawSide(); save();
 };
-$('#sAcct').onclick = () => { side = 'usage'; sideOn = true; drawSide(); save(); };
+$('#sAcct').onclick = () => { setButler(false); side = 'usage'; sideOn = true; drawSide(); save(); };
+
+// --- 管家: the newest conversation in its folder (state.butler) is the 管家, shown on the left; the board on the right
+// lists the others, from the same state the side bar draws. Out of it, the groups are as they were, woken again.
+const norm = (p) => String(p ?? '').replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+const isButler = (s) => !!state?.butler && norm(s.cwd) === norm(state.butler);
+function setButler(on) {
+  if (butler === on) return;
+  butler = on; $('#app').classList.toggle('butler', on);
+  for (const g of groups) if (g.active) on ? g.active.sleep() : g.active.wake();
+  if (bConv) on ? bConv.wake() : bConv.sleep();
+  if (on) { drawButler(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
+  markRows(); save();
+}
+function mountButler(c) { bConv = c; $('#bChat').append(c.el); if (butler) { c.wake(); if (FINE) c.focus(); } }
+function drawButler() {
+  if (!butler || !state) return;
+  const bs = state.sessions.find(isButler); // the newest
+  if (!bConv && bs) mountButler(makeConv({ id: bs.id }, bs.title));
+  $('#bChat').classList.toggle('blank', !bConv);
+  if (!bConv) $('#bChat > .hint').html = `${SPARK}<div class="bt">管家</div><div>替你看着所有对话：谁在等你、谁在回复、谁做完了。</div>
+    <div class="btns"><button class="btn primary" data-bstart>用账号 ${(state.usage.rec ?? 0) + 1} 启动管家</button></div>`;
+  const S = state.sessions.filter((s) => !isButler(s)), mine = new Set(state.sessions.filter(isButler).map((s) => s.id));
+  const notes = (state.notes ?? []).filter((n) => !mine.has(n.id)), busy = S.filter((s) => s.busy), idle = S.filter((s) => s.pid && !s.busy);
+  const row = (x) => `<div class="row" data-open="${esc(x.id)}" title="${esc(x.cwd)}">${ac(x.acct + 1)}
+    <div class="main"><div class="t">${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>
+    ${x.busy ? '<span class="spin" title="正在回复"></span>' : `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>`}</div>`;
+  const u = state.usage, list = (a, none) => (a.length ? a.map(row).join('') : `<div class="empty">${none}</div>`);
+  $('#bActs').html = `<button class="ico" data-brefresh title="刷新">${svg(I.refresh)}</button>`;
+  $('#bView').html = `<div class="quota" data-quota title="看额度"><span>5 小时已用</span>${u.accounts.map((a, i) => {
+      const w = a.windows?.find((x) => x.k === 'five_hour');
+      return `<span>${ac(i + 1)}${a.err ? '读不到' : `${w?.pct ?? 0}%`}${u.rec === i && u.open ? '<b class="rec">推荐</b>' : ''}</span>`;
+    }).join('')}</div>`
+    + sec('b:notes', `<span>等你处理<b class="count">${notes.length}</b></span>${notes.length ? '<button class="link" data-readall>全部已读</button>' : ''}`,
+      notes.length ? notes.map(noteRow).join('') : '<div class="empty">没有要你处理的</div>')
+    + sec('b:busy', `<span>正在回复<b class="count">${busy.length}</b></span>`, list(busy, '没有在回复的'))
+    + sec('b:run', `<span>在运行<b class="count">${idle.length}</b></span>`, list(idle, '没有空闲的'));
+  $('[data-bv=board]').html = `看板${notes.length ? ` <b class="count">${notes.length}</b>` : ''}`; // a phone's switch
+}
+function startButler() {
+  if (!state?.butler) return toast('网页服务还是旧版本，重启后才能启动管家', 4000);
+  mountButler(makeConv({ dir: state.butler, acct: (state.usage.rec ?? 0) + 1 }, '管家')); drawButler();
+}
+$('#bChat > .hint').onclick = (e) => { if (e.target.closest('[data-bstart]')) startButler(); };
+$('#bChat').ondragover = (e) => { if (bConv && !drag && e.dataTransfer.types.includes('Files')) e.preventDefault(); };
+$('#bChat').ondrop = (e) => { e.preventDefault(); if (!drag) bConv?.attach([...e.dataTransfer.files]); };
+$('.bHead').onclick = (e) => {
+  const b = e.target.closest('[data-bv]');
+  if (!b) return;
+  $('#butler').classList.toggle('board', b.dataset.bv === 'board');
+  document.querySelectorAll('[data-bv]').forEach((x) => x.classList.toggle('on', x === b));
+};
+$('#bBoard').onclick = (e) => {
+  const b = e.target.closest('button, .row, [data-quota]');
+  if (!b) return;
+  if (b.matches('[data-brefresh]')) return load().then((err) => toast(err ? `刷新失败：${err}` : '已刷新'));
+  if (b.matches('[data-readall]')) { e.preventDefault(); return post('/api/read', { all: true }).then(() => load(), (x) => toast(x.message)); } // not the fold
+  if (b.matches('[data-quota]')) { setButler(false); side = 'usage'; sideOn = true; drawSide(); return save(); }
+  if (b.dataset.open) openSession(b.dataset.open);
+};
 // narrowed to a phone's width (a tablet split, a window made small): one group, the others' tabs moved into it
 function narrow() {
   if (!NARROW.matches) return;
@@ -1009,6 +1110,7 @@ function sideGroup() {
   return groups[i + 1] ?? (groups.length < 3 ? makeGroup(focusG) : groups[i - 1]);
 }
 async function openSession(id, where) {
+  setButler(false); // from the 管家's board, or a notification tapped there: to the conversation
   const s = state?.sessions.find((x) => x.id === id), have = convOf(id);
   if (!s) return toast('这个对话已经不在列表里了');
   if (have) return where && where !== 'aside' && where !== have.g ? moveConv(have, where) : activate(have.g, have); // open already: that tab
@@ -1031,6 +1133,7 @@ function restore() {
     activate(g, g.tabs.find((c) => c.id === sg.active) ?? g.tabs[0], true);
   }
   relayout(); focusGroup(groups[Math.min(Math.max(0, saved.focus | 0), groups.length - 1)]); narrow();
+  if (butler) for (const g of groups) g.active?.sleep(); // reloaded in 管家: they wait for the way back
 }
 // what a conversation notified, read once you look at it (the island drops it too)
 function readNote(id) {

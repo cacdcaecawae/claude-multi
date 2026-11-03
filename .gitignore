@@ -14,3 +14,5 @@
 !README.md
 !docs/
 !docs/*.png
+!butler/
+!butler/CLAUDE.md
