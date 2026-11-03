@@ -1128,7 +1128,8 @@ function makeConv(body, title) {
   const typed = () => {
     const b = term.buffer.active, rows = [];
     for (let i = 0; i < term.rows; i++) rows.push((b.getLine(b.baseY + i)?.translateToString(true) ?? '').trimEnd()); // Claude pads with spaces
-    const rule = (r) => /^─{20,}$/.test(r), top = rows.findLastIndex((r, i) => rule(r) && /^❯/.test(rows[i + 1] ?? '')), end = rows.findIndex((r, i) => i > top && rule(r));
+    // a rule: a row starting with a long run of ─ (the top one carries the conversation's name when it has one)
+    const rule = (r) => /^─{20,}/.test(r), top = rows.findLastIndex((r, i) => rule(r) && /^❯/.test(rows[i + 1] ?? '')), end = rows.findIndex((r, i) => i > top && rule(r));
     return top < 0 || end < 0 ? '' : rows.slice(top + 1, end).map((r, k) => (k ? r.replace(/^ {2}/, '') : r.replace(/^❯ ?/, ''))).join('\n').trim();
   };
   // 停止: Esc to Claude. Stopped before it took the message in, Claude puts that message back in its own input box, and
@@ -1327,7 +1328,7 @@ function makeConv(body, title) {
     // Claude's input box on the screen (a rule, its ❯ row under it): no menu is up, as one takes the box's place. A
     // "❯ 4. …" above it is a message of yours in the conversation (Claude draws ❯ before those too), or in the box
     // your own words, not a menu's cursor.
-    const inBox = rows.some((r, i) => /^\s*─{20,}\s*$/.test(r) && /^\s*❯/.test(rows[i + 1] ?? ''));
+    const inBox = rows.some((r, i) => /^\s*─{20,}/.test(r) && /^\s*❯/.test(rows[i + 1] ?? '')); // its rule may carry the name
     const opt = (i) => /^\s*(?:❯\s*)?(\d+)\.\s+(.*\S)/.exec(rows[i]), cur = inBox ? -1 : rows.findIndex((r) => /^\s*❯\s*\d+\.\s/.test(r));
     let menu = null;
     if (cur >= 0) {
