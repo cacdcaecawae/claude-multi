@@ -1318,7 +1318,9 @@ async function web() {
     const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`; // the count too: two started in one ms were one key
     shareMemory([[p.configDir, projectFolder(cwd)]]);
     shareMcp(p.configDir); shareTrust(p.configDir);
-    const proc = pty.spawn(claudeExe, args, { name: 'xterm-256color', cols, rows, cwd, env: childEnv(p.configDir) });
+    // TERM: the page's terminal is an xterm. Without it (the service starts hidden, no WT_SESSION) Claude thinks the
+    // console can't draw its symbols and falls back to plain ones: "> No, exit", not "❯", and the page saw no menu
+    const proc = pty.spawn(claudeExe, args, { name: 'xterm-256color', cols, rows, cwd, env: { ...childEnv(p.configDir), TERM: 'xterm-256color' } });
     // pid read live: node-pty only knows it once the pseudo-terminal is ready (it is 0 right after spawn)
     const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, dir: p.configDir,
       resume: args[0] === '--resume' ? args[1] : null };
