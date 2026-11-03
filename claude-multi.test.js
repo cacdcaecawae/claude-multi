@@ -520,3 +520,14 @@ console.log('tokens ok');
   assert.deepEqual(pushText({ kind: 'ask', project: 'helper', msg: 'Claude needs your permission' }), { title: '⏸ helper 等你确认', body: '打开看看它在问什么' });
   console.log('push text ok');
 }
+
+// What Bark gets: the subtitle, a group per conversation, a question time-sensitive with its own sound, a tap's page.
+{
+  const { barkMsg } = require('./claude-multi');
+  assert.deepEqual(barkMsg({ title: '✅ rag检索', body: '跑完了', sub: '智能体rag · 账号 3', group: 'rag检索', id: 'ab' }, 'https://h'),
+    { title: '✅ rag检索', subtitle: '智能体rag · 账号 3', body: '跑完了', group: 'rag检索', icon: 'https://h/icon-180.png', url: 'https://h/?open=ab' });
+  const ask = barkMsg({ title: '⏸ x 等你确认', body: 'b', ask: true });
+  assert.equal(ask.level, 'timeSensitive'); assert.equal(ask.sound, 'bell'); assert.equal(ask.group, 'Claude');
+  assert.ok(!('subtitle' in ask) && !('icon' in ask)); // no line under the title when there's nothing to say; no page link off https
+  console.log('bark ok');
+}
