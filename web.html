@@ -294,9 +294,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .todo { margin: 0 0 8px; padding: 9px 10px; border: 1px solid var(--cardB); border-radius: 10px; background: var(--bg); }
   .desk .todo .tt { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 4px; }
   .desk .todo .tt b { flex: 1; min-width: 0; color: var(--fgHi); font-weight: 600; }
-  .desk .todo .ln { display: flex; gap: 6px; font-size: 12px; color: var(--fg2); margin-top: 2px; min-width: 0; }
-  .desk .todo .ln > span:first-child { flex: none; color: var(--fg3); width: 2.4em; }
-  .desk .todo .ln > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .todo .sum { font-size: 12px; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .todo .wt { padding: 4px 0 0; margin-top: 6px; border-top: 1px dashed var(--border); color: var(--fg2); }
   .desk .todo [data-open] { color: var(--link); cursor: pointer; }
   .desk .st { flex: none; font-size: 11px; padding: 0 6px; border-radius: 8px; line-height: 18px; background: var(--tint); color: var(--fg2); }
   .desk .st.wait { color: var(--a1); } .desk .st.run { color: var(--orange); } .desk .st.bad { color: var(--red); } .desk .st.ok { color: var(--green); }
@@ -593,7 +592,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <aside id="side"><div class="sideHead"><span id="sideTitle">对话</span><div id="sideActs"></div></div><div id="view"><div class="empty">加载中…</div></div></aside>
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
-  <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form><div id="deskRun"></div><div id="deskAcct"></div><div id="deskWait"></div><div id="deskLog"></div><div id="deskPc"></div></aside>
+  <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form><div id="deskLog"></div><div id="deskRun"></div><div id="deskAcct"></div><div id="deskPc"></div></aside>
   <main id="butler" class="blank"><div id="deskLine"></div><div id="peekBar"><button class="back">← 回到管家</button><span class="t"></span></div><div id="asks"></div><div class="hint"></div></main>
   <aside id="deskR" class="desk"></aside>
 </div>
@@ -1051,14 +1050,23 @@ function drawDesk() {
   const status = !up ? '没在运行' : bConv?.live === 'ask' || me?.wait ? '在等你回答' : thinking ? '在回复' : '空闲';
   $('#deskMe').html = `<div class="me${thinking ? ' busy' : ''}">${SPARK}<div><b>管家</b><div class="sub">${status}${up && acct ? ` · 账号 ${acct}` : ''}</div></div></div>
     <div class="mood"><span>${face}</span>${esc(word)}</div>`;
-  // each thing it keeps: watching what (a link when it's a conversation's name), waiting for what, then what, how far
+  const hm = (t) => new Date(t).toTimeString().slice(0, 5), mins = (ms) => (ms < 60000 ? '不到 1 分钟' : ms < 3600000 ? `${Math.round(ms / 60000)} 分钟` : `${(ms / 3600000).toFixed(1)} 小时`);
   const todos = state.todos ?? todo.map((t) => ({ t })), byName = (w) => { const n = String(w ?? '').replace(/[（(].*$/, '').trim(); return n && state.sessions.find((x) => x.title === n); };
   const stCls = (st) => (/卡|失败|出错|问题/.test(st) ? 'bad' : /等/.test(st) ? 'wait' : /进行|正在|在跑|跑着/.test(st) ? 'run' : /完成|好了/.test(st) ? 'ok' : '');
-  const ln = (k, v, open) => (v ? `<div class="ln"><span>${k}</span><span${open ? ` data-open="${esc(open.id)}"` : ''} title="${esc(v)}">${esc(v)}</span></div>` : '');
-  $('#deskTodo').html = `<h4>在管的事${todos.length ? `<b class="count">${todos.length}</b>` : ''}</h4>${todos.length
-    ? todos.map((x) => `<div class="todo"><div class="tt"><b>${esc(x.t)}</b>${x.st ? `<span class="st ${stCls(x.st)}">${esc(x.st.replace(/[（(].*$/, ''))}</span>` : ''}</div>
-      ${ln('盯着', x.watch, byName(x.watch))}${ln('等', x.wait)}${ln('然后', x.then)}</div>`).join('')
-    : '<div class="none">还没交代它盯什么。在下面写一件，或者跟它说「盯着某个对话，做完告诉我」</div>'}
+  const waits = state.waits ?? [], used = new Set();
+  const waitOf = (x, conv) => { const w = waits.find((w) => !used.has(w) && !w.until && (conv ? w.id === conv.id : w.title && String(x.watch ?? '').startsWith(w.title))); if (w) used.add(w); return w; };
+  const cards = todos.map((x) => {
+    const conv = byName(x.watch), w = (x.watch || conv) && waitOf(x, conv);
+    const sum = [x.watch && `盯着 <span${conv ? ` data-open="${esc(conv.id)}"` : ''}>${esc(x.watch)}</span>`, x.wait && `等 ${esc(x.wait)}`].filter(Boolean).join(' · ');
+    return `<div class="todo"><div class="tt"><b>${esc(x.t)}</b>${x.st ? `<span class="st ${stCls(x.st)}">${esc(x.st.replace(/[（(：:].*$/, ''))}</span>` : ''}</div>
+      ${sum ? `<div class="sum" title="${esc([x.watch && '盯着 ' + x.watch, x.wait && '等 ' + x.wait, x.then && '然后 ' + x.then, x.st && '状态 ' + x.st].filter(Boolean).join('\n'))}">${sum}</div>` : ''}
+      ${w ? `<div class="wt"><span>⏳</span><span class="t">后台正在等它${w.note ? ' · ' + esc(w.note) : ''}</span><span class="when">已等 ${mins(Date.now() - w.at)}</span></div>` : ''}</div>`;
+  }).join('');
+  const loose = waits.filter((w) => !used.has(w)).map((w) => (w.until
+    ? `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="when">还有 ${mins(w.until - Date.now())}</span></div>`
+    : `<div class="wt"${w.id ? ` data-open="${esc(w.id)}"` : ''}><span>⏳</span><span class="t">等「${esc(w.title ?? '')}」${w.note ? ' · ' + esc(w.note) : ''}</span><span class="when">已等 ${mins(Date.now() - w.at)}</span></div>`)).join('');
+  $('#deskTodo').html = `<h4>任务${todos.length ? `<b class="count">${todos.length}</b>` : ''}</h4>${cards || loose ? cards + loose
+    : '<div class="none">还没有任务。在下面交代一件，或者跟管家说「盯着某个对话，做完告诉我」「15:40 提醒我看额度」</div>'}
     ${(state.todoDone ?? []).slice(0, 3).map((l) => `<div class="doneL" title="${esc(l)}">✓ ${esc(l)}</div>`).join('')}`;
   const tag = (x) => (x.wait ? '<span class="tag wait">等你</span>' : x.busy ? '<span class="spin" title="正在回复"></span>' : '<span class="tag">空闲</span>');
   $('#deskRun').html = `<h4>对话</h4><div class="counts"><span class="wait"><b>${wait.length}</b>等你</span><span><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
@@ -1076,14 +1084,8 @@ function drawDesk() {
       ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · 约 ${usd(today.by[i].usd)}</div>` : ''}
       <div class="m">${on ? `${on} 个对话在用` : '没有对话在用'}</div></div>`;
   }).join('')}` : '';
-  const hm = (t) => new Date(t).toTimeString().slice(0, 5), mins = (ms) => (ms < 60000 ? '不到 1 分钟' : ms < 3600000 ? `${Math.round(ms / 60000)} 分钟` : `${(ms / 3600000).toFixed(1)} 小时`);
-  const waits = state.waits ?? [];
-  $('#deskWait').html = `<h4>提醒和后台等待${waits.length ? `<b class="count">${waits.length}</b>` : ''}</h4>${waits.length ? waits.map((w) => w.until
-    ? `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="when">还有 ${mins(w.until - Date.now())}</span></div>`
-    : `<div class="wt"${w.id ? ` data-open="${esc(w.id)}"` : ''}><span>⏳</span><span class="t">等「${esc(w.title ?? '')}」${w.note ? ' · ' + esc(w.note) : ''}</span><span class="when">已等 ${mins(Date.now() - w.at)}</span></div>`).join('')
-    : '<div class="none">现在没有。跟管家说「15:40 提醒我看额度」试试</div>'}`;
   const mine = butlerIds(), tl = (state.timeline ?? []).filter((e) => e.kind === 'butler' || e.kind === 'todo'); // its own doings (an older service sent more)
-  $('#deskLog').html = `<h4>管家今天做的事</h4>${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id);
+  $('#deskLog').html = `<h4>今天做了</h4>${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id);
     return `<div class="ev k-${esc(e.kind)}"${open ? ` data-open="${esc(e.id)}"` : ''}><span class="when">${hm(e.at)}</span><i></i><span class="t" title="${esc(e.text)}">${esc(e.text)}</span></div>`; }).join('')
     : '<div class="none">它今天还没替你做事</div>'}`;
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
@@ -1093,7 +1095,7 @@ function drawDesk() {
   $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${todo.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
 }
 $('#desk').onclick = $('#deskR').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
-const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskAcct', 'deskWait', 'deskLog', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id)); };
+const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskRun', 'deskAcct', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id)); };
 WIDE.addEventListener('change', placeDesk); placeDesk();
 function startButler(acct = startAcct || (state.usage.rec ?? 0) + 1) {
   if (!state?.butler) return toast('网页服务还是旧版本，重启后才能启动管家', 4000);
