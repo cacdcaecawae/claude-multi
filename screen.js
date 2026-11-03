@@ -31,7 +31,9 @@
         let a = top;
         while (a > 0 && top - a < 12 && !rule(rows[a - 1])) a--;
         const lines = rows.slice(a, top).map((r) => r.replace(/[│╭╮╰╯─]/g, '').trim()).filter(Boolean), tabs = lines.find((l) => /^←.*→$/.test(l));
-        menu = { cur: c, opts, tabs: tabs?.replace(/^←\s*|\s*→$/g, ''), ask: lines.filter((l) => l !== tabs).join('\n') };
+        const head = !tabs && lines.find((l) => /^[☐☒✔]\s+\S/.test(l)); // one question: its header over it ("☐ 优先级"), apart
+        menu = { cur: c, opts, tabs: tabs?.replace(/^←\s*|\s*→$/g, ''), head: head ? head.replace(/^\S+\s+/, '') : undefined,
+          ask: lines.filter((l) => l !== tabs && l !== head).join('\n') };
       }
     }
     // a menu without numbers, like "Do you trust this folder?" (❯ No, exit / Yes, I trust this folder), which Claude asks

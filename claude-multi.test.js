@@ -525,6 +525,8 @@ console.log('tokens ok');
   const t = parseScreen(['Quick safety check: Is this a project you trust?', '', '❯ No, exit', '  Yes, I trust this folder', '', 'Enter to confirm · Esc to cancel']).menu;
   assert.deepEqual([t.cur, t.opts.map((o) => o.label).join('|')], [1, 'No, exit|Yes, I trust this folder']);
   assert.equal(parseScreen(['1. 签字', '2. 压缩', '3. 上传', rule, '❯ 4. 保存回执截图', rule]).menu, null);
+  const h = parseScreen([rule, ' ☐ 优先级', '', '今天想先做哪件事？', '', '❯ 1. 写论文', '  2. 跑实验', '', 'Enter to select']).menu;
+  assert.deepEqual([h.head, h.ask], ['优先级', '今天想先做哪件事？']); // one question's header, apart from it
   console.log('screen ok');
 }
 

@@ -228,8 +228,10 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* the others' questions, above it: answered here, or opened */
   #asks { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 0; max-height: 50%; overflow: auto; flex: none; }
   #asks:empty { display: none; }
-  #asks .from { font-size: 12px; color: var(--fg2); padding: 0 2px; }
-  #asks .from b { color: var(--fgHi); font-weight: 600; }
+  #asks .from { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg2); padding: 0 2px 2px; }
+  #asks .from b { color: var(--fgHi); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #asks .from i { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+  #asks .from .open { margin-left: auto; flex: none; color: var(--link); }
   .hint .bt { font-size: 18px; font-weight: 600; color: var(--fgHi); margin-top: -6px; }
 
   /* a conversation: where it is, the record (对话) or the terminal (终端), the input */
@@ -291,20 +293,24 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .busy { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--orange); }
   .busy i { width: 7px; height: 7px; border-radius: 4px; background: var(--orange); animation: pulse 1.2s infinite; }
   @keyframes pulse { 50% { opacity: .25; } }
-  .ask { background: var(--bar); border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
-  .ask .q { white-space: pre-wrap; font-size: 13px; padding: 0 2px 6px; }
-  .ask .pick { text-align: left; padding: 7px 10px; border-radius: 6px; border: 1px solid transparent; }
+  .ask { background: var(--bar); border: 1px solid var(--cardB); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .ask .head { align-self: flex-start; font-size: 11px; color: var(--fg2); background: var(--tint); border-radius: 9px; padding: 1px 8px; }
+  .ask .q { white-space: pre-wrap; font-size: 14px; font-weight: 600; color: var(--fgHi); padding: 0 2px 4px; }
+  .ask .note { font-size: 13px; color: var(--fg2); padding: 0 2px; }
+  .ask .pick { display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+  .ask .pick .n { flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin: -1px 0; border-radius: 50%; background: var(--tint); color: var(--fg2); font: 600 11px var(--ui); }
+  .ask .pick.own { border-color: transparent; background: none; color: var(--fg2); padding: 4px 12px; } /* Claude's own: write in, chat */
   .ask .pick.on { background: var(--accentBg); border-color: var(--accent); }
   .ask .row2 { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
   .ask .row2 button { font-size: 12px; padding: 3px 10px; border-radius: 6px; background: var(--btn); }
   .ask .row2 .push { margin-right: auto; }
   .ask .tabsQ { font-size: 12px; color: var(--fg2); padding: 0 2px; }
   .ask .pick small { display: block; margin-top: 2px; font-size: 12px; color: var(--fg2); }
-  .ask .pick .box { display: inline-grid; place-items: center; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; border: 1.5px solid var(--fg2); border-radius: 3px; }
+  .ask .pick .box { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-top: 1px; border: 1.5px solid var(--fg2); border-radius: 4px; }
   .ask .pick .box.on { background: var(--accent); border-color: var(--accent); }
   .ask .pick .box.on::after { content: '✓'; color: #fff; font-size: 10px; line-height: 1; }
   .ask .hint2 { font-size: 12px; color: var(--accent); padding: 2px; }
-  @media (hover: hover) { .ask .pick:hover { background: var(--hover); } .ask .pick.on:hover { background: var(--accentBg); } }
+  @media (hover: hover) { .ask .pick:hover { border-color: var(--accent); } .ask .pick.own:hover { color: var(--fg); background: var(--hover); } }
   .keys { display: flex; gap: 4px; padding: 6px; overflow-x: auto; border-top: 1px solid var(--border); scrollbar-width: none; flex: none; }
   .keys button { flex: 1 0 auto; min-width: 32px; background: var(--btn); border-radius: 6px; padding: 8px 4px; font-size: 13px; font-weight: 600; }
   /* the input: one box, the pictures waiting at its top, the text, a bar inside its bottom (pictures left, 发送 right) */
@@ -777,6 +783,14 @@ function drawButler() {
   if (!bConv) $('#butler > .hint').html = `${SPARK}<div class="bt">管家</div><div>你的助理：替你看着所有对话，谁在等你、谁做完了，问它就行。</div>
     <div class="btns"><button class="btn primary" data-bstart>用账号 ${(state.usage.rec ?? 0) + 1} 启动管家</button></div>`;
 }
+// A question on a card: its header, the question, its options as buttons (a number badge, or a multi-select's box), each
+// one's description under it; Claude's own two last ones (write in, chat about it) in our words, quieter.
+const OWN_TYPE = /^Type something/i, OWN_CHAT = /^Chat about this/i;
+const askHead = (m) => `${m.head ? `<div class="head">${esc(m.head)}</div>` : ''}${m.ask ? `<div class="q">${esc(m.ask)}</div>` : ''}`;
+const askOpts = (m, attr, on = () => false) => m.opts.map((o) => {
+  const own = OWN_TYPE.test(o.label) ? '自己写一个回答…' : OWN_CHAT.test(o.label) ? '先不选，和它聊聊' : null;
+  return `<button class="pick${own ? ' own' : ''}${on(o) ? ' on' : ''}" ${attr(o)}>${o.check != null ? `<i class="box${o.check ? ' on' : ''}"></i>` : own ? '' : `<i class="n">${o.n}</i>`}<span>${esc(own ?? o.label)}${o.desc ? `<small>${esc(o.desc)}</small>` : ''}</span></button>`;
+}).join('');
 // The questions other conversations wait on (the service reads them off their screens), as cards: a single choice
 // answered here; a multi-select, several questions or one to write in, in that conversation (its own card has them).
 let asksBusy = false, askOf = new Map(); // conversation id → the question its card shows (a pick says which one it meant)
@@ -793,11 +807,9 @@ async function drawAsks() {
   askOf = new Map(list.map((a) => [a.id, a.menu?.ask]));
   $('#asks').html = list.map(({ id, title, acct, menu }) => {
     const simple = menu && !menu.tabs && !menu.opts.some((o) => o.check != null);
-    return `<div class="ask" data-id="${esc(id)}"><div class="from"><b>${esc(title)}</b> · 账号 ${acct} · 在等你回答</div>${menu
-      ? `${menu.ask ? `<div class="q">${esc(menu.ask)}</div>` : ''}${simple ? menu.opts.map((o) =>
-        `<button class="pick${o.n === menu.cur ? ' on' : ''}" data-n="${o.n}"${/^Type something/i.test(o.label) ? ' data-open="1"' : ''}>${o.n}. ${esc(o.label)}${o.desc ? `<small>${esc(o.desc)}</small>` : ''}</button>`).join('')
-        : '<div class="q">多选，或者一次问了好几题，打开对话回答</div>'}`
-      : '<div class="q">它在等你处理，打开看看</div>'}<div class="row2"><button data-open="1">打开对话</button></div></div>`;
+    return `<div class="ask" data-id="${esc(id)}"><div class="from"><i style="background:${ACCT[(acct - 1) % 4]}"></i><b>${esc(title)}</b><span>账号 ${acct}</span><button class="open" data-open="1">打开对话 ›</button></div>${menu
+      ? askHead(menu) + (simple ? askOpts(menu, (o) => `data-n="${o.n}"${OWN_TYPE.test(o.label) ? ' data-open="1"' : ''}`) : '<div class="note">多选，或者一次问了好几题，打开对话回答</div>')
+      : '<div class="note">它在等你处理，打开看看</div>'}</div>`;
   }).join('');
 }
 $('#asks').onclick = async (e) => {
@@ -1440,8 +1452,7 @@ function makeConv(body, title) {
     const took = busy && /(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0];
     const h = sent.map((s) => (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
       + (s.text ? `<div class="hm user pending">${esc(s.text)}</div>` : '')).join('') + (menu
-      ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${menu.ask ? `<div class="q">${esc(menu.ask)}</div>` : ''}${menu.opts.map((o) =>
-        `<button class="pick${o.n === menu.cur ? ' on' : ''}" data-pick="${o.n}">${o.check != null ? `<i class="box${o.check ? ' on' : ''}"></i>` : `${o.n}. `}${esc(o.label)}${o.desc ? `<small>${esc(o.desc)}</small>` : ''}</button>`).join('')}
+      ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${askHead(menu)}${askOpts(menu, (o) => `data-pick="${o.n}"`, (o) => typeNow && o.n === menu.cur)}
         ${typeNow ? '<div class="hint2">在下面的输入框里写你的回答，发送后填进这一项</div>' : ''}
         <div class="row2">${menu.tabs ? '<button data-key="prev">← 上一题</button><button data-key="next" class="push">下一题 →</button>' : ''}<button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
       : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : 'Claude 正在回复'}${took ? ' · ' + took : ''}</div>` : '');
