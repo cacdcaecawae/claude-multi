@@ -1172,7 +1172,7 @@ async function renderTokens() {
   if (!tokens) {
     $('#view').html = '<div class="empty">统计中…</div>';
     // one count at a time: it takes seconds, and the list's refresh every 10 s asks again meanwhile
-    tokensNow ??= fetch('/api/tokens').then((r) => r.json()).finally(() => { tokensNow = null; });
+    tokensNow ??= fetch('/api/tokens?fresh=1').then((r) => r.json()).finally(() => { tokensNow = null; });
     try { tokens = await tokensNow; } catch (e) { return toast(e.message); }
     if (side !== 'tokens') return;
   }

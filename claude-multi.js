@@ -820,6 +820,7 @@ async function chatLook(ref) {
 }
 async function chatWait(ref, until, maxMin, note) {
   const t = until ? parseUntil(until) : null, s = ref ? findChat(ref) : null, wf = path.join(WAITS, `${process.pid}.json`);
+  if (!t && !s) throw new Error('要等哪个对话，或者 --until 几点？');
   fs.mkdirSync(WAITS, { recursive: true });
   fs.writeFileSync(wf, JSON.stringify({ pid: process.pid, at: Date.now(), until: t, id: s?.id ?? null, title: s?.title ?? null, note: note ?? null }));
   try {
@@ -1769,7 +1770,7 @@ async function web() {
       return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerModel(), pc: pcNow(),
         todo: tp.todos.map((x) => x.t), todos: tp.todos, todoDone: tp.lines.slice(0, 5), timeline: timeline(tp.lines), waits: waitsNow() };
     },
-    'GET /api/tokens': () => { if (!tokCache || Date.now() - tokAt > 30000) { tokCache = tokenStats(); tokAt = Date.now(); } return tokCache; },
+    'GET /api/tokens': (q) => { if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) { tokCache = tokenStats(); tokAt = Date.now(); } return tokCache; },
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
     'POST /api/push/sub': (q, b) => { // a page's subscription, one per endpoint
       if (!/^https:\/\/[^/]+\//.test(b.endpoint ?? '') || !b.keys?.p256dh || !b.keys?.auth) throw new Error('通知订阅不完整');
