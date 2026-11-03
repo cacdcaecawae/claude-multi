@@ -1650,6 +1650,20 @@ async function web() {
       } catch {}
   }, 2000);
 
+  // For the 管家's 操作台: this computer's CPU, busy since the last sample (taken 2 s apart at least: pages ask within
+  // moments of each other, and a tiny gap reads wild), and memory in use
+  const cpuSum = () => os.cpus().reduce(([all, idle], c) => [all + Object.values(c.times).reduce((x, y) => x + y, 0), idle + c.times.idle], [0, 0]);
+  let cpuPrev = cpuSum(), cpuAt = Date.now(), cpuPct = null;
+  const pcNow = () => {
+    if (Date.now() - cpuAt >= 2000) {
+      const now = cpuSum(), all = now[0] - cpuPrev[0];
+      if (all > 0) cpuPct = Math.round(100 * (1 - (now[1] - cpuPrev[1]) / all));
+      cpuPrev = now; cpuAt = Date.now();
+    }
+    return { cpu: cpuPct, mem: os.totalmem() - os.freemem(), memAll: os.totalmem() };
+  };
+  // and what it keeps watching: its 待办.md's sections above 「## 已完成」
+  const todoList = () => { try { return [...fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8').split(/^## 已完成/m)[0].matchAll(/^## (.+)$/gm)].map((m) => m[1].trim()); } catch { return []; } };
   const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
   const api = {
     // the questions other conversations wait on, as their screens show them (管家 mode has them as cards): each read again
@@ -1676,7 +1690,7 @@ async function web() {
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER };
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, todo: todoList(), pc: pcNow() };
     },
     'GET /api/tokens': () => tokenStats(),
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
