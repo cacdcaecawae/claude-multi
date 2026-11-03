@@ -1975,13 +1975,18 @@ async function web() {
   });
   server.keepAliveTimeout = 5000; // the relay's nginx lets its idle ones go at 4 s, before: it never reuses one closing here
   server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
-  // A restart ended the 管家, and its background waits with it: with something left in its 待办, it's continued (on its
-  // own account) and told so, to read the list and wait again for what it still watches
+  // A restart ended the 管家, and its background waits with it. It ran in the last service (its pid in that one's list,
+  // read before this one writes its own; a Claude killed hard leaves its session file) or has something left in its 待办:
+  // it's continued, on its own account. With something left, it's told so, to read the list and wait again for it.
+  const ranBefore = (() => { try { return JSON.parse(fs.readFileSync(WEB_TERMS, 'utf8')); } catch { return []; } })().some((pid) => load().profiles.some((p) => {
+    try { return sameDir(JSON.parse(fs.readFileSync(path.join(p.configDir, 'sessions', `${pid}.json`), 'utf8')).cwd, BUTLER); } catch { return false; }
+  }));
   async function wakeButler() {
     let todo = ''; try { todo = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
-    const s = todoOpen(todo) && sessions().find((x) => sameDir(x.cwd, BUTLER)), p = s && !s.pid && load().profiles[s.acct];
+    const open = todoOpen(todo), s = (ranBefore || open) && sessions().find((x) => sameDir(x.cwd, BUTLER)), p = s && !s.pid && load().profiles[s.acct];
     if (!p) return;
     const t = startPty(p, s.cwd, ['--resume', s.id]);
+    if (!open) return log('butler_woken', { session_id: s.id }); // nothing it was watching: back, waiting for you
     for (let k = 0; k < 60 && !t.gone; k++, await sleep(1000)) {
       let st = null; try { st = JSON.parse(fs.readFileSync(path.join(p.configDir, 'sessions', `${t.pid}.json`), 'utf8')).status; } catch {}
       if (st !== 'idle') continue;
