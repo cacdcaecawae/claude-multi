@@ -996,6 +996,7 @@ const NOTES = path.join(ROOT, 'notes.jsonl');
 const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes running in the web service
 const WEB_USAGE = path.join(ROOT, 'web-usage.json'); // the quota as the page last got it
 const WEB_PORT = 7788;
+const BUTLER = path.join(__dirname, 'butler'); // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
 // The server, from tunnel.json here (not in the repository): {"ssh": "myserver", "url": "https://<its address>:8443"}.
 // Without it there is no tunnel: the page opens on this computer only. sock: the tunnel's end on the server.
 let TUNNEL = null;
@@ -1430,8 +1431,7 @@ async function web() {
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
-      // butler: the folder the page's 管家 runs in (its CLAUDE.md beside this file); its newest conversation is the 管家
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: path.join(__dirname, 'butler') };
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER };
     },
     'GET /api/tokens': () => tokenStats(),
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
@@ -1488,6 +1488,10 @@ async function web() {
       const p = reg.profiles[b.acct - 1];
       if (!p) throw new Error('没有这个账号');
       if (!b.dir || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
+      // the 管家 is one: two screens starting it at once (it isn't listed before its first message) get the same
+      const same = (a, z) => path.resolve(a).toLowerCase() === path.resolve(z).toLowerCase();
+      const one = same(b.dir, BUTLER) && [...terms.values()].find((t) => t.kind === 'pty' && !t.gone && same(t.cwd, BUTLER));
+      if (one) return { key: one.key, kind: 'pty' };
       sessCache = null;
       return { key: startPty(p, b.dir, [], cols, rows).key, kind: 'pty' };
     },

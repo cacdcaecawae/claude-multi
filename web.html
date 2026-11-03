@@ -764,6 +764,7 @@ function mountButler(c) { bConv = c; $('#butler').append(c.el); if (butler) { c.
 function drawButler() {
   if (!butler || !state) return;
   const bs = state.sessions.find(isButler); // the newest
+  if (bConv?.ended && bConv.id !== bs?.id) { bConv.close(); bConv = null; } // ended, and not the newest (or never recorded)
   if (!bConv && bs) mountButler(makeConv({ id: bs.id }, bs.title));
   $('#butler').classList.toggle('blank', !bConv);
   if (!bConv) $('#butler > .hint').html = `${SPARK}<div class="bt">管家</div><div>你的助理：替你看着所有对话，谁在等你、谁做完了，问它就行。</div>
@@ -1062,8 +1063,9 @@ function sideGroup() {
   return groups[i + 1] ?? (groups.length < 3 ? makeGroup(focusG) : groups[i - 1]);
 }
 async function openSession(id, where) {
-  setButler(false); // a notification tapped while in 管家: to the conversation
   const s = state?.sessions.find((x) => x.id === id), have = convOf(id);
+  if (s && s === state.sessions.find(isButler)) return setButler(true); // the 管家 itself: its mode, not a second pane of it
+  setButler(false); // a notification tapped while in 管家: to the conversation
   if (!s) return toast('这个对话已经不在列表里了');
   if (have) return where && where !== 'aside' && where !== have.g ? moveConv(have, where) : activate(have.g, have); // open already: that tab
   const acct = s.pid ? s.acct + 1 : await pickAcct(s); // a running one stays where it runs
