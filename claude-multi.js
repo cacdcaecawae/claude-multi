@@ -1206,6 +1206,7 @@ async function usage(args) {
 // browser that had the old one is out.
 const NOTES = path.join(ROOT, 'notes.jsonl');
 const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes running in the web service
+const WEB_BUTLER = path.join(ROOT, 'web-butler.json'); // whether the 管家 runs in it
 const WEB_USAGE = path.join(ROOT, 'web-usage.json'); // the quota as the page last got it
 const WEB_PORT = 7788;
 const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus', 'haiku']; // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
@@ -1660,7 +1661,10 @@ async function web() {
   }
   // for the island and `claude-multi attach`: which running conversations are ours
   function saveTerms() {
-    try { fs.writeFileSync(WEB_TERMS, JSON.stringify([...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid).map((t) => t.pid))); } catch {}
+    const up = [...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid);
+    try { fs.writeFileSync(WEB_TERMS, JSON.stringify(up.map((t) => t.pid))); } catch {}
+    // and whether the 管家 runs here: a service killed never writes again, so after a restart this says it did
+    try { fs.writeFileSync(WEB_BUTLER, JSON.stringify(up.some((t) => sameDir(t.cwd, BUTLER)))); } catch {}
   }
 
   // the record of the conversation asked for (?key, ?id): by the open terminal's key, else by its id
@@ -1975,12 +1979,10 @@ async function web() {
   });
   server.keepAliveTimeout = 5000; // the relay's nginx lets its idle ones go at 4 s, before: it never reuses one closing here
   server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
-  // A restart ended the 管家, and its background waits with it. It ran in the last service (its pid in that one's list,
-  // read before this one writes its own; a Claude killed hard leaves its session file) or has something left in its 待办:
-  // it's continued, on its own account. With something left, it's told so, to read the list and wait again for it.
-  const ranBefore = (() => { try { return JSON.parse(fs.readFileSync(WEB_TERMS, 'utf8')); } catch { return []; } })().some((pid) => load().profiles.some((p) => {
-    try { return sameDir(JSON.parse(fs.readFileSync(path.join(p.configDir, 'sessions', `${pid}.json`), 'utf8')).cwd, BUTLER); } catch { return false; }
-  }));
+  // A restart ended the 管家, and its background waits with it. It ran in the last service (as that one last wrote, read
+  // before this one writes) or has something left in its 待办: it's continued, on its own account. With something left,
+  // it's told so, to read the list and wait again for it. (Its Claude, ended with its terminal, takes its session file.)
+  const ranBefore = (() => { try { return JSON.parse(fs.readFileSync(WEB_BUTLER, 'utf8')) === true; } catch { return false; } })();
   async function wakeButler() {
     let todo = ''; try { todo = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
     const open = todoOpen(todo), s = (ranBefore || open) && sessions().find((x) => sameDir(x.cwd, BUTLER)), p = s && !s.pid && load().profiles[s.acct];
