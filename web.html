@@ -61,22 +61,32 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #act .logo { margin: 6px 0 4px; color: #d97757 !important; } /* 管家: in and out of it */
   #act .logo .spark { width: 24px; height: 24px; }
   #app.butler #act .logo { background: var(--tint); }
-  #app.butler #act button[data-side] { display: none; } /* a place of its own: out of it only by the spark */
+  #app.butler #act button[data-side] { visibility: hidden; } /* a place of its own: out of it only by the spark (their places kept: the spark stays put) */
   /* held to go in or out: a ring fills round the spark (let go early and it empties) */
   #act .logo { touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
   #act .logo .sp { position: relative; display: grid; place-items: center; }
   #act .logo .ring { position: absolute; left: -8px; top: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; overflow: visible; }
   #act .logo .ring circle { fill: none; stroke: #d97757; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: 100; opacity: 0; }
   #act .logo.hold .ring circle { opacity: 1; animation: holdRing .8s linear forwards; }
-  #act .logo.hold .spark { animation: spin 1.6s linear infinite; }
+  #act .logo.hold .ring { filter: drop-shadow(0 0 4px rgba(217, 119, 87, .8)); }
+  #act .logo.hold .spark { animation: holdSpark .8s cubic-bezier(.5, 0, .9, .5) forwards; }
   @keyframes holdRing { to { stroke-dashoffset: 0; } }
-  /* the way in: a circle opens from the spark onto the 管家, a big spark bursting in the middle; the way out, it closes */
-  ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
-  html.vtIn::view-transition-new(root) { animation: vtOpen .7s cubic-bezier(.7, 0, .2, 1) both; }
-  html.vtOut::view-transition-old(root) { z-index: 1; animation: vtOpen .55s cubic-bezier(.7, 0, .2, 1) reverse both; }
-  @keyframes vtOpen { from { clip-path: circle(0 at var(--vx) var(--vy)); } to { clip-path: circle(var(--vr) at var(--vx) var(--vy)); } }
-  #burst { position: fixed; left: 50%; top: 50%; width: 180px; height: 180px; margin: -90px 0 0 -90px; color: #d97757; pointer-events: none; z-index: 50; animation: burst 1s cubic-bezier(.2, .7, .2, 1) forwards; }
-  @keyframes burst { 0% { transform: scale(.2) rotate(0); opacity: 0; } 30% { opacity: .85; } 100% { transform: scale(1.7) rotate(150deg); opacity: 0; } }
+  @keyframes holdSpark { to { transform: rotate(300deg) scale(1.35); filter: drop-shadow(0 0 6px rgba(217, 119, 87, .9)); } }
+  /* the way in or out: warm light sweeps out from the spark over the screen (taps stopped), the mode changes under it,
+     then the light closes into a big spark in the middle, which goes last; going in, the 管家's columns rise into place */
+  #flip { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+    background: radial-gradient(circle at var(--vx) var(--vy), #f3b08f, #d97757 45%, #9c4a2a); color: #fff; font: 600 22px/1 var(--ui); letter-spacing: .3em;
+    clip-path: circle(0 at var(--vx) var(--vy)); animation: flipOpen .42s cubic-bezier(.7, 0, .84, 0) forwards; }
+  #flip.close { animation: flipClose .55s cubic-bezier(.3, 0, .2, 1) forwards; }
+  #flip .spark { width: 120px; height: 120px; flex: none; animation: flipSpark .9s cubic-bezier(.2, .7, .2, 1) forwards; }
+  #flip b { animation: flipWord .5s .15s ease both; }
+  @keyframes flipOpen { to { clip-path: circle(var(--vr) at var(--vx) var(--vy)); } }
+  @keyframes flipClose { from { clip-path: circle(var(--vr) at var(--vx) var(--vy)); } to { clip-path: circle(0 at var(--cx) var(--cy)); } }
+  @keyframes flipSpark { from { transform: scale(.3) rotate(0); opacity: 0; } 40% { opacity: 1; } to { transform: scale(1.3) rotate(200deg); } }
+  @keyframes flipWord { from { opacity: 0; transform: translateY(8px); } }
+  #app.arrive #desk, #app.arrive #butler, #app.arrive #deskR { animation: rise .5s cubic-bezier(.2, .8, .2, 1) both; }
+  #app.arrive #butler { animation-delay: .08s; } #app.arrive #deskR { animation-delay: .16s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(16px) scale(.985); } }
   /* and a warm light over it, while there */
   #app.butler { background: radial-gradient(900px 520px at 0 0, rgba(217, 119, 87, .16), transparent 70%); }
   .spark { display: block; width: 100%; height: 100%; }
@@ -846,20 +856,23 @@ function setButler(on) {
   if (on) { drawButler(); drawAsks(); drawDesk(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
   markRows(); save();
 }
-// Held ~0.8 s (the ring full): in or out, a circle opening from the spark onto the 管家 or closing back into it (View
-// Transitions; without them, or with less motion asked for, at once)
+// Held ~0.8 s (the ring full): in or out under a sweep of warm light from the spark (with less motion asked for, at once).
+// Each step on the one before ending, not on a timer: a slow phone never shows the change before the light covers it.
 let heldAt = 0;
 function flipButler(on) {
-  const go = () => {
-    setButler(on);
-    if (on) { const b = document.createElement('div'); b.id = 'burst'; b.innerHTML = SPARK; b.onanimationend = () => b.remove(); document.body.append(b); } // in the new view: it plays as the circle opens
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return setButler(on);
+  const r = $('#act .logo .spark').getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, f = document.createElement('div');
+  f.id = 'flip'; f.innerHTML = SPARK + (on ? '<b>管家</b>' : '');
+  const at = { vx: x, vy: y, cx: innerWidth / 2, cy: innerHeight / 2, vr: Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y)) };
+  for (const k in at) f.style.setProperty('--' + k, at[k] + 'px');
+  f.onanimationend = (e) => {
+    if (e.target !== f) return; // the spark's and the word's own
+    if (f.classList.contains('close')) return f.remove();
+    setButler(on); // under the light
+    if (on) { $('#app').classList.add('arrive'); setTimeout(() => $('#app').classList.remove('arrive'), 900); }
+    setTimeout(() => f.classList.add('close'), 120);
   };
-  if (!document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) return go();
-  const r = $('#act .logo .spark').getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, h = document.documentElement;
-  h.style.setProperty('--vx', x + 'px'); h.style.setProperty('--vy', y + 'px');
-  h.style.setProperty('--vr', Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y)) + 'px');
-  h.classList.add(on ? 'vtIn' : 'vtOut');
-  document.startViewTransition(go).finished.finally(() => h.classList.remove('vtIn', 'vtOut'));
+  document.body.append(f);
 }
 {
   const logo = $('#act .logo'), letGo = () => logo.classList.remove('hold');
