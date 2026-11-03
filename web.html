@@ -72,16 +72,23 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #act .logo.hold .spark { animation: holdSpark .8s cubic-bezier(.5, 0, .9, .5) forwards; }
   @keyframes holdRing { to { stroke-dashoffset: 0; } }
   @keyframes holdSpark { to { transform: rotate(300deg) scale(1.35); filter: drop-shadow(0 0 6px rgba(217, 119, 87, .9)); } }
-  /* the way in or out: the spark's petals fly out from it as light, points of light scatter while warm light fills the
-     screen (taps stopped), the mode changes under it, then they gather again and the light clears (flipButler) */
+  /* the way in or out, a console booting: the screen goes dark over a faint grid (taps stopped), the mode changes in the
+     dark, a line of light sweeps down uncovering it; going in, the columns power up one by one (flipButler) */
   #flip { position: fixed; inset: 0; z-index: 60; overflow: hidden; }
-  #flip .bg { position: absolute; inset: 0; opacity: 0; background: radial-gradient(circle at var(--vx) var(--vy), #f6c2a8, #df8a65 45%, #a9532f); }
-  #flip .pt, #flip .dot { position: absolute; left: 0; top: 0; will-change: transform, opacity; }
-  #flip .pt { width: 9px; margin-left: -4.5px; border-radius: 4px; transform-origin: 50% 100%; box-shadow: 0 0 10px rgba(255, 255, 255, .7); }
-  #flip .dot { border-radius: 50%; background: #fff; box-shadow: 0 0 12px 3px rgba(255, 225, 205, .9); }
-  #app.arrive #desk, #app.arrive #butler, #app.arrive #deskR { animation: rise .5s cubic-bezier(.2, .8, .2, 1) both; }
-  #app.arrive #butler { animation-delay: .08s; } #app.arrive #deskR { animation-delay: .16s; }
-  @keyframes rise { from { opacity: 0; transform: translateY(16px) scale(.985); } }
+  #flip .dark { position: absolute; inset: 0; opacity: 0; display: grid; place-items: center;
+    background: linear-gradient(rgba(217, 119, 87, .08) 1px, transparent 1px) 0 0 / 28px 28px, linear-gradient(90deg, rgba(217, 119, 87, .08) 1px, transparent 1px) 0 0 / 28px 28px,
+      radial-gradient(ellipse at 50% 42%, #1d1612, #07080a 72%); }
+  #flip .hud { font: 600 15px/1 var(--mono); letter-spacing: .4em; color: #f0a07c; text-shadow: 0 0 12px rgba(217, 119, 87, .85); white-space: nowrap; }
+  #flip .hud i { display: inline-block; width: .6em; height: 1em; margin-left: .1em; vertical-align: -2px; background: currentColor; animation: blink .5s steps(1) infinite; }
+  #flip .scan { position: absolute; left: 0; right: 0; top: 0; height: 2px; opacity: 0; background: #fff;
+    box-shadow: 0 0 8px 2px rgba(255, 196, 168, .95), 0 0 42px 12px rgba(217, 119, 87, .55); }
+  @keyframes blink { 50% { opacity: 0; } }
+  #app.arrive #desk, #app.arrive #butler, #app.arrive #deskR { animation: boot .75s cubic-bezier(.2, .8, .2, 1) both; }
+  #app.arrive #desk { animation-delay: .32s; } #app.arrive #butler { animation-delay: .47s; } #app.arrive #deskR { animation-delay: .62s; }
+  @keyframes boot {
+    0% { opacity: .12; filter: brightness(.45); box-shadow: 0 0 0 1px rgba(217, 119, 87, .95), 0 0 30px rgba(217, 119, 87, .6); }
+    55% { opacity: 1; filter: none; box-shadow: 0 0 0 1px rgba(217, 119, 87, .7), 0 0 22px rgba(217, 119, 87, .35); }
+    100% { box-shadow: 0 0 0 0 rgba(217, 119, 87, 0), 0 0 0 rgba(217, 119, 87, 0); } }
   /* and a warm light over it, while there */
   #app.butler { background: radial-gradient(900px 520px at 0 0, rgba(217, 119, 87, .16), transparent 70%); }
   .spark { display: block; width: 100%; height: 100%; }
@@ -883,45 +890,22 @@ function setButler(on) {
   if (on) { drawButler(); drawAsks(); drawDesk(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
   markRows(); save();
 }
-// Held ~0.8 s (the ring full): in or out as the spark's petals (with less motion asked for, at once). They and the points of
-// light fly out over the screen as warm light covers it; once it does (its animation done, not a timer: a slow phone never
-// shows the change early), the mode changes under it; they gather into a big spark in the middle (going in) or back into
-// the small one (going out), and the light clears.
+// Held ~0.8 s (the ring full): in or out as a console booting (with less motion asked for, at once). Dark first; once it's
+// dark (its animation done, not a timer: a slow phone never shows the change early) the mode changes under it, then a line
+// of light sweeps down, the dark going with it; going in, the columns power up one by one as it passes.
 let heldAt = 0;
 function flipButler(on) {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return setButler(on);
-  const r = $('#act .logo .spark').getBoundingClientRect(), ox = r.left + r.width / 2, oy = r.top + r.height / 2, W = innerWidth, H = innerHeight;
-  const R = Math.hypot(Math.max(ox, W - ox), Math.max(oy, H - oy)), [tx, ty] = on ? [W / 2, H / 2] : [ox, oy], big = on ? 1.7 : 0.3, D = 1150;
-  const f = document.createElement('div'), go = { duration: D, easing: 'cubic-bezier(.3, .1, .2, 1)', fill: 'forwards' };
-  f.id = 'flip'; f.innerHTML = '<div class="bg"></div>';
-  f.style.setProperty('--vx', ox + 'px'); f.style.setProperty('--vy', oy + 'px');
+  const f = document.createElement('div');
+  f.id = 'flip'; f.innerHTML = `<div class="dark">${on ? '<div class="hud">管家 · 启动中<i></i></div>' : ''}</div><div class="scan"></div>`;
   document.body.append(f);
-  const add = (cls, css) => { const e = document.createElement('div'); e.className = cls; Object.assign(e.style, css); f.append(e); return e; };
-  RAYS.forEach((l, k) => { // a petal: its foot at the point, standing out along its angle
-    const L = l * 1.3, a = k * 30 + 8 + TILT[k], at = (x, y) => `translate(${x}px, ${y - L}px)`;
-    add('pt', { height: L + 'px' }).animate([
-      { transform: `${at(ox, oy)} rotate(${a}deg) translateY(0px) scale(.25)`, background: '#d97757' },
-      { transform: `${at(ox, oy)} rotate(${a + 25}deg) translateY(${-R * 0.42}px) scale(2)`, background: '#fff', offset: 0.42 },
-      { transform: `${at(tx, ty)} rotate(${a + 90}deg) translateY(${-18 * big}px) scale(${big})`, background: '#fff', offset: 0.78 },
-      { transform: `${at(tx, ty)} rotate(${a + 120}deg) translateY(${-30 * big}px) scale(${1.3 * big})`, background: '#fff', opacity: 0 },
-    ], go);
-  });
-  for (let k = 0; k < 24; k++) { // points of light: out anywhere on the screen, then gathered with the petals
-    const d = 4 + Math.random() * 8, th = Math.random() * 2 * Math.PI, rho = R * (0.3 + Math.random() * 0.7), j = () => (Math.random() - 0.5) * 60 * big;
-    const at = (x, y) => `translate(${x - d / 2}px, ${y - d / 2}px)`;
-    add('dot', { width: d + 'px', height: d + 'px' }).animate([
-      { transform: `${at(ox, oy)} scale(.2)`, opacity: 0, background: '#e9875f' },
-      { transform: `${at(ox + Math.cos(th) * rho, oy + Math.sin(th) * rho)} scale(1)`, opacity: 1, background: '#fff', offset: 0.42 },
-      { transform: `${at(tx + j(), ty + j())} scale(.6)`, opacity: 0.9, offset: 0.8 },
-      { transform: `${at(tx, ty)} scale(0)`, opacity: 0 },
-    ], go);
-  }
-  const bg = f.firstChild;
-  bg.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 480, easing: 'cubic-bezier(.5, 0, .75, 0)', fill: 'forwards' }).finished.then(() => {
-    setButler(on); // under the light
-    if (on) { $('#app').classList.add('arrive'); setTimeout(() => $('#app').classList.remove('arrive'), 900); }
-    bg.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 450, delay: 250, easing: 'ease-out', fill: 'forwards' });
-    setTimeout(() => f.remove(), 760);
+  const [dark, scan] = f.children, sweep = { duration: 620, delay: on ? 280 : 60, easing: 'cubic-bezier(.45, 0, .2, 1)', fill: 'forwards' };
+  dark.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: 'ease-in', fill: 'forwards' }).finished.then(() => {
+    setButler(on); // in the dark
+    if (on) { $('#app').classList.add('arrive'); setTimeout(() => $('#app').classList.remove('arrive'), 1500); }
+    dark.animate([{ clipPath: 'inset(0 0 0 0)' }, { clipPath: 'inset(100% 0 0 0)' }], sweep);
+    scan.animate([{ transform: 'translateY(-4px)', opacity: 1 }, { transform: `translateY(${innerHeight}px)`, opacity: 1, offset: 0.9 }, { transform: `translateY(${innerHeight}px)`, opacity: 0 }], sweep)
+      .finished.then(() => f.remove());
   });
 }
 {
