@@ -1475,10 +1475,16 @@ async function pushAll(msg, endpoint) {
 // and a tap's page (that conversation) from the public address. The answer back: 200 is delivered to Bark's server.
 const BARK = path.join(ROOT, 'bark.json');
 const barkUrl = () => { try { return JSON.parse(fs.readFileSync(BARK, 'utf8').replace(/^﻿/, '')).url?.replace(/\/+$/, '') || null; } catch { return null; } };
+// What Bark gets: under the title a line with where it runs (its folder, its account); grouped by conversation, so each
+// one's notifications stack apart; one waiting for you time-sensitive (shown through Focus) with its own sound.
+function barkMsg(msg, pub = '') {
+  return { title: msg.title, ...(msg.sub && { subtitle: msg.sub }), body: msg.body, group: msg.group || 'Claude',
+    ...(msg.ask && { level: 'timeSensitive', sound: 'bell' }),
+    ...(pub && { icon: `${pub}/icon-180.png`, url: `${pub}/${msg.id ? `?open=${encodeURIComponent(msg.id)}` : ''}` }) };
+}
 async function bark(msg) {
-  const u = barkUrl(), pub = WEB_URL.startsWith('https://');
-  const r = await fetch(u, { method: 'POST', signal: AbortSignal.timeout(15000), headers: { 'content-type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ title: msg.title, body: msg.body, group: 'Claude', ...(pub && { icon: `${WEB_URL}/icon-180.png`, url: `${WEB_URL}/${msg.id ? `?open=${encodeURIComponent(msg.id)}` : ''}` }) }) });
+  const r = await fetch(barkUrl(), { method: 'POST', signal: AbortSignal.timeout(15000), headers: { 'content-type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(barkMsg(msg, WEB_URL.startsWith('https://') ? WEB_URL : '')) });
   if (r.status !== 200) log('bark_fail', { status: r.status, said: (await r.text().catch(() => '')).slice(0, 300) });
   return r.status;
 }
@@ -1618,8 +1624,7 @@ async function web() {
   // Its text has Claude's last words (gist), read from the record here a moment after the note: the hook runs before
   // Claude has written them (the hook found the words before them).
   let pushedTo = Date.now(); // the ones before the service started were for the island
-  const lastWords = (id) => {
-    const f = id && sessions().find((s) => s.id === id)?.file;
+  const lastWords = (f) => {
     if (!f) return '';
     const fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size, tail = slice(fd, Math.max(0, size - 4194304), 4194304);
     fs.closeSync(fd);
@@ -1630,7 +1635,12 @@ async function web() {
     if (!fresh.length) return;
     pushedTo = fresh.at(-1).at;
     for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000))
-      try { const m = { ...pushText({ ...n, gist: lastWords(n.id) }), id: n.id }; (barkUrl() ? bark(m) : pushAll(m)).catch(() => {}); } catch {} // Bark set up: it alone, not twice
+      try {
+        const s = n.id && sessions().find((x) => x.id === n.id), name = n.title || n.project || 'Claude', folder = s ? path.basename(s.cwd) : n.project;
+        const m = { ...pushText({ ...n, gist: lastWords(s?.file) }), id: n.id, group: name, ask: n.kind === 'ask',
+          sub: [folder !== name && folder, s && `账号 ${s.acct + 1}`].filter(Boolean).join(' · ') };
+        (barkUrl() ? bark(m) : pushAll(m)).catch(() => {}); // Bark set up: it alone, not twice
+      } catch {}
   }, 2000);
 
   const api = {
@@ -2055,7 +2065,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { parseUntil, todoOpen, bark, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { parseUntil, todoOpen, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
