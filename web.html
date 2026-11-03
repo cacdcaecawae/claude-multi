@@ -329,6 +329,13 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .ah b { color: var(--fgHi); }
   .desk .acct .gauge { padding: 0 0 6px; }
   .desk .acct .m { font-size: 11.5px; color: var(--fg3); }
+  /* a conversation looked at in its place: 「← 回到管家」 over it, the 管家's own things put away meanwhile */
+  #peekBar { display: none; flex: none; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  #butler.peeking #peekBar { display: flex; }
+  #butler.peeking #asks, #butler.peeking > .hint { display: none !important; }
+  #peekBar .back { flex: none; padding: 3px 10px; border-radius: 6px; background: var(--btn); color: var(--fgHi); }
+  #peekBar .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg2); }
+  @media (hover: hover) { #peekBar .back:hover { background: var(--btnH); } }
   /* the others' questions, above it: answered here, or opened */
   #asks { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 0; max-height: 50%; overflow: auto; flex: none; }
   #asks:empty { display: none; }
@@ -589,7 +596,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
   <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form><div id="deskRun"></div><div id="deskAcct"></div><div id="deskWait"></div><div id="deskLog"></div><div id="deskPc"></div></aside>
-  <main id="butler" class="blank"><div id="deskLine"></div><div id="asks"></div><div class="hint"></div></main>
+  <main id="butler" class="blank"><div id="deskLine"></div><div id="peekBar"><button class="back">← 回到管家</button><span class="t"></span></div><div id="asks"></div><div class="hint"></div></main>
   <aside id="deskR" class="desk"></aside>
 </div>
 <footer id="status"><span class="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span id="host">…</span></span>
@@ -674,7 +681,7 @@ let side = ['chats', 'usage', 'tokens'].includes(saved.side) ? saved.side : 'cha
 let state = null, tokens = null, tokensNow = null, tokensAt = 0, groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
 let listMode = saved.listMode === 'run' ? 'run' : 'dirs'; // 对话: by folder, or (the bell) 提示 and the running ones
-let butler = !!saved.butler, bConv = null; // 管家 mode (the spark), and its conversation once there is one
+let butler = !!saved.butler, bConv = null, peek = null; // 管家 mode (the spark), and its conversation once there is one
 $('#app').classList.toggle('butler', butler);
 $('#act .logo .label').textContent = butler ? '退出管家' : '管家'; // reloaded in it: says what the spark does
 function save() { // not before the tabs are back: a first load that failed would forget them
@@ -682,7 +689,7 @@ function save() { // not before the tabs are back: a first load that failed woul
     groups: groups.map((g) => ({ size: g.size, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
 }
 const allConvs = () => groups.flatMap((g) => g.tabs), convOf = (id) => id && allConvs().find((c) => c.id === id);
-const shownConvs = () => (butler ? [bConv] : groups.map((g) => g.active)).filter(Boolean); // live: in 管家, its conversation only
+const shownConvs = () => (butler ? [peek ?? bConv] : groups.map((g) => g.active)).filter(Boolean); // live: in 管家, its conversation (or the one looked at) only
 
 // Like the island: one account to the end, a conversation continues on its own account. Only when that one has
 // under an hour left and the recommended one has more, a sheet asks first (accounts don't share their prompt
@@ -762,7 +769,7 @@ async function load(fresh) {
   if (!restored) restore();
   if (openAsked) { const id = openAsked; openAsked = null; openSession(id); } // a notification tapped
   for (const c of allConvs()) c.sync();
-  bConv?.sync();
+  bConv?.sync(); peek?.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
   drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere();
   return ''; // read: no error
@@ -883,6 +890,7 @@ const butlerIds = () => new Set((state?.sessions ?? []).filter(isButler).map((s)
 const notesOut = () => { const b = butlerIds(); return (state?.notes ?? []).filter((n) => !b.has(n.id)); };
 function setButler(on) {
   if (butler === on) return;
+  if (!on) unpeek();
   butler = on; $('#app').classList.toggle('butler', on);
   $('#act .logo .label').textContent = on ? '退出管家' : '管家'; $('#act .logo').title = on ? '长按退出管家' : '长按进入管家';
   for (const g of groups) if (g.active) on ? g.active.sleep() : g.active.wake();
@@ -924,6 +932,22 @@ $('#deskAdd').onsubmit = (e) => {
   if (!bConv || bConv.ended || !bConv.started) return toast('管家没在运行：先启动它，或点「接着聊」');
   bConv.say(HAND + v); i.value = '';
 };
+// A conversation looked at in 管家 mode: a pane of its own in the 管家's place (one open in a tab too gets a second view
+// of it), till 「← 回到管家」, the 管家 tapped, or the mode left. Its Claude goes on either way.
+function peekAt(s, acct) {
+  if (peek?.id === s.id) return;
+  if (peek) peek.close(); else bConv?.sleep();
+  peek = makeConv({ id: s.id, acct }, s.title);
+  $('#butler').classList.add('peeking'); $('#peekBar .t').textContent = s.title;
+  $('#butler').append(peek.el); peek.wake(); if (FINE) peek.focus();
+}
+function unpeek() {
+  if (!peek) return;
+  peek.close(); peek = null;
+  $('#butler').classList.remove('peeking');
+  if (butler) { bConv?.wake(); if (FINE) bConv?.focus(); }
+}
+$('#peekBar .back').onclick = unpeek;
 function mountButler(c) {
   // its account and model, by its input box (drawn in drawDesk)
   if (!c.el.querySelector('.bsel')) {
@@ -937,7 +961,7 @@ function mountButler(c) {
       if (!t.value.startsWith(HAND)) t.value = HAND + t.value; // what you'd written becomes the thing
       t.focus(); t.setSelectionRange(t.value.length, t.value.length);
     };
-  } bConv = c; $('#butler').append(c.el); if (butler) { c.wake(); if (FINE) c.focus(); } }
+  } bConv = c; $('#butler').append(c.el); if (butler && !peek) { c.wake(); if (FINE) c.focus(); } }
 function drawButler() {
   if (!butler || !state) return;
   const bs = state.sessions.find(isButler); // the newest
@@ -1373,9 +1397,9 @@ function sideGroup() {
 }
 async function openSession(id, where) {
   const s = state?.sessions.find((x) => x.id === id), have = convOf(id);
-  if (s && s === state.sessions.find(isButler)) return setButler(true); // the 管家 itself: its mode, not a second pane of it
-  setButler(false); // a notification tapped while in 管家: to the conversation
+  if (s && s === state.sessions.find(isButler)) return butler ? unpeek() : setButler(true); // the 管家 itself: its mode, not a second pane of it
   if (!s) return toast('这个对话已经不在列表里了');
+  if (butler) { const acct = s.pid ? s.acct + 1 : await pickAcct(s); if (acct) peekAt(s, acct); return; } // in 管家 mode it stays: the conversation in the 管家's place
   if (have) return where && where !== 'aside' && where !== have.g ? moveConv(have, where) : activate(have.g, have); // open already: that tab
   const acct = s.pid ? s.acct + 1 : await pickAcct(s); // a running one stays where it runs
   if (!acct || convOf(id)) return;
