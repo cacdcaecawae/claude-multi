@@ -572,8 +572,18 @@ async function pushEnable() {
     const sub = (await reg.pushManager.getSubscription())
       ?? await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0)) });
     await post('/api/push/sub', sub.toJSON());
-    pushOn = true; drawSide(); toast('手机通知已开启。点「发测试」试一下', 4000);
+    pushOn = true; drawSide(); toast('这台设备的通知已开启。点「发测试」试一下', 4000);
   } catch (e) { toast('开启失败：' + e.message, 6000); }
+}
+// a test to this device only: its subscription told again first (the service may have dropped it), then what came back
+async function pushTest() {
+  try {
+    const sub = await pushSub();
+    if (!sub) { pushOn = false; drawSide(); return toast('这台设备的通知已经失效，请重新开启', 5000); }
+    await post('/api/push/sub', sub.toJSON());
+    const r = await post('/api/push/test', { endpoint: sub.endpoint });
+    toast(r.sent ? '已发出，这台设备应该马上弹出通知。没弹出的话，看看系统设置里是否允许了这个浏览器的通知' : `没发出去，推送服务回复：${r.results.join('，') || '无'}`, 6000);
+  } catch (e) { toast('发测试失败：' + e.message, 5000); }
 }
 async function pushDisable() {
   const sub = await pushSub().catch(() => null);
@@ -657,8 +667,8 @@ function renderChats() {
   $('#sideActs').html = `<button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   if (bell) {
-    const push = `<div class="pushbar">${pushOn ? '<span>手机通知已开启</span><button class="link" data-pushtest>发测试</button><button class="link" data-pushoff>关闭</button>'
-      : '<span>回复完、等你确认时，在手机上提醒你</span><button class="link" data-pushon>开启手机通知</button>'}</div>`;
+    const push = `<div class="pushbar">${pushOn ? '<span>这台设备的通知已开启</span><button class="link" data-pushtest>发测试</button><button class="link" data-pushoff>关闭</button>'
+      : '<span>回复完、等你确认时提醒你（每台设备分别开启）</span><button class="link" data-pushon>开启这台设备的通知</button>'}</div>`;
     $('#view').html = push + (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
         notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
           <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
@@ -678,7 +688,7 @@ $('#side').onclick = (e) => {
   if (!b) return;
   if (b.matches('[data-new]')) return newSheet();
   if (b.matches('[data-pushon]')) return pushEnable();
-  if (b.matches('[data-pushtest]')) return post('/api/push/test').then((r) => toast(r.sent ? '已发出，手机上应该马上能看到' : `没发出去：${r.results.join('，') || '还没有设备开启通知'}`, 5000), (x) => toast(x.message));
+  if (b.matches('[data-pushtest]')) return pushTest();
   if (b.matches('[data-pushoff]')) return pushDisable();
   if (b.matches('[data-bell]')) { listMode = listMode === 'run' ? 'dirs' : 'run'; save(); return renderChats(); }
   if (b.matches('[data-refresh]')) {

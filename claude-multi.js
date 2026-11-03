@@ -1256,16 +1256,20 @@ function pushAuth(endpoint, jwk) {
   const sig = require('crypto').sign('sha256', Buffer.from(t), { key: require('crypto').createPrivateKey({ key: jwk, format: 'jwk' }), dsaEncoding: 'ieee-p1363' });
   return `vapid t=${t}.${sig.toString('base64url')}, k=${pushPublic(jwk)}`;
 }
-// {title, body, id} to every subscription; one its push service says is gone (404, 410: the app removed, notifications
-// turned off) is dropped. The push services' answers back: 201 is delivered to them.
-async function pushAll(msg) {
-  const s = pushStore();
-  if (!s?.subs.length) return [];
-  const out = await Promise.all(s.subs.map((sub) => fetch(sub.endpoint, {
+// {title, body, id} to every subscription (or the one at endpoint only); one its push service says is gone (404, 410:
+// the app removed, notifications turned off) is dropped. The push services' answers back: 201 is delivered to them.
+// Any other answer goes to the log, with the service's words: why a device got nothing.
+async function pushAll(msg, endpoint) {
+  const s = pushStore(), subs = (s?.subs ?? []).filter((x) => !endpoint || x.endpoint === endpoint);
+  if (!subs.length) return [];
+  const out = await Promise.all(subs.map((sub) => fetch(sub.endpoint, {
     method: 'POST', body: pushBody(sub.keys, JSON.stringify(msg)), signal: AbortSignal.timeout(15000),
     headers: { authorization: pushAuth(sub.endpoint, s.jwk), 'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: '86400', urgency: 'high' },
-  }).then((r) => r.status, (e) => e.message)));
-  const gone = new Set(s.subs.filter((_, i) => out[i] === 404 || out[i] === 410).map((x) => x.endpoint));
+  }).then(async (r) => {
+    if (r.status !== 201) log('push_fail', { host: new URL(sub.endpoint).host, status: r.status, said: (await r.text().catch(() => '')).slice(0, 300) });
+    return r.status;
+  }, (e) => { log('push_fail', { host: new URL(sub.endpoint).host, err: `${e.cause?.code ?? ''} ${e.message}`.trim() }); return e.cause?.code ?? e.message; })));
+  const gone = new Set(subs.filter((_, i) => out[i] === 404 || out[i] === 410).map((x) => x.endpoint));
   if (gone.size) { const now = pushStore(); now.subs = now.subs.filter((x) => !gone.has(x.endpoint)); savePush(now); }
   return out;
 }
@@ -1437,8 +1441,8 @@ async function web() {
       return { n: s.subs.length };
     },
     'POST /api/push/off': (q, b) => { const s = pushStore(); if (s) { s.subs = s.subs.filter((x) => x.endpoint !== b.endpoint); savePush(s); } return {}; },
-    'POST /api/push/test': async () => {
-      const r = await pushAll({ title: 'Claude 多账号', body: '测试通知：手机通知开好了。对话回复完、等你确认时，会这样提醒你。' });
+    'POST /api/push/test': async (q, b) => { // to the device asking (its endpoint), not every one
+      const r = await pushAll({ title: 'Claude 多账号', body: '测试通知：这台设备的通知开好了。对话回复完、等你确认时，会这样提醒你。' }, b.endpoint);
       return { sent: r.filter((x) => x === 201).length, results: r };
     },
     // asked every second while shown, mostly from where the last answer ended. By the open terminal's key: one
