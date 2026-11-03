@@ -138,9 +138,10 @@ function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profi
 // continued on another account stopped at "Do you trust this folder?". Its Yes/No has no numbers, so the web page
 // didn't show it as a choice, and a message typed there answered it with its default: No, exit. Trusted in one config
 // is trusted in all: the config about to start gets every folder another one trusts.
-function shareTrust(dir, files = [path.join(HOME, '.claude.json'), ...load().profiles.map((p) => path.join(p.configDir, '.claude.json'))]) {
+// extra: folders (as C:/a/b) trusted besides, as clicking Yes on their trust question does
+function shareTrust(dir, files = [path.join(HOME, '.claude.json'), ...load().profiles.map((p) => path.join(p.configDir, '.claude.json'))], extra = []) {
   const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const trusted = new Set(files.flatMap((f) => Object.entries(read(f)?.projects ?? {}).filter(([, v]) => v?.hasTrustDialogAccepted).map(([k]) => k)));
+  const trusted = new Set([...extra, ...files.flatMap((f) => Object.entries(read(f)?.projects ?? {}).filter(([, v]) => v?.hasTrustDialogAccepted).map(([k]) => k))]);
   const f = path.join(dir, '.claude.json'), j = read(f);
   const add = j ? [...trusted].filter((k) => !j.projects?.[k]?.hasTrustDialogAccepted) : [];
   if (!add.length) return; // written only on a change: a Claude running there rewrites this file too
@@ -720,6 +721,169 @@ async function attach(id) {
     process.exit(1);
   }
 }
+
+// --- chat: how the 管家 (butler\) works the other conversations, through the web service as the page does. A
+// conversation by its id, or a part of its title that only it has. look: where it is, its last answer, the question it
+// waits on; wait: until it's done (in the 管家's background: it's woken when this ends), or until a time (a quota's
+// reset); say: a message, sent as the page sends one, not while it's asking something; pick: an option of its question;
+// new: one started in the web service, on the recommended account, its folder marked trusted first.
+async function webPost(p, body) {
+  const r = await fetch(`http://127.0.0.1:${WEB_PORT}${p}`, { method: 'POST', body: JSON.stringify(body),
+    headers: { cookie: `cm=${webKey()}`, 'content-type': 'application/json', 'accept-encoding': 'identity' } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.err || `网页服务出错了（${r.status}）`);
+  return j;
+}
+const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+function findChat(ref) {
+  const all = listSessions(load()), byId = all.find((s) => s.id === ref), hit = byId ? [byId] : all.filter((s) => ref && s.title.includes(ref));
+  if (hit.length === 1) return hit[0];
+  if (!hit.length) throw new Error(`找不到「${ref ?? ''}」这个对话`);
+  throw new Error(`「${ref}」对上了好几个对话，用编号指定：\n${hit.slice(0, 8).map((s) => `  ${s.id}  ${s.title}`).join('\n')}`);
+}
+// its Claude's session file (on any account), once one matches; null after ms
+async function waitLive(match, ms = 0) {
+  for (const end = Date.now() + ms; ; await sleep(1000)) {
+    for (const p of load().profiles) { const j = sessionFiles(p.configDir).find(match); if (j) return { ...j, dir: p.configDir }; }
+    if (Date.now() >= end) return null;
+  }
+}
+const statusOf = (live) => { try { return alive(live.pid) ? JSON.parse(fs.readFileSync(path.join(live.dir, 'sessions', `${live.pid}.json`), 'utf8')).status : 'gone'; } catch { return null; } };
+// A conversation's screen as its terminal shows it now (the question it waits on is only there: its record gets it once
+// answered): its stream, which the service begins with what's on it, written into a terminal of the same size here and
+// read once quiet; what's on it as the page reads it (screen.js)
+async function screenOf(id) {
+  const { Terminal } = require('@xterm/headless'), { Unicode11Addon } = require('@xterm/addon-unicode11'), { parseScreen } = require('./screen.js');
+  const { key } = await webPost('/api/open', { id }), ac = new AbortController();
+  const r = await fetch(`http://127.0.0.1:${WEB_PORT}/api/term?key=${encodeURIComponent(key)}`, { signal: ac.signal, headers: { cookie: `cm=${webKey()}`, 'accept-encoding': 'identity' } });
+  let term = null, last = Date.now(), wrote = Promise.resolve();
+  (async () => {
+    const dec = new TextDecoder();
+    let buf = '';
+    for await (const chunk of r.body) {
+      buf += dec.decode(chunk, { stream: true });
+      for (let k; (k = buf.indexOf('\n\n')) >= 0; buf = buf.slice(k + 2)) {
+        const block = buf.slice(0, k), ev = /^event: (\w+)/m.exec(block)?.[1], data = /^data: (.*)$/m.exec(block)?.[1];
+        if (ev === 'size') {
+          const z = JSON.parse(data);
+          if (term) { if (z.w) term.resize(z.w, z.h); continue; }
+          term = new Terminal({ cols: z.w || 120, rows: z.h || 40, allowProposedApi: true });
+          term.loadAddon(new Unicode11Addon()); term.unicode.activeVersion = '11'; // CJK two columns wide, as the page draws them
+        } else if (ev === 'data' && term) { const d = JSON.parse(data); wrote = new Promise((ok) => term.write(d, ok)); last = Date.now(); }
+      }
+    }
+  })().catch(() => {});
+  for (const end = Date.now() + 5000; Date.now() < end && !(term && Date.now() - last > 800);) await sleep(100);
+  ac.abort(); await wrote;
+  if (!term) return null;
+  const b = term.buffer.active, rows = [];
+  for (let i = 0; i < term.rows; i++) rows.push(b.getLine(b.baseY + i)?.translateToString(true) ?? '');
+  term.dispose();
+  return parseScreen(rows);
+}
+// "15:40" (the next one), or a date and time: when to wake
+function parseUntil(s, now = Date.now()) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s ?? '');
+  if (!m) { const t = Date.parse(s); if (isNaN(t)) throw new Error(`看不懂这个时间：${s}（写成 15:40）`); return t; }
+  const d = new Date(now); d.setHours(+m[1], +m[2], 0, 0);
+  return d.getTime() > now ? d.getTime() : d.getTime() + 86400000;
+}
+// not while it works (up to ms), nor while it waits on a question: typing would answer it
+async function untilReady(live, ms = 600000) {
+  for (const end = Date.now() + ms; ; await sleep(2000)) {
+    const st = statusOf(live);
+    if (st === 'gone') throw new Error('它的 Claude 已经退出了');
+    if (st === 'waiting') throw new Error('它在等人回答问题，先用 chat look 看它在问什么');
+    if (st === 'idle') return;
+    if (Date.now() >= end) throw new Error(st == null ? '读不到它的状态，没有发' : '它一直在忙，没有发');
+  }
+}
+// as the page sends a message: pasted in one piece, then Enter; whether it got to work
+async function typeIn(key, live, text) {
+  await webPost('/api/input', { key, by: 'butler', data: `\x1b[200~${text.replace(/\r?\n/g, '\r')}\x1b[201~` });
+  await sleep(400);
+  await webPost('/api/input', { key, by: 'butler', data: '\r' });
+  for (let k = 0; k < 20; k++, await sleep(1000)) if (['busy', 'shell'].includes(statusOf(live))) return true;
+  return false;
+}
+async function chatLook(ref) {
+  const s = findChat(ref), live = s.pid ? await waitLive((j) => j.pid === s.pid) : null;
+  const st = live ? statusOf(live) : null, menu = st === 'waiting' ? (await screenOf(s.id))?.menu : null;
+  const ans = history(s.file).items.filter((m) => m.role === 'claude').pop()?.text ?? '（还没有回答）';
+  const where = !s.pid ? '没在运行' : { busy: '正在回复', shell: '正在执行命令', waiting: '在等人回答', idle: '空闲' }[st] ?? '在运行';
+  let out = `「${s.title}」 ${s.id}\n账号 ${s.acct + 1} · ${s.cwd} · ${s.pid ? (s.web ? '网页上 · ' : '电脑窗口里 · ') : ''}${where}\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}`;
+  if (menu) out += `\n\n它在问${menu.tabs ? `（一次好几题：${menu.tabs}）` : ''}：\n${menu.ask}\n`
+    + menu.opts.map((o) => `  ${o.n}. ${o.check == null ? '' : o.check ? '[✔] ' : '[ ] '}${o.label}${o.desc ? ' — ' + o.desc : ''}${o.n === menu.cur ? '  ← 光标在这' : ''}`).join('\n')
+    + `\n（用户交代过怎么选的，用 claude-multi chat pick ${s.id} <选项号> 回答；没交代就转告用户）`;
+  else if (st === 'waiting') out += '\n\n它在等人处理，但屏幕上没认出选择题，让用户在网页上打开它看一下。';
+  console.log(out);
+}
+async function chatWait(ref, until, maxMin) {
+  if (until) {
+    const t = parseUntil(until);
+    await sleep(Math.max(0, t - Date.now()));
+    console.log(`到点了（${new Date(t).toLocaleString('zh-CN', { hour12: false })}）。`);
+    return ref ? chatLook(ref) : undefined;
+  }
+  const s = findChat(ref), live = s.pid ? await waitLive((j) => j.pid === s.pid) : null;
+  let done = !live;
+  for (const end = Date.now() + maxMin * 60000; !done && Date.now() < end; await sleep(3000)) {
+    const st = statusOf(live);
+    done = st === 'gone' || (st != null && st !== 'busy' && st !== 'shell'); // idle, or waiting on someone
+  }
+  if (!done) console.log(`等了 ${maxMin} 分钟，它还在忙。\n`);
+  await chatLook(s.id);
+}
+async function chatSay(ref, text) {
+  if (!text) throw new Error('要说什么？');
+  const s = findChat(ref), t0 = Date.now();
+  const { key } = await webPost('/api/open', { id: s.id, acct: s.acct + 1, cols: 120, rows: 40 }); // not running: continued in the web service
+  const live = await waitLive((j) => j.sessionId === s.id || j.pid === s.pid || (!s.pid && sameDir(j.cwd, s.cwd) && j.startedAt >= t0 - 5000), 60000);
+  if (!live) throw new Error('它没能启动起来');
+  await untilReady(live);
+  const went = await typeIn(key, live, text);
+  console.log(went ? `已发给「${s.title}」，它开始干活了。` : `已发给「${s.title}」，但它还没动，稍后用 chat look 看看。`);
+}
+// a single-choice question: from the option the cursor is on to the one chosen, then Enter (as the page's card does)
+async function chatPick(ref, n) {
+  const s = findChat(ref), menu = s.pid ? (await screenOf(s.id))?.menu : null, o = menu?.opts.find((x) => x.n === Number(n));
+  if (!menu) throw new Error('它现在没在问选择题');
+  if (menu.tabs || menu.opts.some((x) => x.check != null)) throw new Error('这是多选题，或者一次问了好几题，请用户在网页上点卡片回答');
+  if (!o) throw new Error(`选项号要在 1 到 ${menu.opts.length} 之间`);
+  if (/^Type something/i.test(o.label)) throw new Error('「自己输入」这一项请用户在网页上回答');
+  const { key } = await webPost('/api/open', { id: s.id });
+  for (let i = 0; i < Math.abs(o.n - menu.cur); i++) await webPost('/api/input', { key, by: 'butler', data: o.n > menu.cur ? '\x1b[B' : '\x1b[A' });
+  await webPost('/api/input', { key, by: 'butler', data: '\r' });
+  console.log(`已替用户选了「${o.label}」。`);
+}
+async function chatNew(dir, text, n) {
+  dir = path.resolve(dir ?? '');
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`没有这个文件夹：${dir}`);
+  if (sameDir(dir, HOME)) throw new Error('主文件夹 Claude 每次都要问是否信任，换一个具体的文件夹');
+  if (!text) throw new Error('要给它第一句话');
+  const reg = load();
+  if (!n) { const u = (await usageState(reg)).json; if (!u.open) throw new Error(`账号都到上限了，${u.ready} 后恢复`); n = u.rec + 1; }
+  const p = reg.profiles[n - 1];
+  if (!p) throw new Error('没有这个账号');
+  shareTrust(p.configDir, undefined, [dir.replace(/\\/g, '/')]); // no trust question to stop at
+  const t0 = Date.now(), { key } = await webPost('/api/open', { dir, acct: n, cols: 120, rows: 40 });
+  const live = await waitLive((j) => sameDir(j.cwd, dir) && j.startedAt >= t0 - 5000, 60000);
+  if (!live) throw new Error('它没能启动起来');
+  await untilReady(live, 60000);
+  const went = await typeIn(key, live, text);
+  console.log(`已在账号 ${n} 新建对话，编号 ${live.sessionId}（文件夹 ${dir}）。${went ? '第一句已发出，它开始干活了。' : '第一句已发出，但它还没动，稍后用 chat look 看看。'}`);
+}
+async function chat([sub, ...a]) {
+  const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a.splice(i, 2)[1] : undefined; };
+  try {
+    if (sub === 'look') await chatLook(a[0]);
+    else if (sub === 'wait') { const until = opt('--until'), max = Number(opt('--max')) || 120; await chatWait(a[0], until, max); }
+    else if (sub === 'say') await chatSay(a[0], a.slice(1).join(' '));
+    else if (sub === 'pick') await chatPick(a[0], a[1]);
+    else if (sub === 'new') { const n = Number(opt('--acct')) || 0; await chatNew(a[0], a.slice(1).join(' '), n); }
+    else console.log('claude-multi chat look <对话> | wait <对话> [--max 分钟] | wait [<对话>] --until 15:40 | say <对话> <消息> | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N]');
+  } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
+}
 // Before account p continues conversation s: its newest record (and side folder) into p's config dir.
 function copyTo(s, p) {
   const dst = path.join(p.configDir, 'projects', path.basename(path.dirname(s.file)));
@@ -997,6 +1161,8 @@ const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes runn
 const WEB_USAGE = path.join(ROOT, 'web-usage.json'); // the quota as the page last got it
 const WEB_PORT = 7788;
 const BUTLER = path.join(__dirname, 'butler'); // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
+// its 待办.md has something still to do: a "## " section above "## 已完成"
+const todoOpen = (text) => /^## (?!已完成)/m.test(String(text ?? '').split(/^## 已完成/m)[0]);
 // The server, from tunnel.json here (not in the repository): {"ssh": "myserver", "url": "https://<its address>:8443"}.
 // Without it there is no tunnel: the page opens on this computer only. sock: the tunnel's end on the server.
 let TUNNEL = null;
@@ -1491,8 +1657,7 @@ async function web() {
       if (!p) throw new Error('没有这个账号');
       if (!b.dir || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
       // the 管家 is one: two screens starting it at once (it isn't listed before its first message) get the same
-      const same = (a, z) => path.resolve(a).toLowerCase() === path.resolve(z).toLowerCase();
-      const one = same(b.dir, BUTLER) && [...terms.values()].find((t) => t.kind === 'pty' && !t.gone && same(t.cwd, BUTLER));
+      const one = sameDir(b.dir, BUTLER) && [...terms.values()].find((t) => t.kind === 'pty' && !t.gone && sameDir(t.cwd, BUTLER));
       if (one) return { key: one.key, kind: 'pty' };
       sessCache = null;
       return { key: startPty(p, b.dir, [], cols, rows).key, kind: 'pty' };
@@ -1527,6 +1692,10 @@ async function web() {
     'POST /api/input': (q, b) => {
       const t = terms.get(b.key);
       if (!t || t.gone) throw new Error('这个终端已经结束');
+      // the 管家 (chat say, pick) doesn't type where you typed words in the last 2 minutes: yours and its would mix.
+      // Keys a page sends by itself (focus reports, arrows, Enter) aren't words.
+      if (b.by === 'butler') { if (Date.now() - (t.typed ?? 0) < 120000) throw new Error('用户两分钟内在这个对话里打过字，先别发，过一会儿再试'); }
+      else if (/[^\x00-\x1f\x7f]/.test(String(b.data).replace(/\x1b(\[[0-9;?]*[A-Za-z~]|O.)/g, ''))) t.typed = Date.now();
       if (t.kind === 'pty') t.proc.write(String(b.data)); else t.proc.stdin.write(JSON.stringify({ k: String(b.data) }) + '\n');
       return {};
     },
@@ -1568,6 +1737,7 @@ async function web() {
       }
       if (!keyMatch(keyCookie(req.headers.cookie), webKey())) return out(403, '要用链接打开：在电脑上运行 claude-multi web-link。', text);
       if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
+      if (req.method === 'GET' && url.pathname === '/screen.js') return out(200, fs.readFileSync(path.join(ROOT, 'screen.js'), 'utf8'), 'text/javascript; charset=utf-8');
       // the terminal's files, from our node_modules: from the CDN abroad they took 7-8 s, and the page waits for
       // them. Kept a year: the page asks with the version, ?6.0.0, so a new one is a new address.
       const lib = /^\/lib\/(@xterm\/[\w-]+\/(?:lib|css)\/[\w.-]+\.(js|css))$/.exec(url.pathname);
@@ -1635,7 +1805,22 @@ async function web() {
   });
   server.keepAliveTimeout = 5000; // the relay's nginx lets its idle ones go at 4 s, before: it never reuses one closing here
   server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
-  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
+  // A restart ended the 管家, and its background waits with it: with something left in its 待办, it's continued (on its
+  // own account) and told so, to read the list and wait again for what it still watches
+  async function wakeButler() {
+    let todo = ''; try { todo = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
+    const s = todoOpen(todo) && sessions().find((x) => sameDir(x.cwd, BUTLER)), p = s && !s.pid && load().profiles[s.acct];
+    if (!p) return;
+    const t = startPty(p, s.cwd, ['--resume', s.id]);
+    for (let k = 0; k < 60 && !t.gone; k++, await sleep(1000)) {
+      let st = null; try { st = JSON.parse(fs.readFileSync(path.join(p.configDir, 'sessions', `${t.pid}.json`), 'utf8')).status; } catch {}
+      if (st !== 'idle') continue;
+      t.proc.write('\x1b[200~[系统通知] 网页服务刚重启，你在后台等着的事都断了。读一遍 待办.md，把还要盯的重新盯上。\x1b[201~');
+      await sleep(400); t.proc.write('\r');
+      return log('butler_woken', { session_id: s.id });
+    }
+  }
+  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); setTimeout(wakeButler, 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
   // the way in from outside, kept up: dialed again 5 s after a drop, waiting longer (up to a minute) while each try
   // fails at once (the server or the network down). A connection the network swallowed (a proxy's TUN switched on or
   // off moves it to another interface) is found dead within 15 s, by either side. On the server its end is a socket
@@ -1820,7 +2005,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { parseUntil, todoOpen, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -1839,6 +2024,7 @@ if (require.main === module) {
   else if (cmd === 'resume') resume(process.argv[3], process.argv[4]);
   else if (cmd === 'swap') switchChat(process.argv[3], Number(process.argv[4]), process.argv.includes('--now'));
   else if (cmd === 'attach') attach(process.argv[3]);
+  else if (cmd === 'chat') chat(process.argv.slice(3));
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'remove') remove(process.argv[3]);
   else if (cmd === 'web') web();

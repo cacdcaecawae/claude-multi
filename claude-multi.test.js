@@ -502,3 +502,28 @@ console.log('tokens ok');
   assert.ok(crypto.verify('sha256', Buffer.from(`${h}.${c}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(s, 'base64url')));
   console.log('push ok');
 }
+
+// The 管家's chat commands: a time to wake at, and whether its 待办 still has something to do.
+{
+  const { parseUntil, todoOpen } = require('./claude-multi');
+  const now = new Date(2026, 10, 3, 14, 0).getTime();
+  assert.equal(parseUntil('15:40', now), new Date(2026, 10, 3, 15, 40).getTime());
+  assert.equal(parseUntil('9:05', now), new Date(2026, 10, 4, 9, 5).getTime()); // past today: tomorrow's
+  assert.throws(() => parseUntil('soon', now));
+  assert.equal(todoOpen('## rag检索 跑完告诉我\n- 状态：等待中\n\n## 已完成\n- x'), true);
+  assert.equal(todoOpen('# 待办\n\n## 已完成\n- rag检索 跑完了'), false); // only done ones
+  assert.equal(todoOpen(''), false);
+  console.log('chat ok');
+}
+
+// What's on Claude's screen (screen.js, the page's and the 管家's): a question's options, the trust question, and
+// "❯ 4. …" in the input box (your words, not a menu)
+{
+  const { parseScreen } = require('./screen.js'), rule = '─'.repeat(30);
+  const m = parseScreen(['Which color?', '', '❯ 1. Red', '     warm', '  2. Blue', '', 'Enter to select · Esc to cancel']).menu;
+  assert.deepEqual([m.cur, m.ask, m.opts.map((o) => o.label).join('|'), m.opts[0].desc], [1, 'Which color?', 'Red|Blue', 'warm']);
+  const t = parseScreen(['Quick safety check: Is this a project you trust?', '', '❯ No, exit', '  Yes, I trust this folder', '', 'Enter to confirm · Esc to cancel']).menu;
+  assert.deepEqual([t.cur, t.opts.map((o) => o.label).join('|')], [1, 'No, exit|Yes, I trust this folder']);
+  assert.equal(parseScreen(['1. 签字', '2. 压缩', '3. 上传', rule, '❯ 4. 保存回执截图', rule]).menu, null);
+  console.log('screen ok');
+}

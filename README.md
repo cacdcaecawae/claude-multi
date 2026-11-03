@@ -131,6 +131,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 | `resume ID N` | 用账号 N 接着一个之前的对话 |
 | `swap ID N [--now]` | 把正在运行的对话换到账号 N。默认等 Claude 这一轮答完再换，`--now` 立即换 |
 | `attach ID` | 在当前终端接上一个在网页服务里运行的对话，两边看到同一个画面 |
+| `chat look\|wait\|say\|pick\|new …` | 管家用的：看一个对话（含它正在问的选择题）、等它答完或等到某个时间、给它发消息、替你选一项、在后台新开对话。不带参数运行 `chat` 看用法 |
 | `rename ID 名字` | 给没在运行的对话改名 |
 | `delete ID` | 把没在运行的对话移到回收站 |
 | `remove N` | 移除账号 N。它的文件夹移到回收站，有对话正在用它时不让移除 |
@@ -261,6 +262,8 @@ server {
 | `island.ps1` | 灵动岛（WPF）。必须保存为带 BOM 的 UTF-8，否则 PowerShell 5.1 会读错中文 |
 | `console-bridge.ps1` | 读取电脑上 Claude 窗口的画面并转发按键，网页的终端视图靠它 |
 | `web.html` | 网页，单个文件，每次刷新直接读取，改完不用重启服务 |
+| `screen.js` | 从 Claude 的终端画面认出「正在回复」和选择题，网页和管家的命令共用 |
+| `butler\` | 管家的工作文件夹：`CLAUDE.md` 是它的规矩，模型设成 Sonnet；`待办.md` 由它自己维护，不进 git |
 | `claude-multi.test.js` | 测试 |
 
 运行测试：
