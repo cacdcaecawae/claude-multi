@@ -61,7 +61,24 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #act .logo { margin: 6px 0 4px; color: #d97757 !important; } /* 管家: in and out of it */
   #act .logo .spark { width: 24px; height: 24px; }
   #app.butler #act .logo { background: var(--tint); }
-  #app.butler #act button[data-side].on { background: none; color: var(--fg3); }
+  #app.butler #act button[data-side] { display: none; } /* a place of its own: out of it only by the spark */
+  /* held to go in or out: a ring fills round the spark (let go early and it empties) */
+  #act .logo { touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+  #act .logo .sp { position: relative; display: grid; place-items: center; }
+  #act .logo .ring { position: absolute; left: -8px; top: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; overflow: visible; }
+  #act .logo .ring circle { fill: none; stroke: #d97757; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: 100; opacity: 0; }
+  #act .logo.hold .ring circle { opacity: 1; animation: holdRing .8s linear forwards; }
+  #act .logo.hold .spark { animation: spin 1.6s linear infinite; }
+  @keyframes holdRing { to { stroke-dashoffset: 0; } }
+  /* the way in: a circle opens from the spark onto the 管家, a big spark bursting in the middle; the way out, it closes */
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+  html.vtIn::view-transition-new(root) { animation: vtOpen .7s cubic-bezier(.7, 0, .2, 1) both; }
+  html.vtOut::view-transition-old(root) { z-index: 1; animation: vtOpen .55s cubic-bezier(.7, 0, .2, 1) reverse both; }
+  @keyframes vtOpen { from { clip-path: circle(0 at var(--vx) var(--vy)); } to { clip-path: circle(var(--vr) at var(--vx) var(--vy)); } }
+  #burst { position: fixed; left: 50%; top: 50%; width: 180px; height: 180px; margin: -90px 0 0 -90px; color: #d97757; pointer-events: none; z-index: 50; animation: burst 1s cubic-bezier(.2, .7, .2, 1) forwards; }
+  @keyframes burst { 0% { transform: scale(.2) rotate(0); opacity: 0; } 30% { opacity: .85; } 100% { transform: scale(1.7) rotate(150deg); opacity: 0; } }
+  /* and a warm light over it, while there */
+  #app.butler { background: radial-gradient(900px 520px at 0 0, rgba(217, 119, 87, .16), transparent 70%); }
   .spark { display: block; width: 100%; height: 100%; }
   #act button { position: relative; width: 40px; height: 40px; margin: 2px 0; border-radius: 8px; display: grid; place-items: center; color: var(--fg3); }
   #act button:hover, #act button.on { color: var(--fg); }
@@ -226,7 +243,15 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #app.butler #side, #app.butler #sideSash, #app.butler #editor { display: none !important; }
   #butler.blank > .hint { display: flex; }
   /* its 操作台, beside it: how it is, what it keeps watching, the conversations, what just got done, the computer */
-  #desk { display: none; width: 260px; flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: var(--bar); }
+  #desk { display: none; width: 260px; flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: linear-gradient(180deg, rgba(217, 119, 87, .10), transparent 200px), var(--bar); }
+  /* its account and model, by its input box; and on its start page */
+  .send .bsel { display: flex; gap: 6px; padding: 0 8px 6px 42px; }
+  .send .bsel button { font-size: 12px; padding: 2px 9px; border-radius: 10px; background: var(--tint); color: var(--fg2); }
+  .send .bsel button::after { content: ' ▾'; font-size: 10px; }
+  @media (hover: hover) { .send .bsel button:hover { color: var(--fgHi); } }
+  .hint .pickRow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .hint .pickRow > span { color: var(--fg2); margin-right: 2px; }
+  .hint .pickRow .opt { color: var(--fg); }
   #app.butler #desk { display: flex; }
   #desk:empty, #desk > div:empty, #deskLine { display: none; }
   #desk h4 { margin: 0 0 6px; padding: 0 6px; font-size: 11px; font-weight: 600; color: var(--fg2); }
@@ -584,7 +609,7 @@ const ac = (n, cls = '') => {
 // Claude's spark, as the icon draws it, in currentColor
 const SPARK = `<svg class="spark" viewBox="-32 -32 64 64" fill="currentColor">${[29, 24, 27, 23, 30, 25, 27, 23, 28, 24, 27, 22].map((l, k) =>
   `<path transform="rotate(${k * 30 + 8 + [0, 2, -1, 1, -1, -2, 1, 1, -1, 2, 0, -1][k]})" d="M-4.7 0L-2.5 -${l}A2.5 2.5 0 0 1 2.5 -${l}L4.7 0z"/>`).join('')}<circle r="7.6"/></svg>`;
-$('#act .logo').insertAdjacentHTML('afterbegin', SPARK);
+$('#act .logo').insertAdjacentHTML('afterbegin', `<span class="sp">${SPARK}<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" pathLength="100"/></svg></span>`);
 
 // --- the layout, as in VS Code: the activity bar picks what the side bar shows (对话, 额度, 用量); conversations open as
 // tabs in an editor group, and 向右拆分 puts groups side by side (three at most). A phone shows one group, the side bar
@@ -693,7 +718,7 @@ function drawSide() {
   $('#app').classList.toggle('side', sideOn);
   $('#app').style.setProperty('--sideW', sideW + 'px');
   document.querySelectorAll('#act [data-side]').forEach((b) => b.classList.toggle('on', b.dataset.side === side));
-  const n = state?.notes?.length ?? 0; $('#badge').textContent = n; $('#badge').hidden = !n;
+  const n = notesOut().length; $('#badge').textContent = n; $('#badge').hidden = !n;
   $('#sideTitle').textContent = { chats: '对话', usage: '额度', tokens: '用量' }[side];
   if (state) ({ chats: renderChats, usage: renderUsage, tokens: renderTokens })[side]();
 }
@@ -734,8 +759,8 @@ function markRows() { // the side bar's rows: which are open in a tab, which one
 // 对话, newest first (by its record's last write): by folder, the folders by their newest; or, behind the bell, the unread
 // 提示 and the running ones, with their folder on a second line
 function renderChats() {
-  const notes = state.notes ?? []; // unread only: the server drops what you've read anywhere or answered since
-  const S = state.sessions, run = S.filter((x) => x.pid), bell = listMode === 'run';
+  const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
+  const S = state.sessions.filter((x) => !isButler(x)), run = S.filter((x) => x.pid), bell = listMode === 'run';
   const right = (x) => `${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}${x.pid ? `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(x.at)}</span>`}
     <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
   const row = (x) => `<div class="row" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1)}
@@ -787,36 +812,85 @@ $('#view').ondragend = (e) => {
   if (drag?.id && e.dataTransfer.dropEffect === 'none' && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 24) openSession(drag.id);
 };
 $('#act').onclick = (e) => {
-  if (e.target.closest('.logo')) return setButler(!butler);
+  if (e.target.closest('.logo')) { if (e.detail === 0) flipButler(!butler); else if (Date.now() - heldAt > 1500) toast(butler ? '长按菊花退出管家' : '长按菊花进入管家'); return; } // Enter goes at once
   const b = e.target.closest('[data-side]');
   if (!b) return;
   if (b.dataset.side === side && sideOn && !NARROW.matches && !butler) sideOn = false; // the shown one again: the side bar closes
   else { if (b.dataset.side === 'tokens' && side !== 'tokens') tokens = null; side = b.dataset.side; sideOn = true; }
   setButler(false); drawSide(); save();
 };
-$('#sAcct').onclick = () => { setButler(false); side = 'usage'; sideOn = true; drawSide(); save(); };
+$('#sAcct').onclick = () => { if (butler) return; setButler(false); side = 'usage'; sideOn = true; drawSide(); save(); };
 
 // --- 管家: the newest conversation in its folder (state.butler) is the 管家, the one every screen shows; in its mode,
 // it alone. Out of it, the groups are as they were, woken again.
 const norm = (p) => String(p ?? '').replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
 const isButler = (s) => !!state?.butler && norm(s.cwd) === norm(state.butler);
+const butlerIds = () => new Set((state?.sessions ?? []).filter(isButler).map((s) => s.id)); // a note has no folder: by its conversation
+const notesOut = () => { const b = butlerIds(); return (state?.notes ?? []).filter((n) => !b.has(n.id)); };
 function setButler(on) {
   if (butler === on) return;
   butler = on; $('#app').classList.toggle('butler', on);
+  $('#act .logo .label').textContent = on ? '退出管家' : '管家'; $('#act .logo').title = on ? '长按退出管家' : '长按进入管家';
   for (const g of groups) if (g.active) on ? g.active.sleep() : g.active.wake();
   if (bConv) on ? bConv.wake() : bConv.sleep();
   if (on) { drawButler(); drawAsks(); drawDesk(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
   markRows(); save();
 }
-function mountButler(c) { bConv = c; $('#butler').append(c.el); if (butler) { c.wake(); if (FINE) c.focus(); } }
+// Held ~0.8 s (the ring full): in or out, a circle opening from the spark onto the 管家 or closing back into it (View
+// Transitions; without them, or with less motion asked for, at once)
+let heldAt = 0;
+function flipButler(on) {
+  const go = () => {
+    setButler(on);
+    if (on) { const b = document.createElement('div'); b.id = 'burst'; b.innerHTML = SPARK; b.onanimationend = () => b.remove(); document.body.append(b); } // in the new view: it plays as the circle opens
+  };
+  if (!document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) return go();
+  const r = $('#act .logo .spark').getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, h = document.documentElement;
+  h.style.setProperty('--vx', x + 'px'); h.style.setProperty('--vy', y + 'px');
+  h.style.setProperty('--vr', Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y)) + 'px');
+  h.classList.add(on ? 'vtIn' : 'vtOut');
+  document.startViewTransition(go).finished.finally(() => h.classList.remove('vtIn', 'vtOut'));
+}
+{
+  const logo = $('#act .logo'), letGo = () => logo.classList.remove('hold');
+  logo.onpointerdown = (e) => { if (e.button) return; logo.classList.add('hold'); logo.setPointerCapture?.(e.pointerId); };
+  logo.onpointerup = logo.onpointercancel = logo.onlostpointercapture = letGo;
+  logo.oncontextmenu = (e) => e.preventDefault(); // a phone's long press: no menu
+  logo.querySelector('.ring circle').onanimationend = () => { if (logo.classList.contains('hold')) { letGo(); heldAt = Date.now(); flipButler(!butler); } };
+  logo.title = '长按进入管家';
+}
+function mountButler(c) {
+  // its account and model, by its input box (drawn in drawDesk)
+  if (!c.el.querySelector('.bsel')) c.el.querySelector('.send .box').insertAdjacentHTML('beforeend', '<div class="bsel"><button data-act="acct"></button><button data-act="model"></button></div>'); bConv = c; $('#butler').append(c.el); if (butler) { c.wake(); if (FINE) c.focus(); } }
 function drawButler() {
   if (!butler || !state) return;
   const bs = state.sessions.find(isButler); // the newest
   if (bConv?.ended && bConv.id !== bs?.id) { bConv.close(); bConv = null; } // ended, and not the newest (or never recorded)
   if (!bConv && bs) mountButler(makeConv({ id: bs.id }, bs.title));
   $('#butler').classList.toggle('blank', !bConv);
+  const n = startAcct || (state.usage.rec ?? 0) + 1;
   if (!bConv) $('#butler > .hint').html = `${SPARK}<div class="bt">管家</div><div>你的助理：替你看着所有对话，谁在等你、谁做完了，问它就行。</div>
-    <div class="btns"><button class="btn primary" data-bstart>用账号 ${(state.usage.rec ?? 0) + 1} 启动管家</button></div>`;
+    <div class="pickRow"><span>账号</span>${acctOpts().map((o) => `<button class="opt${o.v === n ? ' on' : ''}" data-sa="${o.v}">${o.v}<small>${esc(o.sub)}</small></button>`).join('')}</div>
+    <div class="pickRow"><span>模型</span>${MODELS.map(([v, l]) => `<button class="opt${v === state.butlerModel ? ' on' : ''}" data-sm="${v}">${l}</button>`).join('')}</div>
+    <div class="btns"><button class="btn primary" data-bstart>用账号 ${n} 启动管家</button></div>`;
+}
+// the 管家's models, and the accounts as the choices show them
+const MODELS = [['sonnet', 'Sonnet', '日常够用，省额度'], ['opus', 'Opus', '更聪明，额度用得多'], ['haiku', 'Haiku', '最快最省']];
+const modelName = (m) => MODELS.find(([v]) => v === m)?.[1] ?? m ?? '模型';
+const acctOpts = () => (state?.usage?.accounts ?? []).map((a, i) => ({ v: i + 1, label: `账号 ${i + 1}`, sub: a.err ? '读不到额度' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满' }));
+let startAcct = 0; // the account picked on its start page (0: the recommended one)
+async function setButlerModel(m) { await post('/api/butler-model', { model: m }); state.butlerModel = m; }
+// a few choices in the sheet: the value of the one picked, or null
+function choose(title, opts, cur) {
+  return new Promise((done) => {
+    $('#sheetIn').innerHTML = `<div class="stitle">${esc(title)}</div><div class="opts" style="margin-top:12px">${opts.map((o, i) =>
+      `<button class="opt${o.v === cur ? ' on' : ''}" data-i="${i}">${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</button>`).join('')}</div>
+      <div class="btns"><button class="btn" data-no>取消</button></div>`;
+    const end = (v) => { sheetOff(); done(v); };
+    $('#sheetIn').onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) end(opts[+b.dataset.i].v); else if (e.target.closest('[data-no]')) end(null); };
+    $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') end(null); };
+    $('#sheet').classList.add('on');
+  });
 }
 // A question on a card: its header, the question, its options as buttons (a number badge, or a multi-select's box), each
 // one's description under it; Claude's own two last ones (write in, chat about it) in our words, quieter.
@@ -885,19 +959,27 @@ function drawDesk() {
   const tag = (x) => (x.wait ? '<span class="tag wait">等你</span>' : x.busy ? '<span class="spin" title="正在回复"></span>' : '<span class="tag">空闲</span>');
   $('#deskRun').html = `<h4>对话</h4><div class="counts"><span class="wait"><b>${wait.length}</b>等你</span><span><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
     ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" title="${esc(x.cwd)}"><i class="ad" style="background:${ACCT[x.acct % 4]}"></i><span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
-  const done = (state.notes ?? []).filter((n) => n.kind === 'done' && n.id).slice(0, 5);
+  const done = notesOut().filter((n) => n.kind === 'done' && n.id).slice(0, 5);
   $('#deskDone').html = done.length ? `<h4>刚做完</h4>${done.map((n) => `<div class="item" data-open="${esc(n.id)}"><span class="t">${esc(n.title || n.project || 'Claude')}</span><span class="when">${ago(n.at)}</span></div>`).join('')}` : '';
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
   const meter = (k, p, v) => `<div class="gauge"><div class="k"><span>${k}</span><span>${v}</span></div><div class="meter"><i class="${p >= 85 ? 'bad' : p >= 60 ? 'warn' : ''}" style="width:${p}%"></i></div></div>`;
   $('#deskPc').html = pc ? `<h4>这台电脑</h4>${meter('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${meter('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
+  const sel = bConv?.el.querySelector('.bsel');
+  if (sel) { sel.children[0].textContent = `账号 ${acct ?? (me ? me.acct + 1 : '?')}`; sel.children[1].textContent = modelName(state.butlerModel ?? me?.line?.model); }
   $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${todo.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
 }
 $('#desk').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
-function startButler() {
+function startButler(acct = startAcct || (state.usage.rec ?? 0) + 1) {
   if (!state?.butler) return toast('网页服务还是旧版本，重启后才能启动管家', 4000);
-  mountButler(makeConv({ dir: state.butler, acct: (state.usage.rec ?? 0) + 1 }, '管家')); drawButler();
+  mountButler(makeConv({ dir: state.butler, acct }, '管家')); drawButler();
 }
-$('#butler > .hint').onclick = (e) => { if (e.target.closest('[data-bstart]')) startButler(); };
+$('#butler > .hint').onclick = async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.bstart != null) startButler();
+  else if (b.dataset.sa) { startAcct = +b.dataset.sa; drawButler(); }
+  else if (b.dataset.sm) { try { await setButlerModel(b.dataset.sm); drawButler(); } catch (er) { toast(er.message); } }
+};
 $('#butler').ondragover = (e) => { if (bConv && !drag && e.dataTransfer.types.includes('Files')) e.preventDefault(); };
 $('#butler').ondrop = (e) => { e.preventDefault(); if (!drag) bConv?.attach([...e.dataTransfer.files]); };
 // narrowed to a phone's width (a tablet split, a window made small): one group, the others' tabs moved into it
@@ -1414,6 +1496,8 @@ function makeConv(body, title) {
     else if (d.v) setView(d.v);
     else if (d.kb) input(KEYS[+d.kb][1]);
     else if (d.act === 'swap') swap();
+    else if (d.act === 'acct') { if (c.id && state?.sessions.some((x) => x.id === c.id)) swap(); else restartOn(); }
+    else if (d.act === 'model') pickModel();
     else if (d.act === 'end') endIt();
     else if (d.act === 'resume') { if (c.id) resume(); else start(); } // a new one that never got a record: started again in its folder
     else if (d.key === 'next' || d.key === 'prev') { // several questions: the next or the one before (out of 「Type something」 first: there ← → move in the words)
@@ -1539,6 +1623,27 @@ function makeConv(body, title) {
 
   // 结束: the conversation's Claude exits, as Ctrl+C in its terminal does. Pressed again until it's gone (at most 4, 0.6 s
   // apart): the first one may only stop an answer, clear what's typed or close a question. Its record stays.
+  // the 管家's account, before it has said anything (not listed, nothing to carry over): ended and started on the one picked
+  async function restartOn() {
+    const acct = await choose('管家换到哪个账号', acctOpts(), c.acct);
+    if (!acct || acct === c.acct) return;
+    for (let k = 0; k < 8 && !c.ended && key; k++) { input('\x03'); await new Promise((ok) => setTimeout(ok, 600)); }
+    if (!c.ended && key) return toast('没能让它停下来，稍后再试');
+    if (bConv === c) bConv = null;
+    c.close(); startButler(acct);
+  }
+  // its model: kept for its next start, and told to it now with /model (not while it works or asks: typed then, it would
+  // queue, or answer the question)
+  async function pickModel() {
+    const m = await choose('管家用哪个模型', MODELS.map(([v, l, sub]) => ({ v, label: l, sub })), state?.butlerModel);
+    if (!m) return;
+    try { await setButlerModel(m); } catch (e) { return toast(e.message); }
+    drawDesk();
+    if (!key || c.ended) return toast(`下次启动管家会用 ${modelName(m)}`);
+    if (busyNow || menuNow) return toast(`它正忙，已记下：下次启动用 ${modelName(m)}。等它答完再选一次就能马上换`, 4000);
+    input('/model ' + m); setTimeout(() => input('\r'), 500);
+    toast(`管家换成 ${modelName(m)} 了，下一句回复开始生效`);
+  }
   async function endIt() {
     if (!key || c.ended || !confirm('结束这个对话？\n和在终端里按 Ctrl+C 一样，Claude 会退出，电脑上它的窗口也会关掉。对话记录会保留，之后可以从列表里接着聊。')) return;
     for (let k = 0; k < 4 && !c.ended; k++) { input('\x03'); await new Promise((ok) => setTimeout(ok, 600)); }

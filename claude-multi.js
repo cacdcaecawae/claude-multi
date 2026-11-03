@@ -1196,7 +1196,7 @@ const NOTES = path.join(ROOT, 'notes.jsonl');
 const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes running in the web service
 const WEB_USAGE = path.join(ROOT, 'web-usage.json'); // the quota as the page last got it
 const WEB_PORT = 7788;
-const BUTLER = path.join(__dirname, 'butler'); // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
+const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus', 'haiku']; // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
 // its 待办.md has something still to do: a "## " section above "## 已完成"
 const todoOpen = (text) => /^## (?!已完成)/m.test(String(text ?? '').split(/^## 已完成/m)[0]);
 // The server, from tunnel.json here (not in the repository): {"ssh": "myserver", "url": "https://<its address>:8443"}.
@@ -1664,6 +1664,8 @@ async function web() {
   };
   // and what it keeps watching: its 待办.md's sections above 「## 已完成」
   const todoList = () => { try { return [...fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8').split(/^## 已完成/m)[0].matchAll(/^## (.+)$/gm)].map((m) => m[1].trim()); } catch { return []; } };
+  // the model it starts with: its folder's settings.local.json (chosen on the page) over settings.json
+  const butlerModel = () => { for (const n of ['settings.local.json', 'settings.json']) try { const m = JSON.parse(fs.readFileSync(path.join(BUTLER, '.claude', n), 'utf8')).model; if (m) return m; } catch {} return null; };
   const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
   const api = {
     // the questions other conversations wait on, as their screens show them (管家 mode has them as cards): each read again
@@ -1674,6 +1676,14 @@ async function web() {
       return { id: s.id, title: s.title, acct: s.acct + 1, menu: await a.menu };
     })),
     // one answered from such a card: by you, so it isn't held back as the 管家's typing is
+    // the 管家's model, for its next start (the page also tells a running one, with /model)
+    'POST /api/butler-model': (q, b) => {
+      if (!BUTLER_MODELS.includes(b.model)) throw new Error('没有这个模型');
+      const f = path.join(BUTLER, '.claude', 'settings.local.json');
+      let j = {}; try { j = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
+      fs.writeFileSync(f, JSON.stringify({ ...j, model: b.model }, null, 2));
+      return { model: b.model };
+    },
     'POST /api/pick': async (q, b) => { try { return { label: await pickOn(String(b.id), b.n, b.ask, 'you') }; } finally { asks.delete(String(b.id)); } },
     // the quota as last read, at once: reading it again (each account's, over the network) takes a second or
     // more, so one over a minute old is read again in the background, for the next look. That read goes abroad
@@ -1690,7 +1700,7 @@ async function web() {
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, todo: todoList(), pc: pcNow() };
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerModel(), todo: todoList(), pc: pcNow() };
     },
     'GET /api/tokens': () => tokenStats(),
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
@@ -1750,6 +1760,7 @@ async function web() {
       // the 管家 is one: two screens starting it at once (it isn't listed before its first message) get the same
       const one = sameDir(b.dir, BUTLER) && [...terms.values()].find((t) => t.kind === 'pty' && !t.gone && sameDir(t.cwd, BUTLER));
       if (one) return { key: one.key, kind: 'pty' };
+      if (sameDir(b.dir, BUTLER)) shareTrust(p.configDir, undefined, [BUTLER.replace(/\\/g, '/')]); // on any account, no trust question
       sessCache = null;
       return { key: startPty(p, b.dir, [], cols, rows).key, kind: 'pty' };
     },
