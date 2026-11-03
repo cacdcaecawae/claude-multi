@@ -1042,7 +1042,8 @@ function notify(kind) {
   } catch {}
   if (kind === 'done' && helpersBusy(tail, started)) return; // it only paused to read a helper's message; the job goes on
   // the conversation's title, which its terminal tab shows: lets the island drop it once you look
-  const title = field(tail, 'customTitle', true) ?? field(tail, 'aiTitle', true);
+  // (the 管家's is 管家, wherever it shows: the island, the page, the phone)
+  const title = sameDir(home || j.cwd || '.', BUTLER) ? '管家' : field(tail, 'customTitle', true) ?? field(tail, 'aiTitle', true);
   fs.mkdirSync(INBOX, { recursive: true });
   const f = path.join(INBOX, `${Date.now()}-${process.pid}`);
   // the folder the conversation was opened in: the hook's cwd is wherever Claude last cd'd (a .build inside it, say)
@@ -1643,7 +1644,7 @@ async function web() {
     pushedTo = fresh.at(-1).at;
     for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000))
       try {
-        const s = n.id && sessions().find((x) => x.id === n.id), name = n.title || n.project || 'Claude', folder = s ? path.basename(s.cwd) : n.project;
+        const s = n.id && sessions().find((x) => x.id === n.id), name = n.title || n.project || 'Claude', folder = s ? (sameDir(s.cwd, BUTLER) ? '' : path.basename(s.cwd)) : n.project;
         const m = { ...pushText({ ...n, gist: lastWords(s?.file) }), id: n.id, group: name, ask: n.kind === 'ask',
           sub: [folder !== name && folder, s && `账号 ${s.acct + 1}`].filter(Boolean).join(' · ') };
         (barkUrl() ? bark(m) : pushAll(m)).catch(() => {}); // Bark set up: it alone, not twice
