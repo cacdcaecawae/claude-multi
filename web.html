@@ -780,6 +780,8 @@ function drawButler() {
 // The questions other conversations wait on (the service reads them off their screens), as cards: a single choice
 // answered here; a multi-select, several questions or one to write in, in that conversation (its own card has them).
 let asksBusy = false, askOf = new Map(); // conversation id → the question its card shows (a pick says which one it meant)
+// one just answered: its card stays away 8 s, while the list (read every few seconds) still says it waits
+const pickedAt = new Map();
 async function drawAsks() {
   if (!butler || asksBusy) return;
   if (!state.sessions.some((s) => s.wait && s.pid && !isButler(s))) { askOf.clear(); $('#asks').html = ''; return; }
@@ -787,6 +789,7 @@ async function drawAsks() {
   let list = [];
   try { list = await (await fetch('/api/asks')).json(); } catch {} finally { asksBusy = false; }
   if (!Array.isArray(list)) return;
+  list = list.filter((a) => !(Date.now() - (pickedAt.get(a.id) ?? 0) < 8000));
   askOf = new Map(list.map((a) => [a.id, a.menu?.ask]));
   $('#asks').html = list.map(({ id, title, acct, menu }) => {
     const simple = menu && !menu.tabs && !menu.opts.some((o) => o.check != null);
@@ -803,7 +806,7 @@ $('#asks').onclick = async (e) => {
   const id = card.dataset.id;
   if (b.dataset.open) return openSession(id); // its own card there, with the words box
   b.disabled = true;
-  try { toast(`已选「${(await post('/api/pick', { id, n: +b.dataset.n, ask: askOf.get(id) })).label}」`); }
+  try { toast(`已选「${(await post('/api/pick', { id, n: +b.dataset.n, ask: askOf.get(id) })).label}」`); pickedAt.set(id, Date.now()); card.remove(); }
   catch (er) { toast('没选上：' + er.message, 4000); }
   setTimeout(drawAsks, 800);
 };

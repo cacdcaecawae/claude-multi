@@ -751,10 +751,10 @@ async function waitLive(match, ms = 0) {
 const statusOf = (live) => { try { return alive(live.pid) ? JSON.parse(fs.readFileSync(path.join(live.dir, 'sessions', `${live.pid}.json`), 'utf8')).status : 'gone'; } catch { return null; } };
 // A conversation's screen as its terminal shows it now (the question it waits on is only there: its record gets it once
 // answered): its stream, which the service begins with what's on it, written into a terminal of the same size here and
-// read once quiet; what's on it as the page reads it (screen.js)
+// read once quiet; what's on it as the page reads it (screen.js). Live: one that ended since is not started again
 async function screenOf(id) {
   const { Terminal } = require('@xterm/headless'), { Unicode11Addon } = require('@xterm/addon-unicode11'), { parseScreen } = require('./screen.js');
-  const { key } = await webPost('/api/open', { id }), ac = new AbortController();
+  const { key } = await webPost('/api/open', { id, live: true }), ac = new AbortController();
   const r = await fetch(`http://127.0.0.1:${WEB_PORT}/api/term?key=${encodeURIComponent(key)}`, { signal: ac.signal, headers: { cookie: `cm=${webKey()}`, 'accept-encoding': 'identity' } });
   let term = null, last = Date.now(), wrote = Promise.resolve();
   (async () => {
@@ -853,7 +853,7 @@ async function pickOn(id, n, ask, by = 'butler') {
   if (menu.tabs || menu.opts.some((x) => x.check != null)) throw new Error('这是多选题，或者一次问了好几题，请用户在网页上点卡片回答');
   if (!o) throw new Error(`选项号要在 1 到 ${menu.opts.length} 之间`);
   if (/^Type something/i.test(o.label)) throw new Error('「自己输入」这一项请用户在网页上回答');
-  const { key } = await webPost('/api/open', { id });
+  const { key } = await webPost('/api/open', { id, live: true });
   for (let i = 0; i < Math.abs(o.n - menu.cur); i++) await webPost('/api/input', { key, by, data: o.n > menu.cur ? '\x1b[B' : '\x1b[A' });
   await webPost('/api/input', { key, by, data: '\r' });
   return o.label;
