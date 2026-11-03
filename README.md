@@ -181,6 +181,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 - 终端视图下方有一排按键：Esc、Tab、方向键、Ctrl+C 等。
 - 在 Safari 里点「分享 → 添加到主屏幕」，之后就能像 App 一样全屏打开。
 - 手机通知：从主屏幕打开，点底部的「设置」，打开「通知」并允许。对话回复完、等你确认时，手机会弹出通知，点一下直接打开那个对话。你正在网页上看着的对话不会推送。需要 iOS 16.4 以上。
+- 不想要 iOS 给网页通知加的「from …」那一行：装开源的 [Bark](https://github.com/Finb/Bark)，把它首页的地址写进 `%USERPROFILE%\.claude-multi\bark.json`：`{"url": "https://api.day.app/<你的 key>"}`（这个文件不进仓库，key 别外传）。有这个文件时通知只走 Bark，不再走网页推送；点通知在 Safari 里打开那个对话。改完重启网页服务。
 
 ## 远程访问（手机、别的电脑）
 

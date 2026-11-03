@@ -1470,6 +1470,18 @@ async function pushAll(msg, endpoint) {
   if (gone.size) { const now = pushStore(); now.subs = now.subs.filter((x) => !gone.has(x.endpoint)); savePush(now); }
   return out;
 }
+// Or through the Bark app (an iOS app: its notifications have no "from <web app>" line, which iOS adds to a home screen
+// page's), when bark.json here (not in the repository) has its address: {"url": "https://api.day.app/<key>"}. Its icon
+// and a tap's page (that conversation) from the public address. The answer back: 200 is delivered to Bark's server.
+const BARK = path.join(ROOT, 'bark.json');
+const barkUrl = () => { try { return JSON.parse(fs.readFileSync(BARK, 'utf8').replace(/^﻿/, '')).url?.replace(/\/+$/, '') || null; } catch { return null; } };
+async function bark(msg) {
+  const u = barkUrl(), pub = WEB_URL.startsWith('https://');
+  const r = await fetch(u, { method: 'POST', signal: AbortSignal.timeout(15000), headers: { 'content-type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ title: msg.title, body: msg.body, group: 'Claude', ...(pub && { icon: `${WEB_URL}/icon-180.png`, url: `${WEB_URL}/${msg.id ? `?open=${encodeURIComponent(msg.id)}` : ''}` }) }) });
+  if (r.status !== 200) log('bark_fail', { status: r.status, said: (await r.text().catch(() => '')).slice(0, 300) });
+  return r.status;
+}
 // The page's helper, run by the browser apart from it: shows what's pushed (iOS takes a push away from a page that shows
 // nothing), and a tap opens the page at that conversation.
 const PUSH_SW = `self.addEventListener('push', (e) => {
@@ -1618,7 +1630,7 @@ async function web() {
     if (!fresh.length) return;
     pushedTo = fresh.at(-1).at;
     for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000))
-      try { pushAll({ ...pushText({ ...n, gist: lastWords(n.id) }), id: n.id }).catch(() => {}); } catch {}
+      try { const m = { ...pushText({ ...n, gist: lastWords(n.id) }), id: n.id }; (barkUrl() ? bark(m) : pushAll(m)).catch(() => {}); } catch {} // Bark set up: it alone, not twice
   }, 2000);
 
   const api = {
@@ -2043,7 +2055,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { parseUntil, todoOpen, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { parseUntil, todoOpen, bark, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
