@@ -173,6 +173,15 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* a folder's ＋: a new conversation there (on a computer when the mouse is over the folder) */
   details.dir > summary .fnew { width: 22px; height: 22px; margin-right: -6px; color: var(--fg3); } details.dir > summary .fnew svg { width: 14px; height: 14px; }
   @media (hover: hover) { details.dir > summary:not(:hover) .fnew { visibility: hidden; } }
+  /* a conversation's menu: by the mouse on a computer, a sheet's rows on a phone; what a running one can't, dimmed with why */
+  #cmenu { position: fixed; z-index: 25; min-width: 200px; padding: 4px; border-radius: 8px; background: var(--pop); border: 1px solid var(--popB); box-shadow: 0 8px 24px var(--shadow); }
+  #cmenu button, .mlist button { display: block; width: 100%; text-align: left; padding: 6px 10px; border-radius: 5px; }
+  .mlist { margin-top: 10px; } .mlist button { padding: 11px 10px; font-size: 15px; }
+  #cmenu small, .mlist small { display: block; font-size: 11.5px; color: var(--fg3); }
+  #cmenu button:disabled, .mlist button:disabled { opacity: .55; cursor: default; }
+  #cmenu [data-m=del]:not(:disabled), .mlist [data-m=del]:not(:disabled) { color: var(--red); }
+  @media (hover: hover) { #cmenu button:not(:disabled):hover { background: var(--hover); } }
+  @media (pointer: coarse) { #view .row { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } } /* held for its menu: no text picked */
   /* 搜索对话: the box, the conversations found under it, the one Enter opens marked */
   #findList { max-height: min(55dvh, 480px); overflow-y: auto; margin: 8px -8px 0; }
   .empty { color: var(--fg3); text-align: center; padding: 20px 12px; }
@@ -448,6 +457,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hm.tool { font: 12.5px/1.5 var(--mono); color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hm.tool::before { content: '● '; color: var(--green); }
   .hm.note { align-self: center; font-size: 12px; color: var(--fg3); }
+  .hm.tm { margin-top: 12px; font-size: 11.5px; } /* the time over a message of yours, after a pause */
+  .hm.tm + .hm.user, .hm.tm + .hm.img { margin-top: 0; }
   .hm a { color: var(--link); text-decoration: none; } .hm a:hover { text-decoration: underline; }
   /* copy: a code block's at its top right, an answer's under it (on a computer when the mouse is over it) */
   .cpy { width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--fg3); }
@@ -702,6 +713,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 <div class="sheet" id="sheet"><div class="in" id="sheetIn"></div></div>
 <div class="toast" id="toast"></div>
 <div id="offline" hidden>连不上电脑，正在重试…</div>
+<div id="cmenu" hidden></div>
 
 <script src="/lib/@xterm/xterm/lib/xterm.js?6.0.0"></script>
 <script src="/lib/@xterm/addon-fit/lib/addon-fit.js?0.11.0"></script>
@@ -956,9 +968,71 @@ function renderChats() {
   }
   markRows();
 }
+// A conversation's menu: right-click its row, or hold it on a phone (a sheet there). 在右侧打开, 重命名, 换账号继续,
+// 删除; a running one is renamed from inside it (/rename) and deleted once ended: those say so instead
+let menuFor = null, menuAt = 0;
+function rowMenu(id, x, y) {
+  const s = state?.sessions.find((v) => v.id === id);
+  if (!s || (NARROW.matches && Date.now() - menuAt < 1000)) return; // held on Android: its own contextmenu and the hold both
+  menuFor = s; menuAt = Date.now();
+  const items = [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
+    ['swap', '换账号继续…'], ['del', '删除…', s.pid && '正在运行：先结束对话再删']].filter(Boolean)
+    .map(([k, l, off]) => `<button data-m="${k}"${off ? ' disabled' : ''}>${l}${off ? `<small>${esc(off)}</small>` : ''}</button>`).join('');
+  if (NARROW.matches) { $('#sheetIn').innerHTML = `<div class="stitle">${esc(s.title)}</div><div class="mlist">${items}</div>`; $('#sheetIn').onclick = menuPick; return $('#sheet').classList.add('on'); }
+  const m = $('#cmenu');
+  m.innerHTML = items; m.hidden = false;
+  m.style.left = `${Math.min(x, innerWidth - m.offsetWidth - 8)}px`; m.style.top = `${Math.min(y, innerHeight - m.offsetHeight - 8)}px`;
+}
+async function menuPick(e) {
+  const b = e.target.closest('[data-m]'), s = menuFor;
+  if (!b || b.disabled || !s) return;
+  $('#cmenu').hidden = true; sheetOff();
+  const k = b.dataset.m;
+  if (k === 'aside') return openSession(s.id, 'aside');
+  if (k === 'swap') return swapFrom(s);
+  if (k === 'rename') {
+    const name = prompt('新名字', s.title)?.trim();
+    if (!name || name === s.title) return;
+    try { toast((await post('/api/rename', { id: s.id, name })).said); } catch (er) { toast(er.message, 4000); }
+  } else if (k === 'del') {
+    if (!confirm(`删除「${s.title}」？\n对话记录会移到电脑的回收站，可以找回。`)) return;
+    try {
+      toast((await post('/api/delete', { id: s.id })).said);
+      const c = convOf(s.id); if (c) closeConv(c);
+      try { localStorage.removeItem('cm-draft:' + s.id); } catch {}
+    } catch (er) { toast(er.message, 4000); }
+  }
+  load();
+}
+// 换账号继续 from the list: the conversation in its tab, its 换账号 card there (a running one once it's connected; one
+// not running isn't started first: the account picked on the card starts it)
+async function swapFrom(s) {
+  let c = convOf(s.id);
+  if (c) activate(c.g, c);
+  else if (s.pid) { await openSession(s.id); c = convOf(s.id); }
+  else addConv(focusG, (c = makeConv({ id: s.id }, s.title)));
+  for (const end = Date.now() + 5000; c && s.pid && !c.where() && !c.ended && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 200));
+  c?.swap();
+}
+$('#cmenu').onclick = menuPick;
+$('#view').oncontextmenu = (e) => { const r = e.target.closest('[data-open]'); if (r) { e.preventDefault(); rowMenu(r.dataset.open, e.clientX, e.clientY); } };
+{ // held on a phone: 0.5 s without moving (a scroll takes the finger: pointercancel)
+  let hold = null;
+  const drop = () => { clearTimeout(hold?.t); hold = null; };
+  $('#view').addEventListener('pointerdown', (e) => {
+    const r = e.pointerType === 'touch' && e.target.closest('[data-open]');
+    if (r) { const { clientX: x, clientY: y } = e; hold = { x, y, t: setTimeout(() => rowMenu(r.dataset.open, x, y), 500) }; }
+  });
+  $('#view').addEventListener('pointermove', (e) => { if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10) drop(); });
+  for (const t of ['pointerup', 'pointercancel']) $('#view').addEventListener(t, drop);
+}
+addEventListener('pointerdown', (e) => { if (!e.target.closest('#cmenu')) $('#cmenu').hidden = true; }, true);
+addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#cmenu').hidden = true; });
+addEventListener('blur', () => ($('#cmenu').hidden = true));
+$('#view').addEventListener('scroll', () => ($('#cmenu').hidden = true));
 $('#side').onclick = (e) => {
   const b = e.target.closest('button, .row');
-  if (!b) return;
+  if (!b || Date.now() - menuAt < 700) return; // the release of a hold that opened the menu: not a tap on the row
   if (b.matches('[data-new]')) return newSheet();
   if (b.matches('[data-find]')) return findSheet();
   if (b.matches('[data-newin]')) { // a folder's ＋ (not its fold): started there at once, on the recommended account
@@ -2223,7 +2297,7 @@ function makeConv(body, title) {
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(histTimer); gen++; es?.close(); es = null; c.live = ''; readNote(c.id); };
   c.say = (text) => { const d = line.value, a = atts; line.value = text; atts = []; go.onclick(); line.value = d; atts = a; drawAtts(); grow(); };
   c.close = () => { c.closed = true; c.sleep(); ro.disconnect(); clearTimeout(liveT); clearTimeout(fitT); term?.dispose(); term = null; key = null; switching = 0; el.remove(); };
-  c.claim = claim;
+  c.claim = claim; c.swap = swap;
   c.where = () => (key && !c.ended ? kind : null); // 'pc' a window on the computer, 'pty' the web service
   c.focus = () => { if (view === 'hist') line.focus({ preventScroll: true }); else term?.focus(); };
   c.back = () => { if (shown && key) { if (stale(25000)) connect(true); else claim(); } }; // back to this screen after a while: the stream likely died meanwhile
@@ -2241,6 +2315,12 @@ window.addEventListener('focus', () => shownConvs().forEach((c) => c.claim())); 
 // how long it took. Added to piece by piece as the record grows: the box's end says where the turn is.
 const KIND = { Bash: '命令', PowerShell: '命令', Read: '读文件', Edit: '改文件', Write: '改文件', NotebookEdit: '改文件', Grep: '搜索', Glob: '搜索',
   WebSearch: '查网页', WebFetch: '查网页', Agent: '子任务' };
+// a message's time as a chat app writes it: 14:32 today, 昨天 14:32, 11月3日 14:32 this year, 2025年11月3日 14:32 before
+function stamp(ms, now = Date.now()) {
+  const d = new Date(ms), n = new Date(now), hm = d.toTimeString().slice(0, 5), md = `${d.getMonth() + 1}月${d.getDate()}日`;
+  const days = Math.round((new Date(n.getFullYear(), n.getMonth(), n.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5);
+  return days === 0 ? hm : days === 1 ? `昨天 ${hm}` : d.getFullYear() === n.getFullYear() ? `${md} ${hm}` : `${d.getFullYear()}年${md} ${hm}`;
+}
 const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${Math.floor(s / 3600)} 小时 ${Math.floor(s / 60) % 60} 分`; };
 // a message on your side that isn't your words, each its own way: the service waking the 管家 ([系统通知]), a command
 // (the page's /model, /effort, or one you typed), what the 管家 typed into a conversation (the service knows: by), a
@@ -2269,6 +2349,9 @@ function addItems(box, items) {
       for (const e of col.querySelectorAll(`[data-p="${CSS.escape(m.p)}"]:not([data-u="${CSS.escape(m.u)}"])`))
         if (!answers.some((x) => e.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING)) e.remove();
     }
+    // a message of yours 5 minutes or more after what came before it here (or the first here): its time over it
+    if ((m.role === 'img' || (m.role === 'user' && m.text)) && m.at && !(m.at - (box.$at ?? 0) < 300000)) box.insertAdjacentHTML('beforeend', `<div class="hm note tm">${stamp(m.at)}</div>`);
+    if (m.at) box.$at = m.at;
     if (m.role === 'img') { box.insertAdjacentHTML('beforeend', `<a class="hm img" href="${esc(m.src)}" target="_blank"${mark}><img src="${esc(m.src)}" loading="lazy" alt="图片"></a>`); continue; }
     if (m.role === 'user' && !m.text) continue; // pictures only
     if (m.role === 'done') { // the turn over: how long it took, up front on the line that begins the answer

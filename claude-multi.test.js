@@ -419,6 +419,14 @@ console.log('tokens ok');
   assert.equal(md('[文档](https://d.com/p) `https://c.x` **https://b.x**'), `${a('https://d.com/p', '文档')} <code>${a('https://c.x')}</code> <b>${a('https://b.x')}</b>`);
   assert.ok(md('```\nhttps://in.code/x\n```').endsWith('<pre>https://in.code/x</pre></div>'));
   console.log('md ok');
+  // a message's time, by the day it's on: today's the time alone, yesterday's 昨天, this year's without the year
+  const stamp = new Function(`${part(/^function stamp\(ms[\s\S]*?^\}$/m)}\nreturn stamp;`)();
+  const now = new Date(2026, 10, 4, 9, 0).getTime(), at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime();
+  assert.equal(stamp(at(2026, 11, 4, 0, 5), now), '00:05');
+  assert.equal(stamp(at(2026, 11, 3, 23, 59), now), '昨天 23:59');
+  assert.equal(stamp(at(2026, 1, 2, 8, 7), now), '1月2日 08:07');
+  assert.equal(stamp(at(2025, 12, 31, 18, 30), now), '2025年12月31日 18:30');
+  console.log('stamp ok');
 }
 
 // A picture in a record: history() names it by its line's place in bytes and which picture it is, recordImage() gives

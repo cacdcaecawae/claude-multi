@@ -1753,6 +1753,13 @@ async function web() {
   // only till its Claude has written its session file (then it's listed with its pid): after a /clear or /resume there,
   // it runs another conversation, and this one, tapped, would open that
   const resuming = (id) => [...terms.values()].find((t) => t.resume === id && !t.gone && !(t.pid && fs.existsSync(path.join(t.dir, 'sessions', `${t.pid}.json`))));
+  // `claude-multi <cmd> <id> …` for a conversation, apart from this process: what it printed, or that as the error
+  const command = (what, id, ...more) => {
+    if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error('没有这个对话');
+    if (resuming(id)) throw new Error('这个对话正在运行，先结束它');
+    return new Promise((ok, no) => require('child_process').execFile(process.execPath, [__filename, what, id, ...more], { windowsHide: true },
+      (e, stdout) => { sessCache = null; const said = String(stdout ?? '').trim(); if (e) no(new Error(said || e.message)); else ok({ said }); }));
+  };
   // a conversation started or continued here: claude in a pseudo-terminal, its output kept (last 256 KB) for
   // whoever opens it later
   function startPty(p, cwd, args, cols = 100, rows = 30) {
@@ -2023,6 +2030,15 @@ async function web() {
       require('child_process').execFile(process.execPath, [__filename, 'warmup'], { env: { ...process.env, NO_COLOR: '1' }, windowsHide: true },
         (e, stdout) => { usageAt = 0; ok({ out: String(stdout || e?.message || '').trim() }); }); // read again on the page's next look
     }),
+    // 重命名 and 删除 from the page's list: the commands themselves, their checks and their words (a running one is
+    // refused), run apart as warmup is: a deletion's PowerShell would hold up every terminal's stream meanwhile. One just
+    // continued here isn't listed as running yet: refused here first. The list read afresh after.
+    'POST /api/rename': (q, b) => {
+      const id = String(b.id ?? ''), name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
+      if (!name) throw new Error('名字不能是空的');
+      return command('rename', id, name);
+    },
+    'POST /api/delete': (q, b) => command('delete', String(b.id ?? '')),
     // open a conversation's terminal: {id, acct?} continues one (its window here if it runs in one),
     // {dir, acct} starts one. acct is 1-based; the page proposes it like the island does.
     'POST /api/open': (q, b) => {
