@@ -170,6 +170,11 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .nd { width: 8px; height: 8px; flex: none; border-radius: 4px; background: var(--green); }
   .nd.ask { background: var(--orange); }
   details.dir > summary .nd { margin-left: auto; } details.dir[open] > summary .nd { display: none; }
+  /* a folder's ＋: a new conversation there (on a computer when the mouse is over the folder) */
+  details.dir > summary .fnew { width: 22px; height: 22px; margin-right: -6px; color: var(--fg3); } details.dir > summary .fnew svg { width: 14px; height: 14px; }
+  @media (hover: hover) { details.dir > summary:not(:hover) .fnew { visibility: hidden; } }
+  /* 搜索对话: the box, the conversations found under it, the one Enter opens marked */
+  #findList { max-height: min(55dvh, 480px); overflow-y: auto; margin: 8px -8px 0; }
   .empty { color: var(--fg3); text-align: center; padding: 20px 12px; }
   /* 对话 by folder, as Codex: a folder's icon and name, its conversations under it one line each (the account ring under
      the folder icon, the title under its name) */
@@ -437,6 +442,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hm.user.cmd { align-self: center; margin-top: 8px; padding: 2px 8px; background: none; color: var(--fg3); font: 12px/1.5 var(--mono); }
   .hm.user.byb { background: color-mix(in srgb, #d97757 14%, var(--bg)); } .hm.user.byb .lab { color: #d97757; }
   .hm.user.pending { opacity: .5; }
+  .hm.user.long:not(.open) .clip { max-height: 16.5em; overflow: hidden; -webkit-mask: linear-gradient(#000 55%, transparent); mask: linear-gradient(#000 55%, transparent); } /* 10 lines */
+  .hm.user .more { display: block; margin-top: 4px; font-size: 12.5px; color: var(--link); }
+  .hm.user .more::after { content: '展开全部'; } .hm.user.open .more::after { content: '收起'; }
   .hm.tool { font: 12.5px/1.5 var(--mono); color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hm.tool::before { content: '● '; color: var(--green); }
   .hm.note { align-self: center; font-size: 12px; color: var(--fg3); }
@@ -743,7 +751,7 @@ const svg = (d, w = 1.6) => `<svg viewBox="0 0 24 24" fill="none" stroke="curren
 const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M12 4.5v15"/>', close: '<path d="M7 7l10 10M17 7L7 17"/>',
   list: '<path d="M4 7h16M4 12h16M4 17h16"/>', clip: '<path d="M20.5 11.2l-8 8a5.2 5.2 0 0 1-7.4-7.4l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.6 1.6 0 0 1-2.3-2.3l7.8-7.8"/>',
   auto: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>', light: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
-  dark: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>', plus: '<path d="M12 5v14M5 12h14"/>', refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
+  dark: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>', find: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>', plus: '<path d="M12 5v14M5 12h14"/>', refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
   swap: '<path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/>', send: '<path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/>', stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>', end: '<path d="M12 4v7M7.4 6.6a7 7 0 1 0 9.2 0"/>',
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   folder: '<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H19a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
@@ -916,31 +924,34 @@ function retitle() {
 
 // 对话, newest first (by its record's last write): by folder, the folders by their newest; or, behind the bell, the unread
 // 提示 and the running ones, with their folder on a second line
+// a conversation waiting on you ('ask') or answered and not looked at ('done'), its dot; a row's right end: that, whether
+// it's answering, where it runs or how long ago, and (on hover) 在右侧打开
+const chatMark = (x) => { const k = notesOut().find((n) => n.id === x.id)?.kind; return x.wait || k === 'ask' ? 'ask' : k ? 'done' : ''; };
+const nd = (k) => (k ? `<i class="nd ${k}" title="${k === 'ask' ? '在等你' : '答完了，还没看'}"></i>` : '');
+const chatEnd = (x) => `${nd(chatMark(x))}${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}${x.pid ? `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(x.at)}</span>`}
+    <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
+const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1)}
+    <div class="main"><div class="t">${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
 function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
   const S = state.sessions.filter((x) => !isButler(x)), run = S.filter((x) => x.pid), bell = listMode === 'run';
-  const said = new Map(notes.map((n) => [n.id, n.kind])), mark = (x) => (x.wait || said.get(x.id) === 'ask' ? 'ask' : said.has(x.id) ? 'done' : '');
-  const nd = (k) => (k ? `<i class="nd ${k}" title="${k === 'ask' ? '在等你' : '答完了，还没看'}"></i>` : '');
-  const right = (x) => `${nd(mark(x))}${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}${x.pid ? `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(x.at)}</span>`}
-    <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
-  const row = (x) => `<div class="row" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1)}
-    <div class="main"><div class="t">${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${right(x)}</div>`;
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1)}
-    <div class="main t">${esc(x.title)}</div>${right(x)}</div>`;
+    <div class="main t">${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
-  $('#sideActs').html = `<button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
+  $('#sideActs').html = `<button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   if (bell) {
     $('#view').html = (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
         notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
           <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
           <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
-      + sec('run', `<span>运行中<b class="count">${run.length}</b></span>`, run.length ? run.map(row).join('') : '<div class="empty">没有在运行的对话</div>');
+      + sec('run', `<span>运行中<b class="count">${run.length}</b></span>`, run.length ? run.map(chatRow).join('') : '<div class="empty">没有在运行的对话</div>');
   } else {
     const dirs = new Map();
     for (const x of S) dirs.set(x.cwd, [...(dirs.get(x.cwd) ?? []), x]);
     $('#view').html = dirs.size ? [...dirs].map(([cwd, list]) => sec('d:' + cwd,
-      `<i class="fc">${svg(I.folder)}</i><i class="fo">${svg(I.folderOpen)}</i><span class="t" title="${esc(cwd)}">${esc(base(cwd) || cwd)}</span>${nd(list.some((x) => mark(x) === 'ask') ? 'ask' : list.some(mark) ? 'done' : '')}`,
+      `<i class="fc">${svg(I.folder)}</i><i class="fo">${svg(I.folderOpen)}</i><span class="t" title="${esc(cwd)}">${esc(base(cwd) || cwd)}</span>${nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : '')}
+        <button class="ico fnew" data-newin="${esc(cwd)}" title="在这里开新对话（用推荐的账号）">${svg(I.plus)}</button>`,
       list.map(line).join(''), 'dir')).join('') : '<div class="empty">还没有对话</div>';
   }
   markRows();
@@ -949,6 +960,11 @@ $('#side').onclick = (e) => {
   const b = e.target.closest('button, .row');
   if (!b) return;
   if (b.matches('[data-new]')) return newSheet();
+  if (b.matches('[data-find]')) return findSheet();
+  if (b.matches('[data-newin]')) { // a folder's ＋ (not its fold): started there at once, on the recommended account
+    e.preventDefault();
+    return addConv(focusG, makeConv({ dir: b.dataset.newin, acct: (state.usage.rec ?? 0) + 1 }, base(b.dataset.newin) || '新对话'));
+  }
   if (b.matches('[data-bell]')) { listMode = listMode === 'run' ? 'dirs' : 'run'; save(); return renderChats(); }
   if (b.matches('[data-refresh]')) {
     if (side === 'usage') return refreshUsage();
@@ -1367,6 +1383,34 @@ function newSheet() {
   };
   draw(); $('#sheet').classList.add('on');
 }
+// 搜索对话 (Ctrl+K, or the magnifier over the list), as VS Code's quick open: every word typed in its title, its last
+// message or its folder; ↑ ↓ and Enter (Ctrl+Enter: to the side), or a click. Only the list under the box is drawn again
+function findSheet() {
+  if (!state) return toast('还在加载，稍等');
+  $('#sheetIn').innerHTML = '<input type="text" id="findIn" placeholder="搜索对话：标题、最后一句话、文件夹" enterkeyhint="go" autocomplete="off"><div id="findList"></div>';
+  const box = $('#findIn'), list = $('#findList');
+  let hits = [], at = 0;
+  const draw = () => {
+    const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
+    hits = state.sessions.filter((x) => !isButler(x) && words.every((w) => `${x.title}\n${x.prompt ?? ''}\n${x.cwd}`.toLowerCase().includes(w)));
+    at = Math.min(at, Math.max(0, hits.length - 1));
+    list.innerHTML = hits.map(chatRow).join('') || '<div class="empty">没有找到</div>';
+    list.children[at]?.classList.add('sel'); list.children[at]?.scrollIntoView({ block: 'nearest' });
+  };
+  const open = (i, aside) => { const x = hits[i]; if (!x) return; sheetOff(); openSession(x.id, aside ? 'aside' : undefined); };
+  box.oninput = () => { at = 0; draw(); };
+  box.onkeydown = (e) => {
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && hits.length) { e.preventDefault(); at = (at + (e.key === 'ArrowDown' ? 1 : hits.length - 1)) % hits.length; draw(); }
+    else if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); open(at, e.ctrlKey || e.metaKey); }
+    else if (e.key === 'Escape') sheetOff();
+  };
+  list.onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) open([...list.children].indexOf(r), e.ctrlKey || e.metaKey || e.target.closest('[data-aside]')); };
+  list.ondragstart = (e) => e.preventDefault(); // its rows are the list's, draggable on a computer: not from here
+  draw(); $('#sheet').classList.add('on'); box.focus();
+}
+addEventListener('keydown', (e) => { // not in the terminal: there Ctrl+K is Claude's
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && !e.target.closest?.('.xterm')) { e.preventDefault(); findSheet(); }
+});
 sheetOff();
 
 // --- groups and tabs. Only each group's shown tab is live (its terminal's stream, its record read every second);
@@ -1751,6 +1795,11 @@ function makeConv(body, title) {
   line.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim()) go.click(); } // only sends; Shift+Enter: a new line
     if (e.key === 'Escape' && busyNow) stop(); // as in Claude: Esc stops it
+    // a question up and nothing typed: an option's number picks it, as in Claude's terminal (not while writing in 「Type something」)
+    if (menuNow && !typeNow && !line.value && /^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing) {
+      const o = $p(`.live [data-pick="${e.key}"]`);
+      if (o) { e.preventDefault(); o.click(); }
+    }
   };
   el.addEventListener('click', (e) => {
     const b = e.target.closest('[data-v], [data-kb], [data-act], [data-pick], [data-key], [data-unatt]');
@@ -2201,7 +2250,11 @@ function userHtml(m, mark) {
     : /^\/[a-z][\w-]*(\s|$)/.test(t) && !t.includes('\n') ? ['cmd', '', t]
     : m.by === 'butler' ? ['byb', '管家发的', t]
     : t.startsWith(HAND) ? ['', '📌 交代给管家', t.slice(HAND.length)] : ['', '', t];
-  return `<div class="hm user${cls ? ' ' + cls : ''}"${mark}>${lab ? `<span class="lab">${lab}</span>` : ''}${md(words)}</div>`;
+  // a long one (a paste, a ticket): its first lines fading out, 「展开全部」 under them; that button's words from the CSS,
+  // out of the bubble's text (停止 compares it with what was sent)
+  const long = cls !== 'cmd' && (words.split('\n').length > 12 || words.length > 800);
+  return `<div class="hm user${cls ? ' ' + cls : ''}${long ? ' long' : ''}"${mark}>${lab ? `<span class="lab">${lab}</span>` : ''}${long
+    ? `<div class="clip">${md(words)}</div><button class="more" data-more></button>` : md(words)}</div>`;
 }
 function addItems(box, items) {
   for (const m of items) {
@@ -2297,8 +2350,11 @@ function md(t) {
     : p.replace(/((?:^\|.*\n?)+)/gm, table).replace(/`([^`\n]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)).join('');
 }
-// 复制: a code block's code, or an answer as Claude wrote it (its Markdown)
+// 复制: a code block's code, or an answer as Claude wrote it (its Markdown). 展开全部 / 收起 a long message of yours
+// (folded again, kept in sight)
 document.addEventListener('click', (e) => {
+  const m = e.target.closest('[data-more]')?.closest('.hm');
+  if (m) { if (!m.classList.toggle('open')) m.scrollIntoView({ block: 'nearest' }); return; }
   const b = e.target.closest('[data-copy]');
   if (!b) return;
   const t = b.closest('.pw')?.querySelector('pre').textContent ?? b.closest('[data-raw]')?.dataset.raw ?? '';
