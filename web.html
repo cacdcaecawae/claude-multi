@@ -2228,6 +2228,7 @@ function addItems(box, items) {
       continue;
     }
     if (m.role !== 'tool') {
+      // ponytail: an answer's Markdown kept on it for 复制, its words twice in the page; on demand from the record if a long one weighs on a phone
       box.insertAdjacentHTML('beforeend', m.role === 'user' ? userHtml(m, mark) : m.role === 'claude'
         ? `<div class="hm claude"${mark} data-raw="${esc(m.text)}">${md(m.text)}<button class="cpy" data-copy title="复制这段回答">${svg(I.copy)}</button></div>`
         : `<div class="hm ${m.role}"${mark}>${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
