@@ -1018,7 +1018,7 @@ function remove(x) {
 // Helpers started before this Claude process (since) died with the previous one, when the conversation was
 // closed and resumed. ponytail: ones over 6 h old count as gone too, in case their end fell outside the tail
 function helpersBusy(tail, since = 0) {
-  const busy = new Map(), spawns = new Map(), team = new Set();
+  const busy = new Map(), spawns = new Map(), team = new Set(), tasks = new Map(); // tasks: a background task's id → its launch
   for (const line of tail.split('\n')) {
     if (line.length > 262144) continue; // an image or long output, never a marker: skipping keeps this fast
     let j;
@@ -1039,7 +1039,13 @@ function helpersBusy(tail, since = 0) {
           team.add(spawns.get(p.tool_use_id));
           busy.set(`@${spawns.get(p.tool_use_id)}`, at);
         }
-        else if (/^(Async agent launched|Command running in background)/.test(r)) busy.set(p.tool_use_id, at);
+        else if (/^(Async agent launched|Command running in background)/.test(r)) {
+          busy.set(p.tool_use_id, at);
+          const id = /\b(?:ID|agentId)\s*[:=]\s*([\w-]+)/i.exec(r)?.[1]; // what TaskStop names it by
+          if (id) tasks.set(id, p.tool_use_id);
+        }
+        // stopped by Claude itself (TaskStop): no task-notification ever comes for it, so it's done here
+        else if (/(?:stopped task|killed shell):?\s*([\w-]+)/i.test(r)) busy.delete(tasks.get(/(?:stopped task|killed shell):?\s*([\w-]+)/i.exec(r)[1]));
       }
     }
     for (const m of text.matchAll(/<teammate-message teammate_id="([^"]+)"[^>]*>(\s*\{"type":"(idle_notification|shutdown_approved)")?/g)) {

@@ -51,6 +51,13 @@ const bg = [use('b1', 'Bash', { run_in_background: true }), res('b1', 'Command r
 assert.equal(helpersBusy(bg.join('\n')), true);
 assert.equal(helpersBusy([...bg, says('<task-notification>\n<tool-use-id>b1</tool-use-id>\n<status>completed</status>')].join('\n')), false);
 assert.equal(helpersBusy([use('a1', 'Agent', { description: 'x' }), res('a1', 'the subagent finished: here is its report')].join('\n')), false); // foreground agent
+// stopped by Claude itself: no task-notification ever comes, its TaskStop result says so (as a ticket's worker did,
+// stopping its preview server: no "done" note, and the ticket never saw its turn end)
+const stop = (id, task) => [use(id, 'TaskStop', { task_id: task }), res(id, `{"message":"Successfully stopped task: ${task} (node \\"x.js\\")","task_id":"${task}"}`)];
+const bg2 = [use('b2', 'Bash', { run_in_background: true }), res('b2', 'Command running in background with ID: boy8woozg. Output is being written to: x')];
+assert.equal(helpersBusy([...bg, ...bg2, ...stop('s1', 'q1')].join('\n')), true); // one of two stopped
+assert.equal(helpersBusy([...bg, ...bg2, ...stop('s1', 'q1'), ...stop('s2', 'boy8woozg')].join('\n')), false); // both
+assert.equal(helpersBusy([...bg, ...stop('s3', 'other')].join('\n')), true); // another task's stop
 console.log('helpers ok');
 assert.equal(helpersBusy(spawn.join('\n'), Date.now() + 1000), false); // spawned before this Claude started: gone
 console.log('resume ok');
