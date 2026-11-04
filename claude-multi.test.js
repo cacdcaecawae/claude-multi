@@ -401,13 +401,23 @@ console.log('tokens ok');
 {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
   const part = (re) => src.match(re)[0];
-  const md = new Function(`${part(/^const esc = .*$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)();
+  const md = new Function(`${part(/^const esc = .*$/m)}\n${part(/^const svg = .*$/m)}\n${part(/^const I = [\s\S]*?\};$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}
+    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)();
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
   assert.ok(t.includes('<tr><td>c | d</td><td>&lt;e&gt;</td></tr>'), t);              // escaped as everything else
   assert.ok(t.startsWith('看这个\n<div class="tbl">') && t.endsWith('</table></div>后面'), t);
   assert.equal(md('| grep x\n'), '<div class="mono">| grep x\n</div>');               // not a table
+  // links: the address to a space, a quote or Chinese text; a sentence's end and an unopened ")" left out; in a code
+  // span or bold it's a link inside it (neither cut across its markup); none in a code block
+  const a = (u, w = u) => `<a href="${u}" target="_blank" rel="noopener">${w}</a>`;
+  assert.equal(md('PR：https://github.com/a/b/pull/7，看看'), `PR：${a('https://github.com/a/b/pull/7')}，看看`);
+  assert.equal(md('(见 https://x.com/a)。'), `(见 ${a('https://x.com/a')})。`);
+  assert.equal(md('https://w.org/Foo_(bar). x'), `${a('https://w.org/Foo_(bar)')}. x`);
+  assert.equal(md('q https://a.com/x?a=1&b=2. "https://q.com"'), `q ${a('https://a.com/x?a=1&amp;b=2')}. &quot;${a('https://q.com')}&quot;`);
+  assert.equal(md('[文档](https://d.com/p) `https://c.x` **https://b.x**'), `${a('https://d.com/p', '文档')} <code>${a('https://c.x')}</code> <b>${a('https://b.x')}</b>`);
+  assert.ok(md('```\nhttps://in.code/x\n```').endsWith('<pre>https://in.code/x</pre></div>'));
   console.log('md ok');
 }
 
