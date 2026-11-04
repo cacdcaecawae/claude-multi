@@ -1398,6 +1398,12 @@ function history(file, { from, end, keep = 120 } = {}) {
       for (const p of parts) {
         if (p.type !== 'text') continue;
         let t = p.text.trim();
+        // a background task of Claude's over: it was woken by it, what it says next is about that (a line, not yours)
+        if (t.startsWith('<task-notification>')) {
+          const what = /"([^"]+)"/.exec(/<summary>([\s\S]*?)<\/summary>/.exec(t)?.[1] ?? '')?.[1];
+          add('note', `⏳ 后台的事${/<status>completed</.test(t) ? '有结果了' : '结束了'}${what ? `：${what}` : ''}`, at);
+          continue;
+        }
         // Claude's own bookkeeping, and what another Claude session (a teammate, a subagent) sent it: not yours
         if (/^(?:Another Claude session sent a message:\s*)?<(task-notification|teammate-message|local-command-stdout|local-command-caveat|system-reminder)/.test(t)) continue;
         const cmd = /<command-name>([^<]*)<\/command-name>/.exec(t);

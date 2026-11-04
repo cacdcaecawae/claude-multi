@@ -166,7 +166,8 @@ console.log('tokens ok');
     u('修一下 bug<system-reminder>ignore me</system-reminder>'),
     a([{ type: 'thinking', thinking: '...' }, { type: 'text', text: '好的。' }, { type: 'tool_use', name: 'Bash', input: { command: 'npm test', description: 'Run tests' } }]),
     u([{ type: 'tool_result', tool_use_id: 'x', content: 'ok' }]),
-    u('<task-notification>\n<task-id>b1</task-id>'),
+    // a background task over: a line saying so (what woke Claude), its description from the summary
+    u('<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command "Wait for the plan" completed (exit code 0)</summary>'),
     u('Summary of earlier work', { isCompactSummary: true }),
     a([{ type: 'text', text: '测试通过。' }]),
     // sent while Claude was at work; a background task's message delivered the same way isn't yours
@@ -176,7 +177,7 @@ console.log('tokens ok');
   ].map((x) => JSON.stringify(x)).join('\n') + '\n');
   const all = history(f);
   assert.deepEqual(all.items.map((x) => `${x.role}:${x.text}`),
-    ['user:/rename 新名字', 'user:修一下 bug', 'claude:好的。', 'tool:Bash  Run tests', 'note:更早的内容已压缩', 'claude:测试通过。', 'user:顺便看看日志', 'done:7750']);
+    ['user:/rename 新名字', 'user:修一下 bug', 'claude:好的。', 'tool:Bash  Run tests', 'note:⏳ 后台的事有结果了：Wait for the plan', 'note:更早的内容已压缩', 'claude:测试通过。', 'user:顺便看看日志', 'done:7750']);
   // read again from where it ended: only what was added, and a line still being written waits
   fs.appendFileSync(f, JSON.stringify(a([{ type: 'text', text: '看完了。' }])) + '\n{"type":"assistant","mess');
   const more = history(f, { from: all.end });

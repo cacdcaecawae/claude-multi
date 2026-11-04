@@ -2087,8 +2087,9 @@ window.addEventListener('focus', () => shownConvs().forEach((c) => c.claim())); 
 
 // Messages into a box: your message and Claude's answer. How it got there, its tool calls and its words between them,
 // folds into one line under your message, "过程：6 个操作（命令 3、读文件 2…）" (tap to see it all). Claude's words
-// stay out until its next tool call: then they were on the way, not the answer, and fold in too. A turn over ends
-// with how long it took. Added to piece by piece as the record grows: the box's end says where the turn is.
+// stay out until its next tool call: then they were on the way, not the answer, and fold in too; but not long ones
+// (paragraphs, or over 280 characters): an answer, given before going on with something else. A turn over ends with
+// how long it took. Added to piece by piece as the record grows: the box's end says where the turn is.
 const KIND = { Bash: '命令', PowerShell: '命令', Read: '读文件', Edit: '改文件', Write: '改文件', NotebookEdit: '改文件', Grep: '搜索', Glob: '搜索',
   WebSearch: '查网页', WebFetch: '查网页', Agent: '子任务' };
 const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${Math.floor(s / 3600)} 小时 ${Math.floor(s / 60) % 60} 分`; };
@@ -2123,7 +2124,7 @@ function addItems(box, items) {
     }
     const words = []; // Claude's words since the turn's 过程 (or its start): on the way after all
     let e = box.lastElementChild;
-    while (e?.matches('.hm.claude')) { words.unshift(e); e = e.previousElementSibling; }
+    while (e?.matches('.hm.claude') && !/\n\s*\n/.test(e.textContent) && e.textContent.length <= 280) { words.unshift(e); e = e.previousElementSibling; }
     let g = e?.matches('details.tools') ? e : null;
     if (!g) { g = document.createElement('details'); g.className = 'tools'; g.innerHTML = '<summary></summary><div></div>'; if (words[0]) words[0].before(g); else box.append(g); }
     const list = g.lastElementChild, n = {};
