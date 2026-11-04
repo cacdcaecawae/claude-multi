@@ -589,9 +589,9 @@ console.log('tokens ok');
   assert.deepEqual(stageOf(t, s()), ['等你验收', 'you', '方案写好了']);
   assert.throws(() => op({ op: 'report', id: 1, k: '进行中', text: 'x' }, 14)); // only the words it knows
   assert.throws(() => op({ op: 'report', id: 9, k: '做完', text: 'x' }, 14));
-  assert.equal(op({ op: 'give', id: 1, conv: 'c1', ask: '改掉', name: '改掉' }, 14).ask, '把声速场做到成熟'); // never changed
   const n = butlerNotice([{ t, st: stageOf(t, s()) }, { t: { id: 2, name: '层析' }, st: ['停下了', 'idle', '下一步写理论稿'] }]);
   assert.ok(n.startsWith('[系统通知]') && n.includes('#1「声速场 Stage 4」等用户验收：方案写好了；#2「层析」停下了：下一步写理论稿'), n);
+  assert.equal(op({ op: 'give', id: 1, conv: 'c1', ask: '改掉', name: '改掉' }, 14).ask, '把声速场做到成熟'); // never changed (given again: it starts clean)
   op({ op: 'end', id: 1, how: 'done', text: '交给你了' }, 15);
   assert.deepEqual(stageOf(t, s()), ['完成', 'end', '交给你了']);
   assert.throws(() => op({ op: 'report', id: 1, k: '做完', text: 'x' }, 16)); // ended
@@ -602,6 +602,39 @@ console.log('tokens ok');
   assert.ok(!fs.existsSync(path.join(dir, 'b.json'))); // dropped
   fs.rmSync(dir, { recursive: true });
   console.log('butler tickets ok');
+}
+
+// What review of the first version found: a conversation does one open ticket at a time (two tickets on it took each
+// other's turns); a ticket given again counts only what the new one did; one the list says is at work (the list is read
+// up to 3 s ago) is kept for the 管家, not dropped; nothing is started in the claude-multi in use, or a folder in it
+{
+  const { ticketOp, stageOf, tellSplit, inLive } = require('./claude-multi'), path = require('path');
+  const all = [], op = (b, at) => ticketOp(all, b, at), s = (id, o) => ({ id, pid: 9, busy: false, wait: false, ...o });
+  const a = op({ op: 'new', name: 'A', ask: 'a' }, 1), b = op({ op: 'new', name: 'B', ask: 'b' }, 1);
+  op({ op: 'give', id: a.id, conv: 'c1' }, 2);
+  op({ op: 'report', id: a.id, k: '做完', text: 'A 好了' }, 3); a.ev.push({ at: 4, k: 'stop', text: '' });
+  assert.throws(() => op({ op: 'give', id: b.id, conv: 'c1' }, 5), /#1/); // c1 has A open
+  assert.equal(stageOf(a, s('c1'))[0], '等你验收'); // A as it was
+  op({ op: 'give', id: a.id, conv: 'c1' }, 5); // the same ticket to its own conversation again: fine
+  op({ op: 'end', id: a.id, how: 'done' }, 6);
+  op({ op: 'give', id: b.id, conv: 'c1' }, 7); // A ended: c1 free
+  // B given to c2 after c1 got stuck on it: c1's 卡住 isn't c2's
+  op({ op: 'report', id: b.id, k: '卡住', text: 'c1 卡住' }, 8); b.ev.push({ at: 9, k: 'stop', text: '' });
+  assert.equal(stageOf(b, s('c1'))[0], '卡住了');
+  op({ op: 'give', id: b.id, conv: 'c2' }, 10);
+  assert.deepEqual(stageOf(b, s('c2')), ['停下了', 'idle', '']); // nothing from c2 yet
+  b.ev.push({ at: 11, k: 'stop', text: 'c2 做了一轮' });
+  assert.deepEqual(stageOf(b, s('c2')), ['停下了', 'idle', 'c2 做了一轮']);
+  // queued for the 管家: one at work kept, one stopped told, one ended dropped
+  const c = op({ op: 'new', name: 'C', ask: 'c' }, 12); op({ op: 'give', id: c.id, conv: 'c3' }, 12);
+  const r = tellSplit([a.id, b.id, c.id, 99], all, [s('c2'), s('c3', { busy: true })]);
+  assert.deepEqual(r.items.map((o) => o.t.id), [b.id]);
+  assert.deepEqual(r.keep, [c.id]);
+  // the claude-multi in use: itself and folders in it, not those beside it or above it
+  const here = __dirname; // the test runs from the code's own folder
+  assert.ok(inLive(here) && inLive(path.join(here, 'butler')) && inLive(here + path.sep));
+  assert.ok(!inLive(here + '-dev') && !inLive(path.dirname(here)) && !inLive(path.join(here, '..', 'x')) && !inLive('D:\\paper_fast'));
+  console.log('ticket review ok');
 }
 
 // What the 管家 costs, by what set it going: you, a [系统通知], a background task (a tool's result in between keeps

@@ -735,6 +735,9 @@ async function webPost(p, body, method = 'POST') {
   return j;
 }
 const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+// the claude-multi in use, or a folder in it: a change there is live at once, unreviewed (the 管家 works elsewhere)
+const inLive = (d) => { const r = path.relative(__dirname, path.resolve(d)); return r === '' || (r !== '..' && !r.startsWith('..' + path.sep) && !path.isAbsolute(r)); };
+const LIVE_NO = `这是正在用的 claude-multi 代码，不能在这里改：在单独的副本（${__dirname}-dev 这类 git worktree）里新开对话，交代里写明建分支、发 PR`;
 function findChat(ref) {
   const all = listSessions(load()), byId = all.find((s) => s.id === ref), hit = byId ? [byId] : all.filter((s) => ref && s.title.includes(ref));
   if (hit.length === 1) return hit[0];
@@ -830,13 +833,14 @@ async function chatWait(ref, until, note) {
     if (s) await chatLook(s.id);
   } finally { fs.rmSync(wf, { force: true }); }
 }
-async function chatSay(ref, text) {
+async function chatSay(ref, text, before) {
   if (!text) throw new Error('要说什么？');
   const s = findChat(ref), t0 = Date.now();
   const { key } = await webPost('/api/open', { id: s.id, acct: s.acct + 1, cols: 120, rows: 40 }); // not running: continued in the web service
   const live = await waitLive((j) => j.sessionId === s.id || j.pid === s.pid || (!s.pid && sameDir(j.cwd, s.cwd) && j.startedAt >= t0 - 5000), 60000);
   if (!live) throw new Error('它没能启动起来');
   await untilReady(live);
+  await before?.(s.id); // ticket give: bound first, so its first turn ending is seen
   const went = await typeIn(key, live, text);
   blog(`给「${s.title}」发了消息：${text.length > 40 ? text.slice(0, 40) + '…' : text}`, s.id);
   console.log(went ? `已发给「${s.title}」，它开始干活了。` : `已发给「${s.title}」，但它还没动，稍后用 chat look 看看。`);
@@ -863,10 +867,11 @@ async function chatPick(ref, n) {
   blog(`替你给「${s.title}」选了「${label}」`, s.id);
   console.log(`已替用户选了「${label}」。`);
 }
-async function chatNew(dir, text, n) {
+async function chatNew(dir, text, n, before) {
   dir = path.resolve(dir ?? '');
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`没有这个文件夹：${dir}`);
   if (sameDir(dir, HOME)) throw new Error('主文件夹 Claude 每次都要问是否信任，换一个具体的文件夹');
+  if (inLive(dir)) throw new Error(LIVE_NO);
   if (!text) throw new Error('要给它第一句话');
   const reg = load();
   if (!n) { const u = (await usageState(reg)).json; if (!u.open) throw new Error(`账号都到上限了，${u.ready} 后恢复`); n = u.rec + 1; }
@@ -877,6 +882,7 @@ async function chatNew(dir, text, n) {
   const live = await waitLive((j) => sameDir(j.cwd, dir) && j.startedAt >= t0 - 5000, 60000);
   if (!live) throw new Error('它没能启动起来');
   await untilReady(live, 60000);
+  await before?.(live.sessionId);
   const went = await typeIn(key, live, text);
   blog(`新开了对话（${path.basename(dir)}，账号 ${n}）：${text.length > 40 ? text.slice(0, 40) + '…' : text}`, live.sessionId);
   console.log(`已在账号 ${n} 新建对话，编号 ${live.sessionId}（文件夹 ${dir}）。${went ? '第一句已发出，它开始干活了。' : '第一句已发出，但它还没动，稍后用 chat look 看看。'}`);
@@ -909,14 +915,16 @@ async function ticket([sub, ...a]) {
       const n = Number(opt('--acct')) || 0, [id, where, ...rest] = a, text = rest.join(' ');
       const t = (await webPost('/api/tickets', null, 'GET')).find((x) => x.id === Number(id));
       if (!t) throw new Error(`没有工单 #${id}`);
+      if (t.end) throw new Error(`工单 #${t.id} 已经结束了`);
       if (!where || !text) throw new Error('用法：ticket give <工单号> <文件夹 或 对话> <交代>');
       const brief = `${text}\n\n（这是管家派的工单 #${t.id}「${t.name}」。用户的原话：${t.ask}${t.done ? `\n做到什么算完：${t.done}` : ''}${t.limits ? `\n约束：${t.limits}` : ''}`
         + `\n做完了、要用户决定、或者卡住了，用命令告诉管家（不用等它来问）：\n  claude-multi report ${t.id} 做完 <一句话结果>\n  claude-multi ask ${t.id} <要用户决定的问题>\n  claude-multi report ${t.id} 卡住 <原因>（失败、不用做 也这样报）`
         + '\n只是告一段落、下一步你自己清楚的，不用报告，停下就行，管家会让你接着做。）';
+      // not in the claude-multi in use: the conversation given to, by the folder it runs in
       const dir = fs.existsSync(where) && fs.statSync(where).isDirectory();
-      if (dir && sameDir(where, __dirname)) throw new Error(`这是正在用的 claude-multi 代码，不能在这里改：在单独的副本（${__dirname}-dev 这类 git worktree）里新开对话，交代里写明建分支、发 PR`);
-      const c = dir ? await chatNew(where, brief, n) : await chatSay(where, brief);
-      await webPost('/api/ticket', { op: 'give', id: t.id, conv: c.id, title: c.title || path.basename(path.resolve(where)) });
+      if (inLive(dir ? where : findChat(where).cwd)) throw new Error(LIVE_NO);
+      const bind = (conv) => webPost('/api/ticket', { op: 'give', id: t.id, conv, title: dir ? path.basename(path.resolve(where)) : findChat(conv).title });
+      const c = dir ? await chatNew(where, brief, n, bind) : await chatSay(where, brief, bind);
       console.log(`工单 #${t.id} 已交给${dir ? '新开的对话' : `「${c.title}」`}（编号 ${c.id}）。它停下时你会收到通知。`);
     } else if (sub === 'end') {
       const [id, how, ...rest] = a, text = rest.join(' ');
@@ -1270,7 +1278,13 @@ function ticketOp(all, b, now = Date.now()) {
     all.push(n);
     return n;
   }
-  if (b.op === 'give') { if (!b.conv) throw new Error('要派给哪个对话？'); t.conv = String(b.conv); add('give', b.title || b.conv); return t; }
+  if (b.op === 'give') {
+    if (!b.conv) throw new Error('要派给哪个对话？');
+    const other = all.find((x) => x !== t && !x.end && x.conv === String(b.conv)); // its turns couldn't be told apart
+    if (other) throw new Error(`这个对话已经在做工单 #${other.id}「${other.name}」，先结束它（ticket end），或者换一个对话`);
+    t.conv = String(b.conv); add('give', b.title || b.conv);
+    return t;
+  }
   if (b.op === 'report') {
     if (b.k !== 'ask' && !REPORT_WORDS.includes(b.k)) throw new Error(`报告只能是：${REPORT_WORDS.join('、')}`);
     if (!String(b.text ?? '').trim()) throw new Error(b.k === 'ask' ? '要问什么？' : '写一句话说明');
@@ -1289,12 +1303,23 @@ function stageOf(t, s) {
   if (!t.conv) return t.inferred ? ['建议', 'you', '管家自己提的，你同意了才开工'] : ['没派人', 'queue', ''];
   if (s?.busy) return ['在做', 'work', ''];
   if (s?.wait) return ['等确认', 'ask', '它停在一个确认或选择题上'];
-  const ev = t.ev ?? [], stops = ev.filter((e) => e.k === 'stop'), from = stops.at(-2)?.at ?? 0, to = stops.at(-1)?.at ?? Infinity;
+  const all = t.ev ?? [], ev = all.slice(all.findLastIndex((e) => e.k === 'give') + 1); // since it was given to this one
+  const stops = ev.filter((e) => e.k === 'stop'), from = stops.at(-2)?.at ?? 0, to = stops.at(-1)?.at ?? Infinity;
   const said = ev.filter((e) => e.at > from && e.at <= to), q = said.filter((e) => e.k === 'ask').at(-1), r = said.filter((e) => REPORT_WORDS.includes(e.k)).at(-1);
   if (q) return ['等你回答', 'you', q.text];
   if (r?.k === '做完' || r?.k === '不用做') return [r.k === '做完' ? '等你验收' : '它说不用做', 'you', r.text];
   if (r) return [r.k === '失败' ? '失败' : '卡住了', 'stuck', r.text];
   return ['停下了', 'idle', s?.pid ? (stops.at(-1)?.text ?? '') : '没在运行'];
+}
+// of the tickets queued for the 管家: those to tell now, each as it stands, and those kept (back at work, or so a list read
+// a moment ago says: told once they stop)
+function tellSplit(ids, tickets, list) {
+  const items = [], keep = [];
+  for (const id of ids) {
+    const t = tickets.find((x) => x.id === id), st = t && !t.end && stageOf(t, list.find((x) => x.id === t.conv));
+    if (st) (st[1] === 'work' ? keep.push(id) : items.push({ t, st }));
+  }
+  return { items, keep };
 }
 // the one notice the 管家 gets for the tickets that moved, each as it stands now (the panel's 你 is the user here)
 function butlerNotice(items) {
@@ -2144,13 +2169,14 @@ async function web() {
     if (!t || Date.now() - (t.typed ?? 0) < 10000 || ptyStatus(t) !== 'idle') return; // not running: kept till it is
     const ids = [...toTell], list = sessions();
     toTell.clear();
-    const items = readTickets().filter((x) => ids.includes(x.id) && !x.end).map((x) => ({ t: x, st: stageOf(x, list.find((s) => s.id === x.conv)) })).filter((o) => o.st[1] !== 'work');
+    const { items, keep } = tellSplit(ids, readTickets(), list);
+    keep.forEach((i) => toTell.add(i));
     if (!items.length) return;
     telling = true;
     try {
       await tellIn(t, butlerNotice(items));
       for (let k = 0; k < 10; k++) { await sleep(2000); if (['busy', 'shell'].includes(ptyStatus(t))) { tries = 0; return log('butler_told', { n: items.length }); } }
-      if (++tries <= 2) ids.forEach((i) => toTell.add(i));
+      if (++tries <= 2) items.forEach((o) => toTell.add(o.t.id));
       log('butler_tell_missed', { n: items.length, again: tries <= 2 });
     } finally { telling = false; }
   }, 3000);
@@ -2395,7 +2421,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { keepDefaults, butlerCost, blogSent, parseUntil, todoOpen, ticketOp, stageOf, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { inLive, keepDefaults, butlerCost, blogSent, parseUntil, todoOpen, ticketOp, stageOf, tellSplit, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
