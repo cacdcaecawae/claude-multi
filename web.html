@@ -1011,14 +1011,15 @@ async function menuPick(e) {
   load();
 }
 // 换账号继续 from the list: the conversation in its tab, its 换账号 card there (a running one once it's connected; one
-// not running isn't started first: the account picked on the card starts it)
+// not running isn't started first: the account picked on the card starts it). Its tab closed meanwhile, or another one
+// looked at (or 管家 mode gone into): no card, it would come up over that
 async function swapFrom(s) {
   let c = convOf(s.id);
   if (c) activate(c.g, c);
   else if (s.pid) { await openSession(s.id); c = convOf(s.id); }
   else addConv(focusG, (c = makeConv({ id: s.id }, s.title)));
-  for (const end = Date.now() + 5000; c && s.pid && !c.where() && !c.ended && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 200));
-  c?.swap();
+  for (const end = Date.now() + 5000; c && !c.closed && s.pid && !c.where() && !c.ended && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 200));
+  if (c && !c.closed && !butler && focusG?.active === c) c.swap();
 }
 $('#cmenu').onclick = menuPick;
 $('#view').oncontextmenu = (e) => { const r = e.target.closest('[data-open]'); if (r) { e.preventDefault(); rowMenu(r.dataset.open, e.clientX, e.clientY); } };

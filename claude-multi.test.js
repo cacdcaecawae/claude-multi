@@ -431,6 +431,24 @@ console.log('tokens ok');
   console.log('stamp ok');
 }
 
+// One thing at a time for a conversation in the web service: no rename or delete during a switch or another one, no
+// switch during a rename or delete; a second switch goes on without a hold of its own, the first one's end lets go
+{
+  const { hold } = require('./claude-multi'), id = 'c-1';
+  const switched = hold(id, 'switch');
+  assert.throws(() => hold(id, 'change'), /换账号/);
+  hold(id, 'switch')(); // the second one's end lets nothing go
+  assert.throws(() => hold(id, 'change'), /换账号/);
+  switched();
+  const changed = hold(id, 'change');
+  assert.throws(() => hold(id, 'switch'), /改名或删除/);
+  assert.throws(() => hold(id, 'change'), /改名或删除/);
+  hold('c-2', 'change')(); // another conversation: its own
+  changed();
+  hold(id, 'change')();
+  console.log('hold ok');
+}
+
 // A picture in a record: history() names it by its line's place in bytes and which picture it is, recordImage() gives
 // it back. A picture from the page is saved under a new name; ones older than a week go.
 {

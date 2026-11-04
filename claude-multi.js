@@ -1734,6 +1734,21 @@ self.addEventListener('notificationclick', (e) => {
 const MANIFEST = JSON.stringify({ name: 'Claude 多账号', short_name: 'Claude', start_url: '/', display: 'standalone', background_color: '#181818', theme_color: '#181818',
   icons: [{ src: '/icon-180.png', sizes: '180x180', type: 'image/png' }] });
 
+// What the web service is doing to a conversation, by id: 'switch' (asked, till its new Claude has started) or 'change'
+// (a rename or a delete, till its command is done). A change is refused while anything goes on, a start or a switch
+// while a change does: a deletion between a switch's two Claudes, or a start between a deletion's checks and its
+// PowerShell, would lose the record. A second switch (the island and the page both) goes on as before, the first lets go.
+// ponytail: the service's own doings only; `claude-multi delete` typed meanwhile in a terminal isn't held off
+const doing = new Map();
+function hold(id, what) {
+  const was = doing.get(id);
+  if (was === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
+  if (was && what === 'change') throw new Error('这个对话正在换账号，换完再改');
+  if (was) return () => {};
+  doing.set(id, what);
+  return () => doing.delete(id);
+}
+
 async function web() {
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
@@ -1757,8 +1772,11 @@ async function web() {
   const command = (what, id, ...more) => {
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error('没有这个对话');
     if (resuming(id)) throw new Error('这个对话正在运行，先结束它');
+    sessCache = null;
+    if (!sessions().some((x) => x.id === id)) throw new Error('找不到这个对话，可能已经删了'); // (rename's own words: its usage line)
+    const free = hold(id, 'change');
     return new Promise((ok, no) => require('child_process').execFile(process.execPath, [__filename, what, id, ...more], { windowsHide: true },
-      (e, stdout) => { sessCache = null; const said = String(stdout ?? '').trim(); if (e) no(new Error(said || e.message)); else ok({ said }); }));
+      (e, stdout) => { sessCache = null; const said = String(stdout ?? '').trim(); if (e) no(new Error(said || e.message)); else ok({ said }); })).finally(free);
   };
   // a conversation started or continued here: claude in a pseudo-terminal, its output kept (last 256 KB) for
   // whoever opens it later
@@ -2051,6 +2069,7 @@ async function web() {
         const r = resuming(s.id);
         if (r) return { key: r.key, kind: 'pty' };
         if (b.live) throw new Error('这个对话已经不在运行了'); // the page reconnecting: an ended one isn't started anew
+        if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
         copyTo(s, p);
         return { key: startPty(p, s.cwd, ['--resume', s.id], cols, rows).key, kind: 'pty' };
@@ -2076,21 +2095,25 @@ async function web() {
       if (!p) throw new Error('没有这个账号');
       const args = ['--resume', s.id];
       if (!s.pid && resuming(s.id)) throw new Error('这个对话还在启动，等它起来再换'); // a second Claude on the record, or the page told it switched
-      if (!s.pid) { copyTo(s, p); return { key: startPty(p, s.cwd, args, b.cols | 0 || 100, b.rows | 0 || 30).key, kind: 'pty' }; }
-      const t = where(s);
-      if (t?.kind !== 'pty') { switchWindow(s, b.acct, !!b.now).catch((e) => t && send(t, 'swapfail', { err: `没换成：${e.message}` })); return { window: true }; }
-      (async () => {
-        await untilFree(t.dir, t.pid, b.now || atLimit(reg.profiles[s.acct]));
-        if (t.gone || t.switching) return; // a second request (the island and the page both): one new Claude, not two
-        // removed while it answered: not started there (its folder gone, no login), the old one left running
-        if (!load().profiles.some((x) => x.id === p.id)) throw new Error('要换去的账号已经移除了');
-        t.switching = true;
-        t.proc.kill();
-        while (!t.gone) await sleep(100); // it has stopped writing its record: the copy is whole
-        copyTo(s, p);
-        send(t, 'switched', { key: startPty(p, s.cwd, args, t.w, t.h).key });
-      })().catch((e) => send(t, 'swapfail', { err: `没换成：${e.message}` })); // its pages stop waiting
-      return { pty: true };
+      const free = hold(s.id, 'switch');
+      let later = null; // a switch still to happen: held till it has
+      try {
+        if (!s.pid) { copyTo(s, p); return { key: startPty(p, s.cwd, args, b.cols | 0 || 100, b.rows | 0 || 30).key, kind: 'pty' }; }
+        const t = where(s);
+        if (t?.kind !== 'pty') { later = switchWindow(s, b.acct, !!b.now).catch((e) => t && send(t, 'swapfail', { err: `没换成：${e.message}` })); return { window: true }; }
+        later = (async () => {
+          await untilFree(t.dir, t.pid, b.now || atLimit(reg.profiles[s.acct]));
+          if (t.gone || t.switching) return; // a second request (the island and the page both): one new Claude, not two
+          // removed while it answered: not started there (its folder gone, no login), the old one left running
+          if (!load().profiles.some((x) => x.id === p.id)) throw new Error('要换去的账号已经移除了');
+          t.switching = true;
+          t.proc.kill();
+          while (!t.gone) await sleep(100); // it has stopped writing its record: the copy is whole
+          copyTo(s, p);
+          send(t, 'switched', { key: startPty(p, s.cwd, args, t.w, t.h).key });
+        })().catch((e) => send(t, 'swapfail', { err: `没换成：${e.message}` })); // its pages stop waiting
+        return { pty: true };
+      } finally { if (later) later.finally(free); else free(); }
     },
     'POST /api/input': (q, b) => {
       const t = terms.get(b.key);
@@ -2480,7 +2503,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
