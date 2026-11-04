@@ -696,6 +696,39 @@ console.log('tokens ok');
   console.log('ticket review 2 ok');
 }
 
+// Whoever set a turn going gets its end: one the 管家 set going (its words, as its log has their first 40) tells the 管家,
+// even outside a ticket (it asked rag something and promised to tell you); one you set going yourself doesn't wake it
+{
+  const { turnBy, notesInto, butlerNotice } = require('./claude-multi');
+  const sent = [{ at: 1000, text: '你知道这个项目有没有一个上传/提交的截止日期吗？之前聊过的话帮我确认一下具体是哪' }];
+  assert.equal(turnBy('你知道这个项目有没有一个上传/提交的截止日期吗？之前聊过的话帮我确认一下具体是哪天，有的话告诉我', sent, 5000), 'butler');
+  assert.equal(turnBy('先看一下：\r\n截止日期是哪天', [{ at: 1000, text: '先看一下：\n截止日期是哪天' }], 5000), 'butler'); // line breaks however kept
+  assert.equal(turnBy('就按这个来，帮我部署', sent, 5000), 'you');
+  assert.equal(turnBy(null, sent, 5000), null); // nothing read
+  assert.equal(turnBy(sent[0].text, sent, 1000 + 7 * 3600e3), 'you'); // its words from long before: typed again since
+  assert.equal(turnBy(sent[0].text, sent, 500 - 120000), 'you'); // sent after that turn ended
+  const go = [{ at: 1000, text: '继续' }]; // a short one is kept whole: only the very words are its
+  assert.equal(turnBy('继续', go, 5000), 'butler');
+  assert.equal(turnBy('继续做第三部分', go, 5000), 'you');
+  // a ticket's conversation: your own turn is kept (the panel shows it), not news for the 管家; the 管家's is
+  const tk = [{ id: 1, conv: 'w', ev: [{ at: 10, k: 'give' }] }], you = { at: 20, id: 'w', kind: 'done' }, its = { at: 30, id: 'w', kind: 'done' };
+  assert.deepEqual(notesInto(tk, [you], () => '我跟用户聊完了', (n) => n === you), []);
+  assert.equal(tk[0].ev.at(-1).at, 20);
+  assert.deepEqual(notesInto(tk, [its], () => '', (n) => n === you), [1]);
+  // your own turn in which the worker reported 做完: news all the same (the 管家 checks it and closes the ticket)
+  tk[0].ev.push({ at: 35, k: '做完', text: '好了' });
+  const you2 = { at: 40, id: 'w', kind: 'done' };
+  assert.deepEqual(notesInto(tk, [you2], () => '', () => true), [1]);
+  const you3 = { at: 50, id: 'w', kind: 'done' }; // the next of yours, nothing reported in it: not news
+  assert.deepEqual(notesInto(tk, [you3], () => '', () => true), []);
+  // a reply outside a ticket, alone and beside a ticket's news
+  const r = butlerNotice([], [{ title: 'rag检索', kind: 'done', text: '初赛材料的上传截止时间是 11 月 5 日 24:00' }]);
+  assert.ok(r.startsWith('[系统通知] 「rag检索」回复了你发的消息：初赛材料的上传截止时间是 11 月 5 日 24:00') && r.includes('告诉用户') && !r.includes('工单有动静'), r);
+  const both = butlerNotice([{ t: { id: 2, name: '层析' }, st: ['停下了', 'idle', ''] }], [{ title: 'rag检索', kind: 'ask' }]);
+  assert.ok(both.includes('#2「层析」停下了') && both.includes('「rag检索」在你发消息后停在一个确认上'), both);
+  console.log('turn owner ok');
+}
+
 // What the 管家 costs, by what set it going: you, a [系统通知], a background task (a tool's result in between keeps
 // the one before), a reply counted once however many lines carry it, the watchdog's logged Haiku; by model too
 {
