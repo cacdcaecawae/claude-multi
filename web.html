@@ -344,6 +344,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .todo.you { border-color: var(--orange); }
   .desk .doneL { font-size: 12px; color: var(--fg2); padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .desk .doneL b { color: var(--green); }
+  .desk .todo .tt .no { color: var(--fg3); font-weight: 400; }
+  .desk .todo .need.bad { background: color-mix(in srgb, var(--red) 12%, transparent); }
+  .desk .todo .need.bad b { color: var(--red); }
   #deskAdd { display: flex; gap: 6px; margin-top: -10px; padding: 0 2px; }
   #deskAdd input { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 6px 9px; border-radius: 8px; border: 1px dashed var(--inputB); background: var(--bg); color: var(--fg); }
   #deskAdd input:focus { outline: none; border-style: solid; border-color: var(--accent); }
@@ -645,7 +648,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
   <aside id="desk" class="desk"><div id="deskMe"></div>
-    <details class="dsec" data-sec="todo" open><summary><h4></h4></summary><div id="deskTodo"></div></details><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form>
+    <details class="dsec" data-sec="todo" open><summary><h4></h4></summary><div id="deskTodo"></div></details><form id="deskAdd"><input placeholder="交代一件事，比如：把层析理论稿推到能给导师看" enterkeyhint="send"><button>交代</button></form>
     <details class="dsec" data-sec="log" open><summary><h4></h4></summary><div id="deskLog"></div></details>
     <details class="dsec" data-sec="run" open><summary><h4></h4></summary><div id="deskRun"></div></details>
     <details class="dsec" data-sec="cost"><summary><h4></h4></summary><div id="deskCost"></div></details>
@@ -983,7 +986,7 @@ function flipButler(on) {
   logo.querySelector('.ring circle').onanimationend = () => { if (logo.classList.contains('hold')) { letGo(); heldAt = Date.now(); flipButler(!butler); } };
   logo.title = '长按进入管家';
 }
-const QUICK = ['大家都怎么样', '谁在等我', '今天做了什么', '额度还够吗'], HAND = '请记进待办并盯着：';
+const QUICK = ['大家都怎么样', '谁在等我', '今天做了什么', '额度还够吗'], HAND = '交代一件事：';
 $('#deskAdd').onsubmit = (e) => {
   e.preventDefault();
   const i = $('#deskAdd input'), v = i.value.trim();
@@ -1083,7 +1086,8 @@ $('#asks').onclick = async (e) => {
   catch (er) { toast('没选上：' + er.message, 4000); }
   setTimeout(drawAsks, 800);
 };
-// Its 操作台: how it is (its mood, worked out from how things stand, not made up), what it keeps watching (its 待办.md),
+// Its 操作台: how it is (its mood, worked out from how things stand, not made up), its tickets (where each stands as the
+// service works it out),
 // the conversations running, what just got done, this computer. Each part drawn apart: the CPU changes every look.
 function mood(up, thinking, run, decide = 0) {
   const wait = run.filter((x) => x.wait).length + decide, busy = run.filter((x) => x.busy).length, u = state.usage;
@@ -1100,39 +1104,31 @@ function mood(up, thinking, run, decide = 0) {
 const head = (id, title, digest) => { $('#' + id).parentElement.querySelector('h4').html = `${title}<span class="dg">${esc(digest)}</span>`; };
 function drawDesk() {
   if (!butler || !state) return;
-  const me = state.sessions.find(isButler), run = state.sessions.filter((x) => x.pid && !isButler(x)), todo = state.todo ?? [], pc = state.pc;
+  const me = state.sessions.find(isButler), run = state.sessions.filter((x) => x.pid && !isButler(x)), pc = state.pc;
+  const tickets = state.tickets ?? [], open = tickets.filter((x) => !x.end), nYou = open.filter((x) => x.stage[1] === 'you').length;
   // it runs: listed with its Claude, or its pane here has one (just started, no message yet, it isn't listed)
   const up = !!me?.pid || !!(bConv?.started && !bConv.ended), thinking = bConv?.live === 'busy' || !!me?.busy, acct = me?.pid ? me.acct + 1 : bConv?.acct;
-  const [face, word] = mood(up, thinking, run, (state.todos ?? []).filter((x) => /^等你/.test(x.st)).length), wait = run.filter((x) => x.wait), busy = run.filter((x) => x.busy && !x.wait);
+  const [face, word] = mood(up, thinking, run, nYou), wait = run.filter((x) => x.wait), busy = run.filter((x) => x.busy && !x.wait);
   const status = !up ? '没在运行' : bConv?.live === 'ask' || me?.wait ? '在等你回答' : thinking ? '在回复' : '空闲';
   const stC = !up ? '' : status === '在等你回答' ? 'o' : thinking ? 'g' : 'b';
   $('#deskMe').html = `<div class="me${thinking ? ' busy' : ''}">${SPARK}<div><b>管家</b><div class="sub"><span class="pill ${stC}">${status}</span>${up && acct ? `<span class="pill" style="color:${ACCT[(acct - 1) % 4]}">账号 ${acct}</span>` : ''}</div></div></div>
     <div class="mood"><span>${face}</span>${esc(word)}</div>`;
   const hm = (t) => new Date(t).toTimeString().slice(0, 5), mins = (ms) => (ms < 60000 ? '不到 1 分钟' : ms < 3600000 ? `${Math.round(ms / 60000)} 分钟` : `${(ms / 3600000).toFixed(1)} 小时`);
-  const todos = state.todos ?? todo.map((t) => ({ t })), byName = (w) => { const n = String(w ?? '').replace(/[（(].*$/, '').trim(); return n && state.sessions.find((x) => x.title === n || x.id === n); };
-  const stCls = (st) => (/^等你/.test(st) ? 'o' : /卡|失败|出错|问题/.test(st) ? 'r' : /等/.test(st) ? 'b' : /进行|正在|在跑|跑着|完成|好了/.test(st) ? 'g' : '');
-  const waits = state.waits ?? [], used = new Set();
-  const waitOf = (x, conv) => { const w = waits.find((w) => !used.has(w) && !w.until && (conv ? w.id === conv.id : w.title && String(x.watch ?? '').startsWith(w.title))); if (w) used.add(w); return w; };
-  const cards = [...todos].sort((a, b) => /^等你/.test(b.st) - /^等你/.test(a.st)).map((x) => { // waiting on you: first
-    const conv = byName(x.watch), w = (x.watch || conv) && waitOf(x, conv);
-    // the watched one as it is now, whatever the card says (a conversation idle has stopped: it doesn't go on by itself)
-    // one its name doesn't find isn't watched at all: shown, not left silent
-    const now = !conv ? x.watch && ['r', '找不到这个对话'] : !conv.pid ? ['', '没在运行'] : conv.wait ? ['o', '在等人确认'] : conv.busy ? ['g', '在回复'] : ['', '空闲'];
-    const you = /^等你/.test(x.st), need = you && x.st.replace(/^等你决定?[：:]?\s*/, '').replace(/[（(].*$/, '');
-    const sum = x.watch && `<em>盯着</em><span${conv ? ` data-open="${esc(conv.id)}"` : ''}>${esc(x.watch.replace(/[（(].*$/, ''))}</span>${now ? `<i class="pill ${now[0]}">${now[1]}</i>` : ''}`;
-    return `<div class="todo${you ? ' you' : ''}"><div class="tt"><b>${esc(x.t)}</b>${x.st ? `<span class="pill ${stCls(x.st)}">${esc(x.st.replace(/[（(：:].*$/, ''))}</span>` : ''}</div>
-      ${sum ? `<div class="sum" title="${esc([x.ask && '你交代的 ' + x.ask, x.watch && '盯着 ' + x.watch, x.wait && '等 ' + x.wait, x.then && '然后 ' + x.then, x.st && '状态 ' + x.st].filter(Boolean).join('\n'))}">${sum}</div>` : ''}
-      ${need ? `<div class="need"><b>要你定</b>${esc(need)}</div>` : ''}
-      ${w ? `<div class="wt"><span>⏳</span><span class="t">后台正在等它${w.note ? ' · ' + esc(w.note) : ''}</span><span class="pill o">已等 ${mins(Date.now() - w.at)}</span></div>` : ''}</div>`;
+  // each ticket: where it stands, who does it (tap: open it), and what it said when that waits on you or it's stuck; what
+  // you asked for on hover
+  const GC = { you: 'o', stuck: 'r', ask: 'o', idle: '', queue: 'b', work: 'g' }, NEED = { 等你回答: '要你回答', 等你验收: '要你验收', 它说不用做: '它说不用做', 建议: '管家的建议' };
+  const cards = open.map((x) => {
+    const [stage, g, text] = x.stage, conv = x.conv && state.sessions.some((s) => s.id === x.conv);
+    const box = text && (g === 'you' ? `<div class="need"><b>${NEED[stage] ?? '要你看'}</b>${esc(text)}</div>` : g === 'stuck' ? `<div class="need bad"><b>${stage}</b>${esc(text)}</div>` : '');
+    const hover = [`你的原话：${x.ask}`, x.done && `做到什么算完：${x.done}`, x.limits && `约束：${x.limits}`, g === 'idle' && text && `它最后说：${text}`].filter(Boolean).join('\n');
+    return `<div class="todo${g === 'you' ? ' you' : ''}" title="${esc(hover)}"><div class="tt"><b><span class="no">#${x.id}</span> ${esc(x.name)}</b><span class="pill ${GC[g]}">${stage}</span></div>
+      <div class="sum">${x.conv ? `<em>交给</em><span${conv ? ` data-open="${esc(x.conv)}"` : ''}>${esc(x.convTitle || '新开的对话')}</span>` : '<em>还没派给对话</em>'}</div>${box || ''}</div>`;
   }).join('');
-  const loose = waits.filter((w) => !used.has(w)).map((w) => (w.until
-    ? `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="pill b">还有 ${mins(w.until - Date.now())}</span></div>`
-    : `<div class="wt"${w.id ? ` data-open="${esc(w.id)}"` : ''}><span>⏳</span><span class="t">等「${esc(w.title ?? '')}」${w.note ? ' · ' + esc(w.note) : ''}</span><span class="pill o">已等 ${mins(Date.now() - w.at)}</span></div>`)).join('');
-  const nYou = todos.filter((x) => /^等你/.test(x.st)).length;
-  head('deskTodo', `任务${todos.length ? `<b class="count">${todos.length}</b>` : ''}`, nYou ? `${nYou} 件等你定` : '');
+  const loose = (state.waits ?? []).filter((w) => w.until).map((w) => `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="pill b">还有 ${mins(w.until - Date.now())}</span></div>`).join('');
+  head('deskTodo', `任务${open.length ? `<b class="count">${open.length}</b>` : ''}`, nYou ? `${nYou} 件等你` : '');
   $('#deskTodo').html = `${cards || loose ? cards + loose
-    : '<div class="none">还没有任务。在下面交代一件，或者跟管家说「盯着某个对话，做完告诉我」「15:40 提醒我看额度」</div>'}
-    ${(state.todoDone ?? []).slice(0, 3).map((l) => `<div class="doneL" title="${esc(l)}"><b>✓</b> ${esc(l)}</div>`).join('')}`;
+    : '<div class="none">还没有任务。在下面交代一件，或者跟管家说「把层析理论稿推到能给导师看」「15:40 提醒我看额度」</div>'}
+    ${tickets.filter((x) => x.end).slice(0, 3).map((x) => `<div class="doneL" title="${esc(x.stage[2])}"><b>${x.end.how === 'stop' ? '–' : '✓'}</b> #${x.id} ${esc(x.name)}${x.stage[2] ? '：' + esc(x.stage[2]) : ''}</div>`).join('')}`;
   const tag = (x) => (x.wait ? '<span class="pill o">等你</span>' : x.busy ? '<span class="pill g">在回复</span>' : '<span class="pill">空闲</span>');
   head('deskRun', '对话', `${run.length} 个在运行${wait.length ? ` · ${wait.length} 个等你` : ''}`);
   $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
@@ -1142,7 +1138,7 @@ function drawDesk() {
     tokensNow = fetch('/api/tokens').then((r) => r.json()).then((t) => { tokens = t; setTimeout(drawDesk); return t; }).finally(() => { tokensNow = null; });
   }
   // what the 管家 itself costs today, by what set it going (its replies at the API price; the watchdog's Haiku logged)
-  const bc = tokens?.butler, COST = [['you', '你问的', 'b', 'a1'], ['notice', '系统通知', 'o', 'orange'], ['bg', '后台任务', 'p', 'purple'], ['dog', '看门狗', 'g', 'green']];
+  const bc = tokens?.butler, COST = [['you', '你问的', 'b', 'a1'], ['notice', '系统通知', 'o', 'orange'], ['bg', '后台任务', 'p', 'purple']];
   // and by model: claude-opus-5-5 → Opus 5.5, its bar in the family's color
   const mName = (id) => { const m = /claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id ?? ''); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? '.' + m[3] : ''}` : id || '其他'; };
   const fam = (id) => ({ opus: 'purple', sonnet: 'a1', haiku: 'green', fable: 'orange' })[/claude-([a-z]+)/.exec(id ?? '')?.[1]] ?? 'fg3';
@@ -1162,11 +1158,12 @@ function drawDesk() {
       ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · <b>约 ${usd(today.by[i].usd)}</b></div>` : ''}
       ${on ? `<span class="pill b">${on} 个对话在用</span>` : '<div class="m">没有对话在用</div>'}</div>`;
   }).join('')}` : '';
-  const mine = butlerIds(), tl = (state.timeline ?? []).filter((e) => e.kind === 'butler' || e.kind === 'todo'); // its own doings (an older service sent more)
+  const mine = butlerIds(), tl = state.timeline ?? []; // its own doings
   // each kind of thing it did as a colored word, its verb taken off the text
   const KINDS = [[/^给(「[^」]*」)发了消息：?/, '发消息', 'b', '$1：'], [/^等到了/, '等到', 'p', ''], [/^替你给?/, '替你选', 'o', ''], [/^新开了对话/, '新开', 'g', ''],
-    [/^提醒到点：?/, '提醒', 'o', ''], [/^告诉了你：?/, '告诉你', 'k', ''], [/^完成：?/, '完成', 'g', '']];
-  const kindOf = (e) => { for (const [re, w, c, to] of KINDS) if (re.test(e.text)) return [w, c, e.text.replace(re, to)]; return e.kind === 'todo' ? ['完成', 'g', e.text] : ['管家', 'k', e.text]; };
+    [/^提醒到点：?/, '提醒', 'o', ''], [/^告诉了你：?/, '告诉你', 'k', ''], [/^完成：?/, '完成', 'g', ''],
+    [/^新工单 /, '工单', 'b', ''], [/^提了个建议 /, '建议', 'p', ''], [/^停了工单 /, '停工单', 'r', '']];
+  const kindOf = (e) => { for (const [re, w, c, to] of KINDS) if (re.test(e.text)) return [w, c, e.text.replace(re, to)]; return ['管家', 'k', e.text]; };
   head('deskLog', '今天做了', tl.length ? `${tl.length} 件` : '');
   $('#deskLog').html = `${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id), [w, c, t] = kindOf(e);
     return `<div class="ev"${open ? ` data-open="${esc(e.id)}"` : ''}><span class="when">${hm(e.at)}</span><span class="pill ${c}">${w}</span><span class="t" title="${esc(e.text)}">${esc(t)}</span></div>`; }).join('')
@@ -1176,7 +1173,7 @@ function drawDesk() {
   $('#deskPc').html = pc ? `${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
   const sel = bConv?.el.querySelector('.bset');
   if (sel) sel.innerHTML = `${ac(acct ?? (me ? me.acct + 1 : 0))}<span>${esc(modelName(state.butlerModel ?? me?.line?.model))} · ${esc(effortName(effortOf(me)))}</span>`;
-  $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${todo.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
+  $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${open.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
 }
 $('#desk').onclick = $('#deskR').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
 const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskRun', 'deskCost', 'deskAcct', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id).parentElement); };
