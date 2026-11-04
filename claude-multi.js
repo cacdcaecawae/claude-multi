@@ -1544,8 +1544,7 @@ async function pushAll(msg, endpoint) {
 // page's), when bark.json here (not in the repository) has its address: {"url": "https://api.day.app/<key>"}. Its icon
 // and a tap's page (that conversation) from the public address. The answer back: 200 is delivered to Bark's server.
 const BARK = path.join(ROOT, 'bark.json');
-const barkConf = () => { try { return JSON.parse(fs.readFileSync(BARK, 'utf8').replace(/^﻿/, '')); } catch { return null; } };
-const barkUrl = () => { const j = barkConf(); return (!j?.off && j?.url?.replace(/\/+$/, '')) || null; }; // off: none sent
+const barkUrl = () => { try { return JSON.parse(fs.readFileSync(BARK, 'utf8').replace(/^﻿/, '')).url?.replace(/\/+$/, '') || null; } catch { return null; } };
 // What Bark gets: under the title a line with where it runs (its folder, its account); grouped by conversation, so each
 // one's notifications stack apart; one waiting for you time-sensitive (shown through Focus) with its own sound.
 function barkMsg(msg, pub = '') {
@@ -1788,7 +1787,7 @@ async function web() {
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
       let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
       const tp = todoParts(tx);
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerModel(), pc: pcNow(), bark: barkConf()?.url ? !barkConf().off : null,
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerModel(), pc: pcNow(),
         todo: tp.todos.map((x) => x.t), todos: tp.todos, todoDone: tp.lines.slice(0, 5), timeline: timeline(tp.lines), waits: waitsNow() };
     },
     'GET /api/tokens': (q) => { if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) { tokCache = tokenStats(); tokAt = Date.now(); } return tokCache; },
@@ -1809,14 +1808,6 @@ async function web() {
       await (barkUrl() ? bark(m) : pushAll(m));
       blog(`告诉了你：${text.length > 40 ? text.slice(0, 40) + '…' : text}`);
       return {};
-    },
-    // Bark on or off (the page's 通知 setting when Bark is set up); test: one to the phone now
-    'POST /api/bark': async (q, b) => {
-      const j = barkConf();
-      if (!j?.url) throw new Error('没有设置 Bark');
-      if (b.test) { if (!barkUrl()) throw new Error('通知关着，先打开'); return { status: await bark({ title: 'Claude 多账号', body: '测试通知：Bark 通知开着。对话回复完、等你确认、管家有事找你时，会这样提醒你。' }) }; }
-      fs.writeFileSync(BARK, JSON.stringify({ ...j, off: !b.on }));
-      return { on: !!b.on };
     },
     'POST /api/push/test': async (q, b) => { // to the device asking (its endpoint), not every one
       const r = await pushAll({ title: 'Claude 多账号', body: '测试通知：这台设备的通知开好了。对话回复完、等你确认时，会这样提醒你。' }, b.endpoint);

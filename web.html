@@ -1130,11 +1130,8 @@ function openSettings() {
       <h3>外观</h3>
       <div class="setting"><span>主题</span><div class="seg">${Object.entries(LOOKS).map(([k, t]) => `<button data-look="${k}" title="${t}"${k === now ? ' class="on"' : ''}>${svg(I[k])}</button>`).join('')}</div></div>
       <h3>通知</h3>
-      ${state?.bark != null
-        ? `<div class="setting"><span>手机通知（Bark）</span><button class="switch${state.bark ? ' on' : ''}" data-bark title="${state.bark ? '关闭' : '开启'}"></button></div>
-          ${state.bark ? '<div class="setting"><span>测试通知</span><button class="btn" data-barktest>发送</button></div>' : ''}`
-        : `<div class="setting"><span>通知</span><button class="switch${pushOn ? ' on' : ''}" data-push title="${pushOn ? '关闭' : '开启'}"></button></div>
-          ${pushOn ? '<div class="setting"><span>测试通知</span><button class="btn" data-pushtest>发送</button></div>' : ''}`}`;
+      <div class="setting"><span>通知</span><button class="switch${pushOn ? ' on' : ''}" data-push title="${pushOn ? '关闭' : '开启'}"></button></div>
+      ${pushOn ? '<div class="setting"><span>测试通知</span><button class="btn" data-pushtest>发送</button></div>' : ''}`;
   };
   $('#sheetIn').onclick = (e) => {
     const b = e.target.closest('button');
@@ -1146,8 +1143,6 @@ function openSettings() {
     }
     if (b.matches('[data-push]')) return (pushOn ? pushDisable() : pushEnable()).then(draw); // enabling asks the permission: straight from this tap
     if (b.matches('[data-pushtest]')) return pushTest();
-    if (b.matches('[data-bark]')) return post('/api/bark', { on: !state.bark }).then((r) => { state.bark = r.on; toast(r.on ? '手机通知已开启' : '手机通知已关闭'); draw(); }, (e) => toast(e.message));
-    if (b.matches('[data-barktest]')) return post('/api/bark', { test: true }).then(() => toast('已发送'), (e) => toast('没发出去：' + e.message, 4000));
   };
   draw(); $('#sheet').classList.add('on', 'mid');
 }
