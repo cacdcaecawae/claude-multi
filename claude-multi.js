@@ -1713,7 +1713,9 @@ async function web() {
       for (const n of fresh) if (n.id && w.has(n.id) && !held.has(n.id)) toTell.push(n);
       toTell.splice(0, Math.max(0, toTell.length - 20));
     } catch {}
-    for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000))
+    // the 管家 running: only it tells you (chat tell), but for its own question (stuck on that, it can't)
+    const me = sessions().find((x) => x.pid && sameDir(x.cwd, BUTLER));
+    for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000) && (!me || (n.id === me.id && n.kind === 'ask')))
       try {
         const s = n.id && sessions().find((x) => x.id === n.id), name = n.title || n.project || 'Claude', folder = s ? (sameDir(s.cwd, BUTLER) ? '' : path.basename(s.cwd)) : n.project;
         const m = { ...pushText({ ...n, gist: lastWords(s?.file) }), id: n.id, group: name, ask: n.kind === 'ask',
