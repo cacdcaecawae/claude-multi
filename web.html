@@ -298,6 +298,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .todo .wt { padding: 4px 0 0; margin-top: 6px; border-top: 1px dashed var(--border); color: var(--fg2); }
   .desk .todo [data-open] { color: var(--link); cursor: pointer; }
   .desk .st { flex: none; font-size: 11px; padding: 0 6px; border-radius: 8px; line-height: 18px; background: var(--tint); color: var(--fg2); }
+  .desk .st.you { color: var(--orange); font-weight: 600; } .desk .todo.you { border-color: var(--orange); }
+  .desk .todo .stnow { font-style: normal; margin-left: 4px; color: var(--fg3); } .desk .todo .stnow.s-busy { color: var(--green); } .desk .todo .stnow.s-ask { color: var(--orange); }
   .desk .st.wait { color: var(--a1); } .desk .st.run { color: var(--orange); } .desk .st.bad { color: var(--red); } .desk .st.ok { color: var(--green); }
   .desk .doneL { font-size: 12px; color: var(--fg3); padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #deskAdd { display: flex; gap: 6px; margin-top: -10px; padding: 0 2px; }
@@ -1030,8 +1032,8 @@ $('#asks').onclick = async (e) => {
 };
 // Its 操作台: how it is (its mood, worked out from how things stand, not made up), what it keeps watching (its 待办.md),
 // the conversations running, what just got done, this computer. Each part drawn apart: the CPU changes every look.
-function mood(up, thinking, run) {
-  const wait = run.filter((x) => x.wait).length, busy = run.filter((x) => x.busy).length, u = state.usage;
+function mood(up, thinking, run, decide = 0) {
+  const wait = run.filter((x) => x.wait).length + decide, busy = run.filter((x) => x.busy).length, u = state.usage;
   const five = u.accounts?.[u.rec]?.windows?.find((x) => x.k === 'five_hour')?.pct ?? 0;
   if (!up) return ['😴', '在休息'];
   if (!u.open) return ['😵', '额度都用完了，等恢复'];
@@ -1046,19 +1048,21 @@ function drawDesk() {
   const me = state.sessions.find(isButler), run = state.sessions.filter((x) => x.pid && !isButler(x)), todo = state.todo ?? [], pc = state.pc;
   // it runs: listed with its Claude, or its pane here has one (just started, no message yet, it isn't listed)
   const up = !!me?.pid || !!(bConv?.started && !bConv.ended), thinking = bConv?.live === 'busy' || !!me?.busy, acct = me?.pid ? me.acct + 1 : bConv?.acct;
-  const [face, word] = mood(up, thinking, run), wait = run.filter((x) => x.wait), busy = run.filter((x) => x.busy && !x.wait);
+  const [face, word] = mood(up, thinking, run, (state.todos ?? []).filter((x) => /^等你/.test(x.st)).length), wait = run.filter((x) => x.wait), busy = run.filter((x) => x.busy && !x.wait);
   const status = !up ? '没在运行' : bConv?.live === 'ask' || me?.wait ? '在等你回答' : thinking ? '在回复' : '空闲';
   $('#deskMe').html = `<div class="me${thinking ? ' busy' : ''}">${SPARK}<div><b>管家</b><div class="sub">${status}${up && acct ? ` · 账号 ${acct}` : ''}</div></div></div>
     <div class="mood"><span>${face}</span>${esc(word)}</div>`;
   const hm = (t) => new Date(t).toTimeString().slice(0, 5), mins = (ms) => (ms < 60000 ? '不到 1 分钟' : ms < 3600000 ? `${Math.round(ms / 60000)} 分钟` : `${(ms / 3600000).toFixed(1)} 小时`);
-  const todos = state.todos ?? todo.map((t) => ({ t })), byName = (w) => { const n = String(w ?? '').replace(/[（(].*$/, '').trim(); return n && state.sessions.find((x) => x.title === n); };
-  const stCls = (st) => (/卡|失败|出错|问题/.test(st) ? 'bad' : /等/.test(st) ? 'wait' : /进行|正在|在跑|跑着/.test(st) ? 'run' : /完成|好了/.test(st) ? 'ok' : '');
+  const todos = state.todos ?? todo.map((t) => ({ t })), byName = (w) => { const n = String(w ?? '').replace(/[（(].*$/, '').trim(); return n && state.sessions.find((x) => x.title === n || x.id === n); };
+  const stCls = (st) => (/^等你/.test(st) ? 'you' : /卡|失败|出错|问题/.test(st) ? 'bad' : /等/.test(st) ? 'wait' : /进行|正在|在跑|跑着/.test(st) ? 'run' : /完成|好了/.test(st) ? 'ok' : '');
   const waits = state.waits ?? [], used = new Set();
   const waitOf = (x, conv) => { const w = waits.find((w) => !used.has(w) && !w.until && (conv ? w.id === conv.id : w.title && String(x.watch ?? '').startsWith(w.title))); if (w) used.add(w); return w; };
-  const cards = todos.map((x) => {
+  const cards = [...todos].sort((a, b) => /^等你/.test(b.st) - /^等你/.test(a.st)).map((x) => { // waiting on you: first
     const conv = byName(x.watch), w = (x.watch || conv) && waitOf(x, conv);
-    const sum = [x.watch && `盯着 <span${conv ? ` data-open="${esc(conv.id)}"` : ''}>${esc(x.watch)}</span>`, x.wait && `等 ${esc(x.wait)}`].filter(Boolean).join(' · ');
-    return `<div class="todo"><div class="tt"><b>${esc(x.t)}</b>${x.st ? `<span class="st ${stCls(x.st)}">${esc(x.st.replace(/[（(：:].*$/, ''))}</span>` : ''}</div>
+    // the watched one as it is now, whatever the card says (a conversation idle has stopped: it doesn't go on by itself)
+    const now = conv && (!conv.pid ? ['', '没在运行'] : conv.wait ? ['s-ask', '在等人确认'] : conv.busy ? ['s-busy', '在回复'] : ['', '空闲']);
+    const sum = [x.watch && `盯着 <span${conv ? ` data-open="${esc(conv.id)}"` : ''}>${esc(x.watch.replace(/[（(].*$/, ''))}</span>${now ? `<i class="stnow ${now[0]}">${now[1]}</i>` : ''}`, x.wait && `等 ${esc(x.wait)}`].filter(Boolean).join(' · ');
+    return `<div class="todo${/^等你/.test(x.st) ? ' you' : ''}"><div class="tt"><b>${esc(x.t)}</b>${x.st ? `<span class="st ${stCls(x.st)}">${esc(x.st.replace(/[（(：:].*$/, ''))}</span>` : ''}</div>
       ${sum ? `<div class="sum" title="${esc([x.watch && '盯着 ' + x.watch, x.wait && '等 ' + x.wait, x.then && '然后 ' + x.then, x.st && '状态 ' + x.st].filter(Boolean).join('\n'))}">${sum}</div>` : ''}
       ${w ? `<div class="wt"><span>⏳</span><span class="t">后台正在等它${w.note ? ' · ' + esc(w.note) : ''}</span><span class="when">已等 ${mins(Date.now() - w.at)}</span></div>` : ''}</div>`;
   }).join('');
@@ -1126,8 +1130,11 @@ function openSettings() {
       <h3>外观</h3>
       <div class="setting"><span>主题</span><div class="seg">${Object.entries(LOOKS).map(([k, t]) => `<button data-look="${k}" title="${t}"${k === now ? ' class="on"' : ''}>${svg(I[k])}</button>`).join('')}</div></div>
       <h3>通知</h3>
-      <div class="setting"><span>通知</span><button class="switch${pushOn ? ' on' : ''}" data-push title="${pushOn ? '关闭' : '开启'}"></button></div>
-      ${pushOn ? '<div class="setting"><span>测试通知</span><button class="btn" data-pushtest>发送</button></div>' : ''}`;
+      ${state?.bark != null
+        ? `<div class="setting"><span>手机通知（Bark）</span><button class="switch${state.bark ? ' on' : ''}" data-bark title="${state.bark ? '关闭' : '开启'}"></button></div>
+          ${state.bark ? '<div class="setting"><span>测试通知</span><button class="btn" data-barktest>发送</button></div>' : ''}`
+        : `<div class="setting"><span>通知</span><button class="switch${pushOn ? ' on' : ''}" data-push title="${pushOn ? '关闭' : '开启'}"></button></div>
+          ${pushOn ? '<div class="setting"><span>测试通知</span><button class="btn" data-pushtest>发送</button></div>' : ''}`}`;
   };
   $('#sheetIn').onclick = (e) => {
     const b = e.target.closest('button');
@@ -1139,6 +1146,8 @@ function openSettings() {
     }
     if (b.matches('[data-push]')) return (pushOn ? pushDisable() : pushEnable()).then(draw); // enabling asks the permission: straight from this tap
     if (b.matches('[data-pushtest]')) return pushTest();
+    if (b.matches('[data-bark]')) return post('/api/bark', { on: !state.bark }).then((r) => { state.bark = r.on; toast(r.on ? '手机通知已开启' : '手机通知已关闭'); draw(); }, (e) => toast(e.message));
+    if (b.matches('[data-barktest]')) return post('/api/bark', { test: true }).then(() => toast('已发送'), (e) => toast('没发出去：' + e.message, 4000));
   };
   draw(); $('#sheet').classList.add('on', 'mid');
 }

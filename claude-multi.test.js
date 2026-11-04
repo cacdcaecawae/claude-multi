@@ -583,3 +583,15 @@ console.log('tokens ok');
   fs.rmSync(dir, { recursive: true });
   console.log('butler desk ok');
 }
+
+// The conversations the 管家's 待办 watches (by title, its （folder） dropped, or by 编号), and the one notice it gets for
+// several stopping at once, each once with its latest
+{
+  const { watchedIds, butlerNotice } = require('./claude-multi');
+  const md = ['## 声速场', '- 盯着：焊缝声速场层析反演可行性调研（D:\paper_fast，账号 2）', '', '## 新开的', '- 盯着：abc-123', '', '## 没盯谁', '- 状态：进行中', '', '## 已完成', '- 盯着：旧的'].join('\n');
+  const list = [{ id: 'a', title: '焊缝声速场层析反演可行性调研' }, { id: 'abc-123', title: '' }, { id: 'c', title: '旧的' }, { id: 'd', title: '别的' }];
+  assert.deepEqual([...watchedIds(md, list)].sort(), ['a', 'abc-123']);
+  const t = butlerNotice([{ id: 'a', title: '声速场', kind: 'ask' }, { id: 'b', title: '层析', kind: 'done' }, { id: 'a', title: '声速场', kind: 'done' }]);
+  assert.ok(t.startsWith('[系统通知]') && t.includes('「声速场」回复完了，现在空闲；「层析」回复完了') && !t.includes('在等人确认'), t);
+  console.log('butler notice ok');
+}

@@ -899,7 +899,8 @@ async function chat([sub, ...a]) {
     else if (sub === 'say') await chatSay(a[0], a.slice(1).join(' '));
     else if (sub === 'pick') await chatPick(a[0], a[1]);
     else if (sub === 'new') { const n = Number(opt('--acct')) || 0; await chatNew(a[0], a.slice(1).join(' '), n); }
-    else console.log('claude-multi chat look <对话> | wait <对话> [--max 分钟] [--note 备注] | wait [<对话>] --until 15:40 [--note 备注] | say <对话> <消息> | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N]');
+    else if (sub === 'tell') { if (!a.join(' ').trim()) throw new Error('要告诉用户什么？'); await webPost('/api/tell', { text: a.join(' ') }); console.log('已发到用户手机。'); }
+    else console.log('claude-multi chat look <对话> | wait <对话> [--max 分钟] [--note 备注] | wait [<对话>] --until 15:40 [--note 备注] | say <对话> <消息> | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N] | tell <要告诉用户的话>');
   } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
 }
 // Before account p continues conversation s: its newest record (and side folder) into p's config dir.
@@ -1052,6 +1053,7 @@ function notify(kind) {
     fs.closeSync(fd);
   } catch {}
   if (kind === 'done' && helpersBusy(tail, started)) return; // it only paused to read a helper's message; the job goes on
+  if (kind === 'done' && String(field(tail, 'lastPrompt', true) ?? '').startsWith('[系统通知]')) return; // the service woke it: not your news
   // the conversation's title, which its terminal tab shows: lets the island drop it once you look
   // (the 管家's is 管家, wherever it shows: the island, the page, the phone)
   const title = sameDir(home || j.cwd || '.', BUTLER) ? '管家' : field(tail, 'customTitle', true) ?? field(tail, 'aiTitle', true);
@@ -1221,6 +1223,18 @@ function todoParts(text) {
   });
   const lines = [...done.matchAll(/^-\s*(.+)$/gm)].map((m) => m[1].trim()).reverse();
   return { todos, lines };
+}
+// the conversations its 待办 watches: 盯着 a title (maybe with （its folder） after it) or a 编号 (one it just started has
+// no title yet)
+function watchedIds(text, list) {
+  const keys = todoParts(text).todos.map((x) => x.watch.replace(/[（(].*$/, '').trim()).filter(Boolean);
+  return new Set(list.filter((x) => keys.some((k) => k === x.id || k === x.title)).map((x) => x.id));
+}
+// what it's told of them: one [系统通知], each conversation once (its latest)
+function butlerNotice(notes) {
+  const last = new Map();
+  for (const n of notes) last.set(n.id, n);
+  return `[系统通知] 你盯着的对话停下来了：${[...last.values()].map((n) => `「${n.title || n.project || n.id}」${n.kind === 'ask' ? '在等人确认' : '回复完了，现在空闲'}`).join('；')}。逐个 chat look 看清它现在怎样，按规矩决定：推它继续、替用户回答，还是记进「等你决定」，然后更新待办。`;
 }
 // a 已完成 line's time, "11-03 15:20 …": that moment this year; null without one
 function doneAt(line, now = new Date()) {
@@ -1530,7 +1544,8 @@ async function pushAll(msg, endpoint) {
 // page's), when bark.json here (not in the repository) has its address: {"url": "https://api.day.app/<key>"}. Its icon
 // and a tap's page (that conversation) from the public address. The answer back: 200 is delivered to Bark's server.
 const BARK = path.join(ROOT, 'bark.json');
-const barkUrl = () => { try { return JSON.parse(fs.readFileSync(BARK, 'utf8').replace(/^﻿/, '')).url?.replace(/\/+$/, '') || null; } catch { return null; } };
+const barkConf = () => { try { return JSON.parse(fs.readFileSync(BARK, 'utf8').replace(/^﻿/, '')); } catch { return null; } };
+const barkUrl = () => { const j = barkConf(); return (!j?.off && j?.url?.replace(/\/+$/, '')) || null; }; // off: none sent
 // What Bark gets: under the title a line with where it runs (its folder, its account); grouped by conversation, so each
 // one's notifications stack apart; one waiting for you time-sensitive (shown through Focus) with its own sound.
 function barkMsg(msg, pub = '') {
@@ -1693,6 +1708,12 @@ async function web() {
     const fresh = readNotes(20).filter((n) => n.at > pushedTo && Date.now() - n.at > 1500).reverse();
     if (!fresh.length) return;
     pushedTo = fresh.at(-1).at;
+    try { // for the 管家: the ones it watches (not those a chat wait of its own already covers), the queue kept short
+      let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
+      const w = watchedIds(tx, sessions()), held = new Set(waitsNow().map((x) => x.id));
+      for (const n of fresh) if (n.id && w.has(n.id) && !held.has(n.id)) toTell.push(n);
+      toTell.splice(0, Math.max(0, toTell.length - 20));
+    } catch {}
     for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000))
       try {
         const s = n.id && sessions().find((x) => x.id === n.id), name = n.title || n.project || 'Claude', folder = s ? (sameDir(s.cwd, BUTLER) ? '' : path.basename(s.cwd)) : n.project;
@@ -1767,7 +1788,7 @@ async function web() {
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
       let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
       const tp = todoParts(tx);
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerModel(), pc: pcNow(),
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerModel(), pc: pcNow(), bark: barkConf()?.url ? !barkConf().off : null,
         todo: tp.todos.map((x) => x.t), todos: tp.todos, todoDone: tp.lines.slice(0, 5), timeline: timeline(tp.lines), waits: waitsNow() };
     },
     'GET /api/tokens': (q) => { if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) { tokCache = tokenStats(); tokAt = Date.now(); } return tokCache; },
@@ -1780,6 +1801,23 @@ async function web() {
       return { n: s.subs.length };
     },
     'POST /api/push/off': (q, b) => { const s = pushStore(); if (s) { s.subs = s.subs.filter((x) => x.endpoint !== b.endpoint); savePush(s); } return {}; },
+    // the 管家 telling you something worth it, on the phone (Bark, or the pages' pushes), whatever page is in front
+    'POST /api/tell': async (q, b) => {
+      const text = String(b.text ?? '').trim();
+      if (!text) throw new Error('要告诉用户什么？');
+      const m = { title: '管家', body: text.slice(0, 500), group: '管家', id: sessions().find((x) => sameDir(x.cwd, BUTLER))?.id };
+      await (barkUrl() ? bark(m) : pushAll(m));
+      blog(`告诉了你：${text.length > 40 ? text.slice(0, 40) + '…' : text}`);
+      return {};
+    },
+    // Bark on or off (the page's 通知 setting when Bark is set up); test: one to the phone now
+    'POST /api/bark': async (q, b) => {
+      const j = barkConf();
+      if (!j?.url) throw new Error('没有设置 Bark');
+      if (b.test) { if (!barkUrl()) throw new Error('通知关着，先打开'); return { status: await bark({ title: 'Claude 多账号', body: '测试通知：Bark 通知开着。对话回复完、等你确认、管家有事找你时，会这样提醒你。' }) }; }
+      fs.writeFileSync(BARK, JSON.stringify({ ...j, off: !b.on }));
+      return { on: !!b.on };
+    },
     'POST /api/push/test': async (q, b) => { // to the device asking (its endpoint), not every one
       const r = await pushAll({ title: 'Claude 多账号', body: '测试通知：这台设备的通知开好了。对话回复完、等你确认时，会这样提醒你。' }, b.endpoint);
       return { sent: r.filter((x) => x === 201).length, results: r };
@@ -1979,6 +2017,19 @@ async function web() {
   // before this one writes) or has something left in its 待办: it's continued, on its own account. With something left,
   // it's told so, to read the list and wait again for it. (Its Claude, ended with its terminal, takes its session file.)
   const ranBefore = (() => { try { return JSON.parse(fs.readFileSync(WEB_BUTLER, 'utf8')) === true; } catch { return false; } })();
+  // a [系统通知] typed into the 管家's terminal as you'd paste it, then Enter (only once it's idle: typed while it waits on
+  // a question, it would answer it)
+  const tellIn = async (t, text) => { t.proc.write(`\x1b[200~${text}\x1b[201~`); await sleep(400); t.proc.write('\r'); };
+  // what's waiting to be told: notes on the conversations it watches, given once it's idle (and you aren't typing there)
+  const toTell = [];
+  setInterval(() => {
+    const t = toTell.length && [...terms.values()].find((x) => x.kind === 'pty' && !x.gone && x.pid && sameDir(x.cwd, BUTLER));
+    if (!t || Date.now() - (t.typed ?? 0) < 10000) return; // not running: kept till it is
+    let st = null; try { st = JSON.parse(fs.readFileSync(path.join(t.dir, 'sessions', `${t.pid}.json`), 'utf8')).status; } catch {}
+    if (st !== 'idle') return;
+    const ns = toTell.splice(0);
+    tellIn(t, butlerNotice(ns)); log('butler_told', { n: ns.length });
+  }, 3000);
   async function wakeButler() {
     let todo = ''; try { todo = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
     const open = todoOpen(todo), s = (ranBefore || open) && sessions().find((x) => sameDir(x.cwd, BUTLER)), p = s && !s.pid && load().profiles[s.acct];
@@ -1988,8 +2039,7 @@ async function web() {
     for (let k = 0; k < 60 && !t.gone; k++, await sleep(1000)) {
       let st = null; try { st = JSON.parse(fs.readFileSync(path.join(p.configDir, 'sessions', `${t.pid}.json`), 'utf8')).status; } catch {}
       if (st !== 'idle') continue;
-      t.proc.write('\x1b[200~[系统通知] 网页服务刚重启，你在后台等着的事都断了。读一遍 待办.md，把还要盯的重新盯上。\x1b[201~');
-      await sleep(400); t.proc.write('\r');
+      await tellIn(t, '[系统通知] 网页服务刚重启，你在后台等着的事都断了。读一遍 待办.md，逐个 chat look 你盯着的对话，看清它们现在怎样，按规矩决定下一步，更新待办。');
       return log('butler_woken', { session_id: s.id });
     }
   }
@@ -2178,7 +2228,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { parseUntil, todoOpen, todoParts, doneAt, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { parseUntil, todoOpen, todoParts, doneAt, waitsNow, watchedIds, butlerNotice, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
