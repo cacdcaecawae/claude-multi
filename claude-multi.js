@@ -1258,8 +1258,6 @@ const WEB_RUN = path.join(ROOT, 'web-running.json'); // the conversations runnin
 const WEB_USAGE = path.join(ROOT, 'web-usage.json'); // the quota as the page last got it
 const WEB_PORT = 7788;
 const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus', 'haiku'], BUTLER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
-// its old 待办.md (before tickets) has something still to do: a "## " section above "## 已完成"
-const todoOpen = (text) => /^## (?!已完成)/m.test(String(text ?? '').split(/^## 已完成/m)[0]);
 // The 管家's tickets (as in DeepSeek's Super-agent): what you asked for, fixed once written (its 原话, 做到什么算完,
 // 约束); the conversation doing it; what that one reported, and when its turns ended. Only the web service writes the
 // file. Where one stands is worked out from those facts (stageOf), never from words the 管家 wrote.
@@ -2225,17 +2223,15 @@ async function web() {
     } finally { telling = false; }
   }, 3000);
   // After a restart each one that ran here is continued on its account, back idle (one cut mid-answer isn't told to go
-  // on: the 管家 is, for those it watches). The 管家 also when its 待办 has something left; then told to look at them
-  // all again, and to set again the reminders that ended. (A Claude ended with its terminal takes its session file.)
-  // Its tickets open, or its old 待办.md still has things.
+  // on: the 管家 is, for those it watches). The 管家 also when it has tickets open; then told to look at them all again,
+  // and to set again the reminders that ended. (A Claude ended with its terminal takes its session file.)
   async function wakeUp() {
     const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
     for (const id of ranBefore) {
       const s = all.find((x) => x.id === id), p = s && !s.pid && s !== me && reg.profiles[s.acct];
       if (p) try { startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
     }
-    let old = false; try { old = todoOpen(fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8')); } catch {}
-    const open = old || readTickets().some((x) => !x.end), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
+    const open = readTickets().some((x) => !x.end), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
     if (!p) return;
     const t = startPty(p, me.cwd, ['--resume', me.id]);
     if (!open && !lost.length) return log('butler_woken', { session_id: me.id }); // nothing it was watching: back, waiting for you
@@ -2243,8 +2239,7 @@ async function web() {
     const again = lost.length ? `你设的这些定时提醒也断了，还要的就重新设：${lost.map((w) => `${hm(w.until)} ${w.note || w.title || ''}`.trim()).join('；')}。` : '';
     for (let k = 0; k < 60 && !t.gone; k++, await sleep(1000)) {
       if (ptyStatus(t) !== 'idle') continue;
-      const move = old ? '工单换了记法：待办.md 不再有人读。把里面没做完的事列给用户，用户点头后用 ticket new 建成工单（原话照抄），接着原来的对话做的用 ticket give 接上，然后把 待办.md 改名为 待办-旧.md。' : '';
-      await tellIn(t, `[系统通知] 网页服务刚重启。用 claude-multi ticket 看一遍工单，按规矩处理（重启时正在回复的对话被切断了，现在是停下的）。${move}${again}`);
+      await tellIn(t, `[系统通知] 网页服务刚重启。用 claude-multi ticket 看一遍工单，按规矩处理（重启时正在回复的对话被切断了，现在是停下的）。${again}`);
       return log('butler_woken', { session_id: me.id, reminders: lost.length });
     }
   }
@@ -2465,7 +2460,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { inLive, keepDefaults, butlerCost, blogSent, parseUntil, todoOpen, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { inLive, keepDefaults, butlerCost, blogSent, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

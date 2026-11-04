@@ -264,7 +264,7 @@ server {
 | `console-bridge.ps1` | 读取电脑上 Claude 窗口的画面并转发按键，网页的终端视图靠它 |
 | `web.html` | 网页，单个文件，每次刷新直接读取，改完不用重启服务 |
 | `screen.js` | 从 Claude 的终端画面认出「正在回复」和选择题，网页和管家的命令共用 |
-| `butler\` | 管家的工作文件夹：`CLAUDE.md` 是它的规矩，模型设成 Sonnet；`待办.md` 由它自己维护，不进 git |
+| `butler\` | 管家的工作文件夹：`CLAUDE.md` 是它的规矩，模型设成 Sonnet |
 | `tickets.json` | 管家的工单（用户的原话、交给了哪个对话、它的汇报和每轮结束的时间），只由网页服务写，不进 git |
 | `claude-multi.test.js` | 测试 |
 

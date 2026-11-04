@@ -504,16 +504,13 @@ console.log('tokens ok');
   console.log('push ok');
 }
 
-// The 管家's chat commands: a time to wake at, and whether its 待办 still has something to do.
+// The 管家's chat commands: a time to wake at
 {
-  const { parseUntil, todoOpen } = require('./claude-multi');
+  const { parseUntil } = require('./claude-multi');
   const now = new Date(2026, 10, 3, 14, 0).getTime();
   assert.equal(parseUntil('15:40', now), new Date(2026, 10, 3, 15, 40).getTime());
   assert.equal(parseUntil('9:05', now), new Date(2026, 10, 4, 9, 5).getTime()); // past today: tomorrow's
   assert.throws(() => parseUntil('soon', now));
-  assert.equal(todoOpen('## rag检索 跑完告诉我\n- 状态：等待中\n\n## 已完成\n- x'), true);
-  assert.equal(todoOpen('# 待办\n\n## 已完成\n- rag检索 跑完了'), false); // only done ones
-  assert.equal(todoOpen(''), false);
   console.log('chat ok');
 }
 
