@@ -1280,6 +1280,20 @@ function blogSent(id) {
   }
   return blogMemo.list.filter((s) => s.id === id);
 }
+// /model and /effort typed into a running Claude also save the choice as every new conversation's default (its
+// account's settings.json, which the accounts share): what those files say now, and a way to put it back (a key that
+// wasn't there goes again). ponytail: a default you change by hand in those 8 s is put back too
+function keepDefaults(files) {
+  const was = files.flatMap((f) => { try { const j = JSON.parse(fs.readFileSync(f, 'utf8')); return [[f, j.model, j.effortLevel]]; } catch { return []; } });
+  return () => {
+    for (const [f, model, effortLevel] of was) try {
+      const raw = fs.readFileSync(f, 'utf8'), j = JSON.parse(raw), set = (k, v) => { if (v === undefined) delete j[k]; else j[k] = v; };
+      if (j.model === model && j.effortLevel === effortLevel) continue;
+      set('model', model); set('effortLevel', effortLevel);
+      fs.writeFileSync(f, JSON.stringify(j, null, /\n( +)"/.exec(raw)?.[1] ?? 2) + (raw.endsWith('\n') ? '\n' : ''));
+    } catch {}
+  };
+}
 // The server, from tunnel.json here (not in the repository): {"ssh": "myserver", "url": "https://<its address>:8443"}.
 // Without it there is no tunnel: the page opens on this computer only. sock: the tunnel's end on the server.
 let TUNNEL = null;
@@ -1793,10 +1807,13 @@ async function web() {
       return { id: s.id, title: s.title, acct: s.acct + 1, menu: await a.menu };
     })),
     // one answered from such a card: by you, so it isn't held back as the 管家's typing is
-    // the 管家's model or effort, for its next start (the page also tells a running one, with /model or /effort)
+    // the 管家's model or effort, for its next start (the page also tells a running one, with /model or /effort: that
+    // would make it every new conversation's default too, so the accounts' defaults are put back 8 s on)
     'POST /api/butler-model': (q, b) => {
       if (b.model != null && !BUTLER_MODELS.includes(b.model)) throw new Error('没有这个模型');
       if (b.effort != null && !BUTLER_EFFORTS.includes(b.effort)) throw new Error('没有这个思考强度');
+      const shared = [...new Set(load().profiles.flatMap((p) => { try { return [fs.realpathSync(path.join(p.configDir, 'settings.json'))]; } catch { return []; } }))];
+      setTimeout(keepDefaults(shared), 8000);
       const f = path.join(BUTLER, '.claude', 'settings.local.json');
       let j = {}; try { j = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
       fs.writeFileSync(f, JSON.stringify({ ...j, ...(b.model && { model: b.model }), ...(b.effort && { effortLevel: b.effort }) }, null, 2));
@@ -2339,7 +2356,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { butlerCost, blogSent, parseUntil, todoOpen, todoParts, doneAt, waitsNow, watchedIds, butlerNotice, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { keepDefaults, butlerCost, blogSent, parseUntil, todoOpen, todoParts, doneAt, waitsNow, watchedIds, butlerNotice, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
