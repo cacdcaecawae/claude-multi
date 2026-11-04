@@ -727,14 +727,18 @@ async function attach(id) {
 // waits on; wait: until it's done (in the 管家's background: it's woken when this ends), or until a time (a quota's
 // reset); say: a message, sent as the page sends one, not while it's asking something; pick: an option of its question;
 // new: one started in the web service, on the recommended account, its folder marked trusted first.
-async function webPost(p, body) {
-  const r = await fetch(`http://127.0.0.1:${WEB_PORT}${p}`, { method: 'POST', body: JSON.stringify(body),
+async function webPost(p, body, method = 'POST') {
+  const r = await fetch(`http://127.0.0.1:${WEB_PORT}${p}`, { method, ...(method === 'POST' && { body: JSON.stringify(body) }),
     headers: { cookie: `cm=${webKey()}`, 'content-type': 'application/json', 'accept-encoding': 'identity' } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.err || `网页服务出错了（${r.status}）`);
   return j;
 }
 const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+// the claude-multi in use, or a folder in it: a change there is live at once, unreviewed (the 管家 works elsewhere)
+const realDir = (d) => { try { return fs.realpathSync.native(path.resolve(d)); } catch { return path.resolve(d); } };
+const inLive = (d) => { const r = path.relative(realDir(__dirname), realDir(d)); return r === '' || (r !== '..' && !r.startsWith('..' + path.sep) && !path.isAbsolute(r)); };
+const LIVE_NO = `这是正在用的 claude-multi 代码，不能在这里改：在单独的副本（${__dirname}-dev 这类 git worktree）里新开对话，交代里写明建分支、发 PR`;
 function findChat(ref) {
   const all = listSessions(load()), byId = all.find((s) => s.id === ref), hit = byId ? [byId] : all.filter((s) => ref && s.title.includes(ref));
   if (hit.length === 1) return hit[0];
@@ -818,39 +822,30 @@ async function chatLook(ref) {
   else if (st === 'waiting') out += '\n\n它在等人处理，但屏幕上没认出选择题，让用户在网页上打开它看一下。';
   console.log(out);
 }
-async function chatWait(ref, until, maxMin, note) {
+async function chatWait(ref, until, note) {
   const t = until ? parseUntil(until) : null, s = ref ? findChat(ref) : null, wf = path.join(WAITS, `${process.pid}.json`);
-  if (!t && !s) throw new Error('要等哪个对话，或者 --until 几点？');
+  if (!t) throw new Error('chat wait 只用来定时：--until 15:40。工单的对话停下时你会自动收到通知，不用等');
   fs.mkdirSync(WAITS, { recursive: true });
   fs.writeFileSync(wf, JSON.stringify({ pid: process.pid, at: Date.now(), until: t, id: s?.id ?? null, title: s?.title ?? null, note: note ?? null }));
   try {
-    if (t) {
-      await sleep(Math.max(0, t - Date.now()));
-      blog(`提醒到点：${note || new Date(t).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })}`, s?.id);
-      console.log(`到点了（${new Date(t).toLocaleString('zh-CN', { hour12: false })}）。`);
-      return s ? chatLook(s.id) : undefined;
-    }
-    const live = s.pid ? await waitLive((j) => j.pid === s.pid) : null;
-    let done = !live;
-    for (const end = Date.now() + maxMin * 60000; !done && Date.now() < end; await sleep(3000)) {
-      const st = statusOf(live);
-      done = st === 'gone' || (st != null && st !== 'busy' && st !== 'shell'); // idle, or waiting on someone
-    }
-    if (!done) console.log(`等了 ${maxMin} 分钟，它还在忙。\n`);
-    else blog(`等到了「${s.title}」${note ? '：' + note : ''}`, s.id);
-    await chatLook(s.id);
+    await sleep(Math.max(0, t - Date.now()));
+    blog(`提醒到点：${note || new Date(t).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })}`, s?.id);
+    console.log(`到点了（${new Date(t).toLocaleString('zh-CN', { hour12: false })}）。`);
+    if (s) await chatLook(s.id);
   } finally { fs.rmSync(wf, { force: true }); }
 }
-async function chatSay(ref, text) {
+async function chatSay(ref, text, before) {
   if (!text) throw new Error('要说什么？');
   const s = findChat(ref), t0 = Date.now();
   const { key } = await webPost('/api/open', { id: s.id, acct: s.acct + 1, cols: 120, rows: 40 }); // not running: continued in the web service
   const live = await waitLive((j) => j.sessionId === s.id || j.pid === s.pid || (!s.pid && sameDir(j.cwd, s.cwd) && j.startedAt >= t0 - 5000), 60000);
   if (!live) throw new Error('它没能启动起来');
   await untilReady(live);
+  await before?.(s.id); // ticket give: bound first, so its first turn ending is seen
   const went = await typeIn(key, live, text);
   blog(`给「${s.title}」发了消息：${text.length > 40 ? text.slice(0, 40) + '…' : text}`, s.id);
   console.log(went ? `已发给「${s.title}」，它开始干活了。` : `已发给「${s.title}」，但它还没动，稍后用 chat look 看看。`);
+  return { id: s.id, title: s.title };
 }
 // a single-choice question: from the option the cursor is on to the one chosen, then Enter (as the page's card does).
 // ask: the question it was picked on; another one up by now (the first answered) isn't answered with it.
@@ -873,10 +868,11 @@ async function chatPick(ref, n) {
   blog(`替你给「${s.title}」选了「${label}」`, s.id);
   console.log(`已替用户选了「${label}」。`);
 }
-async function chatNew(dir, text, n) {
+async function chatNew(dir, text, n, before) {
   dir = path.resolve(dir ?? '');
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`没有这个文件夹：${dir}`);
   if (sameDir(dir, HOME)) throw new Error('主文件夹 Claude 每次都要问是否信任，换一个具体的文件夹');
+  if (inLive(dir)) throw new Error(LIVE_NO);
   if (!text) throw new Error('要给它第一句话');
   const reg = load();
   if (!n) { const u = (await usageState(reg)).json; if (!u.open) throw new Error(`账号都到上限了，${u.ready} 后恢复`); n = u.rec + 1; }
@@ -887,20 +883,70 @@ async function chatNew(dir, text, n) {
   const live = await waitLive((j) => sameDir(j.cwd, dir) && j.startedAt >= t0 - 5000, 60000);
   if (!live) throw new Error('它没能启动起来');
   await untilReady(live, 60000);
+  await before?.(live.sessionId);
   const went = await typeIn(key, live, text);
   blog(`新开了对话（${path.basename(dir)}，账号 ${n}）：${text.length > 40 ? text.slice(0, 40) + '…' : text}`, live.sessionId);
   console.log(`已在账号 ${n} 新建对话，编号 ${live.sessionId}（文件夹 ${dir}）。${went ? '第一句已发出，它开始干活了。' : '第一句已发出，但它还没动，稍后用 chat look 看看。'}`);
+  return { id: live.sessionId, title: '' };
 }
 async function chat([sub, ...a]) {
   const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a.splice(i, 2)[1] : undefined; };
   try {
     if (sub === 'look') await chatLook(a[0]);
-    else if (sub === 'wait') { const until = opt('--until'), max = Number(opt('--max')) || 120, note = opt('--note'); await chatWait(a[0], until, max, note); }
+    else if (sub === 'wait') { const until = opt('--until'), note = opt('--note'); await chatWait(a[0], until, note); }
     else if (sub === 'say') await chatSay(a[0], a.slice(1).join(' '));
     else if (sub === 'pick') await chatPick(a[0], a[1]);
     else if (sub === 'new') { const n = Number(opt('--acct')) || 0; await chatNew(a[0], a.slice(1).join(' '), n); }
     else if (sub === 'tell') { if (!a.join(' ').trim()) throw new Error('要告诉用户什么？'); await webPost('/api/tell', { text: a.join(' ') }); console.log('已发到用户手机。'); }
-    else console.log('claude-multi chat look <对话> | wait <对话> [--max 分钟] [--note 备注] | wait [<对话>] --until 15:40 [--note 备注] | say <对话> <消息> | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N] | tell <要告诉用户的话>');
+    else console.log('claude-multi chat look <对话> | wait [<对话>] --until 15:40 [--note 备注] | say <对话> <消息> | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N] | tell <要告诉用户的话>');
+  } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
+}
+// claude-multi ticket …: the 管家's tickets, which the web service keeps. give: to a new conversation (a folder given)
+// or one going already, as you would; the work is typed in with what you asked for and how to report back.
+async function ticket([sub, ...a]) {
+  const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a.splice(i, 2)[1] : undefined; }, flag = (k) => { const i = a.indexOf(k); return i >= 0 && a.splice(i, 1).length > 0; };
+  const st = (t) => `${t.stage[0]}${t.stage[2] ? '：' + t.stage[2].replace(/\s+/g, ' ').slice(0, 200) : ''}`;
+  try {
+    if (sub === 'new') {
+      const ask = opt('--ask'), done = opt('--done'), limits = opt('--limits'), inferred = flag('--inferred');
+      const t = await webPost('/api/ticket', { op: 'new', name: a.join(' '), ask, done, limits, inferred });
+      blog(`${inferred ? '提了个建议' : '新工单'} #${t.id}「${t.name}」`);
+      console.log(`已建工单 #${t.id}「${t.name}」。${inferred ? '这是你自己提的：用户同意了再 ticket give。' : '接着用 ticket give 派给一个对话。'}`);
+    } else if (sub === 'give') {
+      const n = Number(opt('--acct')) || 0, [id, where, ...rest] = a, text = rest.join(' ');
+      const t = (await webPost('/api/tickets', null, 'GET')).find((x) => x.id === Number(id));
+      if (!t) throw new Error(`没有工单 #${id}`);
+      if (t.end) throw new Error(`工单 #${t.id} 已经结束了`);
+      if (!where || !text) throw new Error('用法：ticket give <工单号> <文件夹 或 对话> <交代>');
+      const no = `${t.id}-${(t.n ?? 0) + 1}`; // this give's number, which its reports carry
+      const brief = `${text}\n\n（这是管家派的工单 #${t.id}「${t.name}」。用户的原话：${t.ask}${t.done ? `\n做到什么算完：${t.done}` : ''}${t.limits ? `\n约束：${t.limits}` : ''}`
+        + `\n做完了、要用户决定、或者卡住了，用命令告诉管家（不用等它来问）：\n  claude-multi report ${no} 做完 <一句话结果>\n  claude-multi ask ${no} <要用户决定的问题>\n  claude-multi report ${no} 卡住 <原因>（失败、不用做 也这样报）`
+        + '\n只是告一段落、下一步你自己清楚的，不用报告，停下就行，管家会让你接着做。）';
+      // not in the claude-multi in use: the conversation given to, by the folder it runs in
+      const dir = fs.existsSync(where) && fs.statSync(where).isDirectory();
+      if (inLive(dir ? where : findChat(where).cwd)) throw new Error(LIVE_NO);
+      const bind = (conv) => webPost('/api/ticket', { op: 'give', id: t.id, n: (t.n ?? 0) + 1, conv, title: dir ? path.basename(path.resolve(where)) : findChat(conv).title });
+      const c = dir ? await chatNew(where, brief, n, bind) : await chatSay(where, brief, bind);
+      console.log(`工单 #${t.id} 已交给${dir ? '新开的对话' : `「${c.title}」`}（编号 ${c.id}）。它停下时你会收到通知。`);
+    } else if (sub === 'end') {
+      const [id, how, ...rest] = a, text = rest.join(' ');
+      if (!['done', 'stop'].includes(how)) throw new Error('用法：ticket end <工单号> done|stop [一句话]');
+      const t = await webPost('/api/ticket', { op: 'end', id, how, text });
+      blog(how === 'done' ? `完成：工单 #${t.id}「${t.name}」${text ? '：' + text : ''}` : `停了工单 #${t.id}「${t.name}」${text ? '：' + text : ''}`);
+      console.log(`工单 #${t.id} 已${how === 'done' ? '完成' : '停下'}。`);
+    } else if (!sub || sub === 'list') {
+      const all = await webPost('/api/tickets', null, 'GET');
+      if (!all.length) return console.log('还没有工单。');
+      for (const t of all) console.log(`#${t.id} ${t.name} · ${st(t)}${t.end ? '' : `\n   对话：${t.conv ? `${t.convTitle || '（还没标题）'}（编号 ${t.conv}）` : '还没派'}\n   原话：${t.ask}${t.done ? `\n   做到什么算完：${t.done}` : ''}${t.limits ? `\n   约束：${t.limits}` : ''}`}\n`);
+    } else console.log('claude-multi ticket [list] | new <名字> --ask <用户原话> [--done <做到什么算完>] [--limits <约束>] [--inferred] | give <工单号> <文件夹 或 对话> <交代> [--acct N] | end <工单号> done|stop [一句话]');
+  } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
+}
+// claude-multi report N <word> <一句话> / ask N <问题>: a worker telling the 管家 how its ticket stands
+async function reportTo(cmd, [id, ...a]) {
+  try {
+    const k = cmd === 'ask' ? 'ask' : a.shift(), text = a.join(' ');
+    const t = await webPost('/api/ticket', { op: 'report', id, k, text });
+    console.log(`已告诉管家（工单 #${t.id}「${t.name}」）。`);
   } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
 }
 // Before account p continues conversation s: its newest record (and side folder) into p's config dir.
@@ -1212,37 +1258,107 @@ const WEB_RUN = path.join(ROOT, 'web-running.json'); // the conversations runnin
 const WEB_USAGE = path.join(ROOT, 'web-usage.json'); // the quota as the page last got it
 const WEB_PORT = 7788;
 const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus', 'haiku'], BUTLER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
-// its 待办.md has something still to do: a "## " section above "## 已完成"
+// its old 待办.md (before tickets) has something still to do: a "## " section above "## 已完成"
 const todoOpen = (text) => /^## (?!已完成)/m.test(String(text ?? '').split(/^## 已完成/m)[0]);
-// and its parts for the 操作台: each open thing (its 盯着 / 等 / 然后 / 状态 lines), the 已完成 lines (newest first)
-function todoParts(text) {
-  const [open, done = ''] = String(text ?? '').split(/^## 已完成.*$/m);
-  const todos = open.split(/^## /m).slice(1).map((sec) => {
-    const [t, ...ls] = sec.split('\n'), f = (k) => ls.map((l) => new RegExp(`^-\\s*${k}[：:]\\s*(.+)`).exec(l.trim())?.[1]).find(Boolean) ?? '';
-    return { t: t.trim(), ask: f('原话'), watch: f('盯着'), wait: f('等'), then: f('然后'), st: f('状态') };
-  });
-  const lines = [...done.matchAll(/^-\s*(.+)$/gm)].map((m) => m[1].trim()).reverse();
-  return { todos, lines };
+// The 管家's tickets (as in DeepSeek's Super-agent): what you asked for, fixed once written (its 原话, 做到什么算完,
+// 约束); the conversation doing it; what that one reported, and when its turns ended. Only the web service writes the
+// file. Where one stands is worked out from those facts (stageOf), never from words the 管家 wrote.
+const TICKETS = path.join(ROOT, 'tickets.json');
+function readTickets(f = TICKETS) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return []; } }
+const REPORT_WORDS = ['做完', '卡住', '失败', '不用做']; // what a worker reports (claude-multi report N <word> …); ask is apart
+// one change, as the service makes it: new, give (to a conversation), report (a worker's word or question), end. What
+// you asked for is never changed: no op touches it.
+function ticketOp(all, b, now = Date.now()) {
+  const [tid, gn] = String(b.id ?? '').split('-'), t = b.op === 'new' ? null : all.find((x) => x.id === Number(tid));
+  if (b.op !== 'new' && !t) throw new Error(`没有工单 #${b.id}`);
+  if (t?.end) throw new Error(`工单 #${t.id} 已经结束了`);
+  const add = (k, text) => { (t.ev ??= []).push({ at: now, k, text: String(text ?? '') }); t.ev.splice(0, Math.max(0, t.ev.length - 60)); };
+  if (b.op === 'new') {
+    if (!b.name || !b.ask) throw new Error('工单要有名字（ticket new 后面那段）和用户的原话（--ask）');
+    const n = { id: Math.max(0, ...all.map((x) => x.id)) + 1, name: String(b.name), at: now, ask: String(b.ask), done: String(b.done ?? ''),
+      limits: String(b.limits ?? ''), inferred: !!b.inferred, conv: null, ev: [] };
+    all.push(n);
+    return n;
+  }
+  if (b.op === 'give') {
+    if (!b.conv) throw new Error('要派给哪个对话？');
+    const other = all.find((x) => x !== t && !x.end && x.conv === String(b.conv)); // its turns couldn't be told apart
+    if (other) throw new Error(`这个对话已经在做工单 #${other.id}「${other.name}」，先结束它（ticket end），或者换一个对话`);
+    // already on it: the number stays (its worker's reports carry it); more to say goes by chat say
+    if (String(b.conv) === t.conv) throw new Error(`工单 #${t.id} 已经在这个对话上了，补充说明用 chat say`);
+    if (b.n != null && Number(b.n) !== (t.n ?? 0) + 1) throw new Error(`工单 #${t.id} 刚被改派过，再用 ticket 看一下`); // its brief has that number
+    t.conv = String(b.conv); t.n = (t.n ?? 0) + 1; add('give', b.title || b.conv);
+    return t;
+  }
+  if (b.op === 'report') {
+    if (b.k !== 'ask' && !REPORT_WORDS.includes(b.k)) throw new Error(`报告只能是：${REPORT_WORDS.join('、')}`);
+    if (!String(b.text ?? '').trim()) throw new Error(b.k === 'ask' ? '要问什么？' : '写一句话说明');
+    // from the conversation it's given to now: one it was taken from may still be running, and report late
+    if (Number(gn) !== t.n) throw new Error(`工单 #${t.id} 已经改派给别的对话了，你这边的结果不算数，停下就行`);
+    add(b.k, b.text);
+    return t;
+  }
+  if (b.op === 'end') { t.end = { at: now, how: b.how === 'stop' ? 'stop' : 'done', text: String(b.text ?? '') }; return t; }
+  throw new Error('不认识的操作');
 }
-// the conversation a 盯着 line names: its title (maybe with （its folder） after it) or its 编号 (one just started has no
-// title yet)
-function watchOf(watch, list) {
-  const k = String(watch ?? '').replace(/[（(].*$/, '').trim();
-  return (k && list.find((x) => k === x.id || k === x.title)) || null;
+// Where a ticket stands, the first that holds (DeepSeek's order, what waits on you first): [stage, group, text]. s: its
+// conversation as listed now. A turn that ended with no report leaves it 停下了 (it doesn't go on by itself), with its
+// last words; what it reported counts for the turn it was said in, so a question answered (a new turn) is gone.
+const STAGE_ORDER = ['you', 'stuck', 'ask', 'idle', 'queue', 'work', 'end'];
+function stageOf(t, s) {
+  if (t.end) return [t.end.how === 'stop' ? '已停' : '完成', 'end', t.end.text];
+  if (!t.conv) return t.inferred ? ['建议', 'you', '管家自己提的，你同意了才开工'] : ['没派人', 'queue', ''];
+  if (s?.busy) return ['在做', 'work', ''];
+  if (s?.wait) return ['等确认', 'ask', '它停在一个确认或选择题上'];
+  const all = t.ev ?? [], ev = all.slice(all.findLastIndex((e) => e.k === 'give') + 1); // since it was given to this one
+  const stops = ev.filter((e) => e.k === 'stop'), from = stops.at(-2)?.at ?? 0, to = stops.at(-1)?.at ?? Infinity;
+  const said = ev.filter((e) => e.at > from && e.at <= to), q = said.filter((e) => e.k === 'ask').at(-1), r = said.filter((e) => REPORT_WORDS.includes(e.k)).at(-1);
+  if (q) return ['等你回答', 'you', q.text];
+  if (r?.k === '做完' || r?.k === '不用做') return [r.k === '做完' ? '等你验收' : '它说不用做', 'you', r.text];
+  if (r) return [r.k === '失败' ? '失败' : '卡住了', 'stuck', r.text];
+  return ['停下了', 'idle', s?.pid ? (stops.at(-1)?.text ?? '') : '没在运行'];
 }
-const watchedIds = (text, list) => new Set(todoParts(text).todos.map((x) => watchOf(x.watch, list)?.id).filter(Boolean));
-// what it's told: one [系统通知], each conversation once (its latest). kind: done / ask (a note), stale (the
-// watchdog: idle too long for what its 待办 says), dog (the watchdog's Haiku, on them all)
-function butlerNotice(notes) {
-  const last = new Map();
-  for (const n of notes) last.set(n.id ?? n.kind, n);
-  const say = (n) => (n.kind === 'dog' ? `看门狗觉得：${n.why}` : `「${n.title || n.project || n.id}」${n.kind === 'ask' ? '在等人确认' : n.kind === 'stale' ? n.why : '回复完了，现在空闲'}`);
-  return `[系统通知] 你盯着的事有动静：${[...last.values()].map(say).join('；')}。逐个 chat look 看清它现在怎样，按规矩决定：推它继续、替用户回答，还是记进「等你决定」，然后更新待办。`;
+// The notes tickets haven't taken yet: all of the file (notify keeps it under 256 KB: a backlog of any length a restart
+// leaves is there), after where the last service left off (its file; none: from the start, which notesInto makes safe),
+// each 1.5 s old at least (Claude writes its last words after the note), oldest first.
+// ponytail: notify trims the file to its last 200 notes past 256 KB: more than that piling up unread would lose the rest
+const TICKETS_SEEN = path.join(ROOT, 'tickets-seen.json');
+function readSeen(f = TICKETS_SEEN) { try { return Number(JSON.parse(fs.readFileSync(f, 'utf8'))) || 0; } catch { return 0; } }
+function allNotes(f = NOTES) { try { return fs.readFileSync(f, 'utf8').split('\n').flatMap((l) => { try { return l ? [JSON.parse(l)] : []; } catch { return []; } }); } catch { return []; } }
+const notesUnseen = (notes, seenTo, now = Date.now()) => notes.filter((n) => n.at > seenTo && now - n.at > 1500);
+// and what they do to the open tickets: a turn ended (done) is kept with its last words (what it stopped on), one stopped
+// on a question as held; each is news for the 管家. Taken twice (the tickets saved, the place not, when the service
+// ended), a note changes nothing: each is kept once, by its time, and only those after the ticket was given to this
+// conversation count. The ids of the tickets with news.
+function notesInto(all, notes, words) {
+  const news = new Set();
+  for (const n of notes) for (const t of all) {
+    if (!n.id || t.end || t.conv !== n.id) continue;
+    const ev = t.ev ?? [], given = ev.findLast((e) => e.k === 'give')?.at ?? 0;
+    if (n.at <= given || ev.some((e) => (e.k === 'stop' || e.k === 'held') && e.at === n.at)) continue;
+    (t.ev ??= []).push(n.kind === 'done' ? { at: n.at, k: 'stop', text: words(n.id) } : { at: n.at, k: 'held', text: '' });
+    t.ev.splice(0, Math.max(0, t.ev.length - 60));
+    news.add(t.id);
+  }
+  return [...news];
 }
-// a 已完成 line's time, "11-03 15:20 …": that moment this year; null without one
-function doneAt(line, now = new Date()) {
-  const m = /^(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})\s+(.+)$/.exec(line);
-  return m ? { at: new Date(now.getFullYear(), m[1] - 1, +m[2], +m[3], +m[4]).getTime(), text: m[5] } : null;
+// of the tickets queued for the 管家: those to tell now, each as it stands, and those kept (back at work, or so a list read
+// a moment ago says: told once they stop)
+function tellSplit(ids, tickets, list) {
+  const items = [], keep = [];
+  for (const id of ids) {
+    const t = tickets.find((x) => x.id === id), st = t && !t.end && stageOf(t, list.find((x) => x.id === t.conv));
+    if (st) (st[1] === 'work' ? keep.push(id) : items.push({ t, st }));
+  }
+  return { items, keep };
+}
+// of those a notice didn't get through for, the ones told again: twice at most each, counted for each ticket apart (a
+// batch that kept missing doesn't use up the next one's)
+const tellAgain = (tries, ids) => ids.filter((i) => { const c = (tries.get(i) ?? 0) + 1; if (c > 2) { tries.delete(i); return false; } tries.set(i, c); return true; });
+// the one notice the 管家 gets for the tickets that moved, each as it stands now (the panel's 你 is the user here)
+function butlerNotice(items) {
+  const say = ({ t, st: [stage, , text] }) => `#${t.id}「${t.name}」${stage.replace('你', '用户')}${text ? '：' + (text.length > 300 ? text.slice(0, 300) + '…' : text) : ''}`;
+  return `[系统通知] 工单有动静：${items.map(say).join('；')}。按规矩处理：停下了的推它继续或告诉用户；等用户回答、验收的，攒起来告诉用户；等确认的先 chat look 看它在问什么。`;
 }
 // The 管家's waits in the background (chat wait), a file each while it runs; one whose process is gone (a restart
 // ended it) is dropped. The soonest first.
@@ -1754,12 +1870,6 @@ async function web() {
     const fresh = readNotes(20).filter((n) => n.at > pushedTo && Date.now() - n.at > 1500).reverse();
     if (!fresh.length) return;
     pushedTo = fresh.at(-1).at;
-    try { // for the 管家: the ones it watches (not those a chat wait of its own already covers), the queue kept short
-      let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
-      const w = watchedIds(tx, sessions()), held = new Set(waitsNow().map((x) => x.id));
-      for (const n of fresh) if (n.id && w.has(n.id) && !held.has(n.id)) toTell.push(n);
-      toTell.splice(0, Math.max(0, toTell.length - 20));
-    } catch {}
     // the 管家 running: only it tells you (chat tell), but for its own question (stuck on that, it can't)
     const me = sessions().find((x) => x.pid && sameDir(x.cwd, BUTLER));
     for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000) && (!me || (n.id === me.id && n.kind === 'ask')))
@@ -1769,6 +1879,22 @@ async function web() {
           sub: [folder !== name && folder, s && `账号 ${s.acct + 1}`].filter(Boolean).join(' · ') };
         (barkUrl() ? bark(m) : pushAll(m)).catch(() => {}); // Bark set up: it alone, not twice
       } catch {}
+  }, 2000);
+
+  // A ticket's conversation ended a turn (its last words kept: what it stopped on), or stopped on a question: the 管家 told.
+  // Read from where the last service left off (kept in a file): one written just before a restart, or during it, isn't
+  // missed; one taken twice changes nothing (notesInto). Phones go on from the start: older ones were the island's.
+  let seenTo = readSeen();
+  setInterval(() => {
+    const fresh = notesUnseen(allNotes(), seenTo);
+    if (!fresh.length) return;
+    try {
+      const words = (id) => lastWords(sessions().find((x) => x.id === id)?.file, 300);
+      if (fresh.some((n) => n.id && readTickets().some((t) => !t.end && t.conv === n.id))) // the tickets first, then the place
+        for (const i of editTickets((all) => notesInto(all, fresh, words))) { toTell.add(i); tries.delete(i); } // news: its tries start again
+      seenTo = fresh.at(-1).at;
+      fs.writeFileSync(TICKETS_SEEN, JSON.stringify(seenTo));
+    } catch (e) { log('ticket_note_fail', { err: e.message }); }
   }, 2000);
 
   // For the 管家's 操作台: this computer's CPU, busy since the last sample (taken 2 s apart at least: pages ask within
@@ -1783,14 +1909,20 @@ async function web() {
     }
     return { cpu: cpuPct, mem: os.totalmem() - os.freemem(), memAll: os.totalmem() };
   };
-  // and what it keeps watching: its 待办.md's sections above 「## 已完成」
-  // today, newest first, the 管家's own doings: what it did (its log), the 待办 things it finished (with a time)
-  const timeline = (doneLines) => {
+  // its tickets, as the 操作台 shows them: the open ones, what waits on you first, then the last 5 ended. Only this service
+  // writes them (written whole, then swapped in: a crash mid-write leaves the old file)
+  const editTickets = (fn) => { const all = readTickets(), r = fn(all); fs.writeFileSync(`${TICKETS}.tmp`, JSON.stringify(all, null, 1)); fs.renameSync(`${TICKETS}.tmp`, TICKETS); return r; };
+  const ticketsNow = (list = sessions()) => {
+    const all = readTickets().map((t) => { const s = list.find((x) => x.id === t.conv); return { ...t, ev: undefined, stage: stageOf(t, s), convTitle: s?.title ?? null }; });
+    const open = all.filter((t) => !t.end).sort((a, b) => STAGE_ORDER.indexOf(a.stage[1]) - STAGE_ORDER.indexOf(b.stage[1]) || a.id - b.id);
+    return [...open, ...all.filter((t) => t.end).sort((a, b) => b.end.at - a.end.at).slice(0, 5)];
+  };
+  // today, newest first, the 管家's own doings (its log)
+  const timeline = () => {
     const d0 = new Date(); d0.setHours(0, 0, 0, 0);
     const t0 = d0.getTime(), out = [];
     let log = ''; try { log = fs.readFileSync(BLOG, 'utf8'); } catch {}
     for (const l of log.split('\n')) try { const j = l && JSON.parse(l); if (j?.at >= t0 && j.who !== 'you') out.push({ ...j, kind: 'butler' }); } catch {}
-    for (const l of doneLines) { const d = doneAt(l); if (d && d.at >= t0) out.push({ at: d.at, kind: 'todo', text: `完成：${d.text}` }); }
     return out.sort((a, b) => b.at - a.at).slice(0, 30);
   };
   let tokAt = 0, tokCache = null;
@@ -1839,11 +1971,12 @@ async function web() {
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
-      let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
-      const tp = todoParts(tx);
       return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
-        todo: tp.todos.map((x) => x.t), todos: tp.todos, todoDone: tp.lines.slice(0, 5), timeline: timeline(tp.lines), waits: waitsNow() };
+        tickets: ticketsNow(all), timeline: timeline(), waits: waitsNow() };
     },
+    // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
+    'GET /api/tickets': () => ticketsNow(),
+    'POST /api/ticket': (q, b) => editTickets((all) => ticketOp(all, b)),
     'GET /api/tokens': (q) => { if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) { tokCache = { ...tokenStats(), butler: butlerCost() }; tokAt = Date.now(); } return tokCache; },
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
     'POST /api/push/sub': (q, b) => { // a page's subscription, one per endpoint
@@ -2068,77 +2201,53 @@ async function web() {
   // a [系统通知] typed into the 管家's terminal as you'd paste it, then Enter (only once it's idle: typed while it waits on
   // a question, it would answer it)
   const tellIn = async (t, text) => { t.proc.write(`\x1b[200~${text}\x1b[201~`); await sleep(400); t.proc.write('\r'); };
-  // what's waiting to be told: notes on the conversations it watches, given once it's idle (and you aren't typing there)
-  const toTell = [];
-  setInterval(() => {
-    const t = toTell.length && [...terms.values()].find((x) => x.kind === 'pty' && !x.gone && x.pid && sameDir(x.cwd, BUTLER));
-    if (!t || Date.now() - (t.typed ?? 0) < 10000) return; // not running: kept till it is
-    let st = null; try { st = JSON.parse(fs.readFileSync(path.join(t.dir, 'sessions', `${t.pid}.json`), 'utf8')).status; } catch {}
-    if (st !== 'idle') return;
-    const ns = toTell.splice(0);
-    tellIn(t, butlerNotice(ns)); log('butler_told', { n: ns.length });
+  const ptyStatus = (t) => { try { return JSON.parse(fs.readFileSync(path.join(t.dir, 'sessions', `${t.pid}.json`), 'utf8')).status; } catch { return null; } };
+  // what's waiting to be told: the tickets that moved, given once it's idle (and you aren't typing there), each as it
+  // stands then (one back at work by then left out). Taken only if it got to work within 20 s; else (a menu was up, it
+  // was starting) told again the next round, twice at most.
+  const toTell = new Set(), tries = new Map(); // ticket id → notices of it that didn't get through
+  let telling = false;
+  setInterval(async () => {
+    const t = toTell.size && !telling && [...terms.values()].find((x) => x.kind === 'pty' && !x.gone && x.pid && sameDir(x.cwd, BUTLER));
+    if (!t || Date.now() - (t.typed ?? 0) < 10000 || ptyStatus(t) !== 'idle') return; // not running: kept till it is
+    const ids = [...toTell], list = sessions();
+    toTell.clear();
+    const { items, keep } = tellSplit(ids, readTickets(), list);
+    keep.forEach((i) => toTell.add(i));
+    if (!items.length) return;
+    telling = true;
+    try {
+      await tellIn(t, butlerNotice(items));
+      for (let k = 0; k < 10; k++) { await sleep(2000); if (['busy', 'shell'].includes(ptyStatus(t))) { items.forEach((o) => tries.delete(o.t.id)); return log('butler_told', { n: items.length }); } }
+      const again = tellAgain(tries, items.map((o) => o.t.id));
+      again.forEach((i) => toTell.add(i));
+      log('butler_tell_missed', { n: items.length, again: again.length });
+    } finally { telling = false; }
   }, 3000);
   // After a restart each one that ran here is continued on its account, back idle (one cut mid-answer isn't told to go
   // on: the 管家 is, for those it watches). The 管家 also when its 待办 has something left; then told to look at them
   // all again, and to set again the reminders that ended. (A Claude ended with its terminal takes its session file.)
+  // Its tickets open, or its old 待办.md still has things.
   async function wakeUp() {
     const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
     for (const id of ranBefore) {
       const s = all.find((x) => x.id === id), p = s && !s.pid && s !== me && reg.profiles[s.acct];
       if (p) try { startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
     }
-    let todo = ''; try { todo = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
-    const open = todoOpen(todo), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
+    let old = false; try { old = todoOpen(fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8')); } catch {}
+    const open = old || readTickets().some((x) => !x.end), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
     if (!p) return;
     const t = startPty(p, me.cwd, ['--resume', me.id]);
     if (!open && !lost.length) return log('butler_woken', { session_id: me.id }); // nothing it was watching: back, waiting for you
     const hm = (ms) => new Date(ms).toTimeString().slice(0, 5);
     const again = lost.length ? `你设的这些定时提醒也断了，还要的就重新设：${lost.map((w) => `${hm(w.until)} ${w.note || w.title || ''}`.trim()).join('；')}。` : '';
     for (let k = 0; k < 60 && !t.gone; k++, await sleep(1000)) {
-      let st = null; try { st = JSON.parse(fs.readFileSync(path.join(p.configDir, 'sessions', `${t.pid}.json`), 'utf8')).status; } catch {}
-      if (st !== 'idle') continue;
-      await tellIn(t, `[系统通知] 网页服务刚重启。读一遍 待办.md，逐个 chat look 你盯着的对话，看清它们现在怎样，按规矩决定下一步，更新待办。${again}`);
+      if (ptyStatus(t) !== 'idle') continue;
+      const move = old ? '工单换了记法：待办.md 不再有人读。把里面没做完的事列给用户，用户点头后用 ticket new 建成工单（原话照抄），接着原来的对话做的用 ticket give 接上，然后把 待办.md 改名为 待办-旧.md。' : '';
+      await tellIn(t, `[系统通知] 网页服务刚重启。用 claude-multi ticket 看一遍工单，按规矩处理（重启时正在回复的对话被切断了，现在是停下的）。${move}${again}`);
       return log('butler_woken', { session_id: me.id, reminders: lost.length });
     }
   }
-  // The watchdog. First part, no model: a conversation its 待办 has as going on (not 等你决定 or 卡住了), idle or
-  // waiting 10 minutes on: the 管家 is told again (a notice lost, or it took a promise for work going on). Each at
-  // most every 30 minutes.
-  const flagged = new Map(), bootAt = Date.now();
-  setInterval(() => {
-    if (Date.now() - bootAt < 300000) return; // after a restart the 管家 looks at them all first
-    let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch { return; }
-    const all = sessions(), now = Date.now();
-    for (const x of todoParts(tx).todos) {
-      const s = !/^(等你|卡住)/.test(x.st) && watchOf(x.watch, all);
-      if (!s || s.busy || now - s.at < 600000 || now - (flagged.get(s.id) ?? 0) < 1800000) continue;
-      flagged.set(s.id, now);
-      toTell.push({ id: s.id, title: s.title, kind: 'stale', why: `${s.wait ? '在等人确认' : s.pid ? '空闲' : '没在运行'}已经 ${Math.round((now - s.at) / 60000)} 分钟，待办里却写着「${x.st.replace(/[（(].*$/, '')}」` });
-    }
-  }, 60000);
-  // Second part, Haiku, once an hour while something it watches has moved: has each got on, or gone in circles, off
-  // what you asked? One question, nothing kept (no record, no tools, no hooks), the recommended account; its answer and
-  // cost as JSON, the cost logged (the 管家's 花费 counts it). It only tells the 管家, which decides.
-  let dogAt = Date.now();
-  setInterval(() => {
-    let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch { return; }
-    const all = sessions(), them = todoParts(tx).todos.map((x) => ({ x, s: watchOf(x.watch, all) })).filter((o) => o.s && o.s.at > dogAt);
-    const p = load().profiles[usageCache?.rec ?? 0];
-    dogAt = Date.now();
-    if (!them.length || !p || usageCache?.open === false) return;
-    const what = them.map(({ x, s }) => `## ${x.t}\n用户交代：${x.ask || '（没记）'}\n待办的状态：${x.st}\n盯着的对话「${s.title}」：${s.busy ? '正在回复' : s.wait ? '在等人确认' : s.pid ? '空闲' : '没在运行'}。它最后的回答：${lastWords(s.file, 800)}`).join('\n\n');
-    const c = require('child_process').spawn(claudeExe, ['-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--settings', '{"disableAllHooks":true}', '--output-format', 'json'],
-      { cwd: os.tmpdir(), env: childEnv(p.configDir), windowsHide: true, timeout: 180000 });
-    let out = '';
-    c.stdout.setEncoding('utf8'); c.stdout.on('data', (d) => (out += d)); c.on('error', () => {});
-    c.on('close', (code) => {
-      let j = {}; try { j = JSON.parse(out); } catch {}
-      const said = String(j.result ?? '').trim();
-      log('watchdog', { n: them.length, code, usd: j.total_cost_usd ?? null, said: said.slice(0, 300) });
-      if (code === 0 && said && !/^正常/.test(said)) toTell.push({ kind: 'dog', why: said.slice(0, 600) });
-    });
-    c.stdin.end(`你是看门狗，替用户检查管家盯着的几件事。对每件事判断：它最近有没有实质进展，有没有在原地打转，有没有偏离用户交代的目标。只看下面给的内容，不要猜。全部正常，只回两个字：正常。否则每件有问题的写一行：「事情名」：问题（一句话）。\n\n${what}`);
-  }, 3600000);
   server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); setTimeout(() => wakeUp().catch((e) => log('wake_fail', { err: e.message })), 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
   // the way in from outside, kept up: dialed again 5 s after a drop, waiting longer (up to a minute) while each try
   // fails at once (the server or the network down). A connection the network swallowed (a proxy's TUN switched on or
@@ -2356,7 +2465,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { keepDefaults, butlerCost, blogSent, parseUntil, todoOpen, todoParts, doneAt, waitsNow, watchedIds, butlerNotice, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { inLive, keepDefaults, butlerCost, blogSent, parseUntil, todoOpen, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -2376,6 +2485,8 @@ if (require.main === module) {
   else if (cmd === 'swap') switchChat(process.argv[3], Number(process.argv[4]), process.argv.includes('--now'));
   else if (cmd === 'attach') attach(process.argv[3]);
   else if (cmd === 'chat') chat(process.argv.slice(3));
+  else if (cmd === 'ticket') ticket(process.argv.slice(3));
+  else if (cmd === 'report' || cmd === 'ask') reportTo(cmd, process.argv.slice(3));
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'remove') remove(process.argv[3]);
   else if (cmd === 'web') web();
