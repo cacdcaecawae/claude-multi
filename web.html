@@ -271,7 +271,10 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .me .spark { width: 34px; height: 34px; flex: none; color: #d97757; }
   .desk .me.busy .spark { animation: spin 6s linear infinite; }
   .desk .me b { font-size: 15px; color: var(--fgHi); }
-  .desk .sub { font-size: 12px; color: var(--fg2); }
+  .desk .sub { display: flex; gap: 4px; margin-top: 3px; }
+  /* a colored bubble, for what should stand out: the text in its color, filled with it faintly */
+  .pill { flex: none; display: inline-block; font-size: 11px; font-weight: 600; font-style: normal; line-height: 18px; padding: 0 7px; border-radius: 9px; white-space: nowrap; color: var(--fg2); background: color-mix(in srgb, currentColor 15%, transparent); }
+  .pill.g { color: var(--green); } .pill.o { color: var(--orange); } .pill.r { color: var(--red); } .pill.b { color: var(--a1); } .pill.p { color: var(--purple); } .pill.k { color: #d97757; }
   .desk .mood { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--cardB); border-radius: 10px; background: var(--bg); color: var(--fg); }
   .desk .mood span { font-size: 18px; line-height: 1; }
   .desk .item { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; min-width: 0; }
@@ -279,12 +282,11 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .item .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .desk .item .ad { flex: none; width: 8px; height: 8px; border-radius: 50%; }
   .desk .item .pt { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #d97757; }
-  .desk .item .when, .desk .tag { flex: none; font-size: 11px; color: var(--fg3); }
-  .desk .tag.wait { color: var(--orange); font-weight: 600; }
   .desk .counts { display: flex; gap: 6px; padding: 0 6px 6px; }
   .desk .counts span { flex: 1; text-align: center; padding: 4px 0; border-radius: 6px; background: var(--tint); font-size: 11px; color: var(--fg2); }
   .desk .counts b { display: block; font-size: 15px; color: var(--fgHi); }
-  .desk .counts .wait b { color: var(--orange); }
+  .desk .counts span.o, .desk .counts span.g { color: var(--orange); background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
+  .desk .counts span.g { color: var(--green); } .desk .counts span.o b, .desk .counts span.g b { color: inherit; }
   .desk .none { padding: 0 6px; font-size: 12px; color: var(--fg3); }
   .desk .gauge { padding: 2px 6px 8px; font-size: 12px; }
   .desk .gauge .k { display: flex; justify-content: space-between; color: var(--fg2); margin-bottom: 5px; }
@@ -294,28 +296,28 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .todo { margin: 0 0 8px; padding: 9px 10px; border: 1px solid var(--cardB); border-radius: 10px; background: var(--bg); }
   .desk .todo .tt { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 4px; }
   .desk .todo .tt b { flex: 1; min-width: 0; color: var(--fgHi); font-weight: 600; }
-  .desk .todo .sum { font-size: 12px; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .todo .sum { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg2); }
+  .desk .todo .sum span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .todo .sum em { flex: none; font-style: normal; }
+  .desk .todo .need { margin-top: 6px; padding: 5px 8px; border-radius: 7px; font-size: 12px; color: var(--fg); background: color-mix(in srgb, var(--orange) 12%, transparent); }
+  .desk .todo .need b { color: var(--orange); margin-right: 4px; }
   .desk .todo .wt { padding: 4px 0 0; margin-top: 6px; border-top: 1px dashed var(--border); color: var(--fg2); }
   .desk .todo [data-open] { color: var(--link); cursor: pointer; }
-  .desk .st { flex: none; font-size: 11px; padding: 0 6px; border-radius: 8px; line-height: 18px; background: var(--tint); color: var(--fg2); }
-  .desk .st.you { color: var(--orange); font-weight: 600; } .desk .todo.you { border-color: var(--orange); }
-  .desk .todo .stnow { font-style: normal; margin-left: 4px; color: var(--fg3); } .desk .todo .stnow.s-busy { color: var(--green); } .desk .todo .stnow.s-ask { color: var(--orange); } .desk .todo .stnow.s-lost { color: var(--red); }
-  .desk .st.wait { color: var(--a1); } .desk .st.run { color: var(--orange); } .desk .st.bad { color: var(--red); } .desk .st.ok { color: var(--green); }
-  .desk .doneL { font-size: 12px; color: var(--fg3); padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .todo.you { border-color: var(--orange); }
+  .desk .doneL { font-size: 12px; color: var(--fg2); padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .doneL b { color: var(--green); }
   #deskAdd { display: flex; gap: 6px; margin-top: -10px; padding: 0 2px; }
   #deskAdd input { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 6px 9px; border-radius: 8px; border: 1px dashed var(--inputB); background: var(--bg); color: var(--fg); }
   #deskAdd input:focus { outline: none; border-style: solid; border-color: var(--accent); }
   #deskAdd button { flex: none; font-size: 12px; padding: 0 10px; border-radius: 8px; background: var(--btn); }
-  .desk .ev { display: flex; gap: 8px; padding: 3px 6px; font-size: 12px; position: relative; }
-  .desk .ev .when { flex: none; width: 36px; color: var(--fg3); font-variant-numeric: tabular-nums; }
-  .desk .ev i { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; background: var(--fg3); }
-  .desk .ev.k-butler i { background: #d97757; } .desk .ev.k-todo i { background: var(--purple); }
-  .desk .ev .t { flex: 1; min-width: 0; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desk .ev { display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 12px; position: relative; }
+  .desk .ev .when { flex: none; width: 34px; color: var(--fg2); font-variant-numeric: tabular-nums; }
+  .desk .ev .t { flex: 1; min-width: 0; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .desk .ev[data-open] { cursor: pointer; border-radius: 6px; }
   .desk .wt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 12px; }
   .desk .wt .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .desk .wt .when { flex: none; color: var(--fg3); }
-  .desk .acct .today { font-size: 11.5px; color: var(--fg2); margin-bottom: 2px; }
+  .desk .acct .today { font-size: 11.5px; color: var(--fg); margin: 2px 0 4px; }
+  .desk .acct .today b { color: var(--orange); }
   /* quick questions over the 管家's input box */
   .send .quick { display: flex; gap: 6px; padding: 0 2px 6px; overflow-x: auto; scrollbar-width: none; }
   .send .quick button { flex: none; font-size: 12px; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--cardB); background: var(--bg); color: var(--fg2); }
@@ -1050,31 +1052,34 @@ function drawDesk() {
   const up = !!me?.pid || !!(bConv?.started && !bConv.ended), thinking = bConv?.live === 'busy' || !!me?.busy, acct = me?.pid ? me.acct + 1 : bConv?.acct;
   const [face, word] = mood(up, thinking, run, (state.todos ?? []).filter((x) => /^等你/.test(x.st)).length), wait = run.filter((x) => x.wait), busy = run.filter((x) => x.busy && !x.wait);
   const status = !up ? '没在运行' : bConv?.live === 'ask' || me?.wait ? '在等你回答' : thinking ? '在回复' : '空闲';
-  $('#deskMe').html = `<div class="me${thinking ? ' busy' : ''}">${SPARK}<div><b>管家</b><div class="sub">${status}${up && acct ? ` · 账号 ${acct}` : ''}</div></div></div>
+  const stC = !up ? '' : status === '在等你回答' ? 'o' : thinking ? 'g' : 'b';
+  $('#deskMe').html = `<div class="me${thinking ? ' busy' : ''}">${SPARK}<div><b>管家</b><div class="sub"><span class="pill ${stC}">${status}</span>${up && acct ? `<span class="pill" style="color:${ACCT[(acct - 1) % 4]}">账号 ${acct}</span>` : ''}</div></div></div>
     <div class="mood"><span>${face}</span>${esc(word)}</div>`;
   const hm = (t) => new Date(t).toTimeString().slice(0, 5), mins = (ms) => (ms < 60000 ? '不到 1 分钟' : ms < 3600000 ? `${Math.round(ms / 60000)} 分钟` : `${(ms / 3600000).toFixed(1)} 小时`);
   const todos = state.todos ?? todo.map((t) => ({ t })), byName = (w) => { const n = String(w ?? '').replace(/[（(].*$/, '').trim(); return n && state.sessions.find((x) => x.title === n || x.id === n); };
-  const stCls = (st) => (/^等你/.test(st) ? 'you' : /卡|失败|出错|问题/.test(st) ? 'bad' : /等/.test(st) ? 'wait' : /进行|正在|在跑|跑着/.test(st) ? 'run' : /完成|好了/.test(st) ? 'ok' : '');
+  const stCls = (st) => (/^等你/.test(st) ? 'o' : /卡|失败|出错|问题/.test(st) ? 'r' : /等/.test(st) ? 'b' : /进行|正在|在跑|跑着|完成|好了/.test(st) ? 'g' : '');
   const waits = state.waits ?? [], used = new Set();
   const waitOf = (x, conv) => { const w = waits.find((w) => !used.has(w) && !w.until && (conv ? w.id === conv.id : w.title && String(x.watch ?? '').startsWith(w.title))); if (w) used.add(w); return w; };
   const cards = [...todos].sort((a, b) => /^等你/.test(b.st) - /^等你/.test(a.st)).map((x) => { // waiting on you: first
     const conv = byName(x.watch), w = (x.watch || conv) && waitOf(x, conv);
     // the watched one as it is now, whatever the card says (a conversation idle has stopped: it doesn't go on by itself)
     // one its name doesn't find isn't watched at all: shown, not left silent
-    const now = !conv ? x.watch && ['s-lost', '找不到这个对话'] : !conv.pid ? ['', '没在运行'] : conv.wait ? ['s-ask', '在等人确认'] : conv.busy ? ['s-busy', '在回复'] : ['', '空闲'];
-    const sum = [x.watch && `盯着 <span${conv ? ` data-open="${esc(conv.id)}"` : ''}>${esc(x.watch.replace(/[（(].*$/, ''))}</span>${now ? `<i class="stnow ${now[0]}">${now[1]}</i>` : ''}`, x.wait && `等 ${esc(x.wait)}`].filter(Boolean).join(' · ');
-    return `<div class="todo${/^等你/.test(x.st) ? ' you' : ''}"><div class="tt"><b>${esc(x.t)}</b>${x.st ? `<span class="st ${stCls(x.st)}">${esc(x.st.replace(/[（(：:].*$/, ''))}</span>` : ''}</div>
+    const now = !conv ? x.watch && ['r', '找不到这个对话'] : !conv.pid ? ['', '没在运行'] : conv.wait ? ['o', '在等人确认'] : conv.busy ? ['g', '在回复'] : ['', '空闲'];
+    const you = /^等你/.test(x.st), need = you && x.st.replace(/^等你决定?[：:]?\s*/, '').replace(/[（(].*$/, '');
+    const sum = x.watch && `<em>盯着</em><span${conv ? ` data-open="${esc(conv.id)}"` : ''}>${esc(x.watch.replace(/[（(].*$/, ''))}</span>${now ? `<i class="pill ${now[0]}">${now[1]}</i>` : ''}`;
+    return `<div class="todo${you ? ' you' : ''}"><div class="tt"><b>${esc(x.t)}</b>${x.st ? `<span class="pill ${stCls(x.st)}">${esc(x.st.replace(/[（(：:].*$/, ''))}</span>` : ''}</div>
       ${sum ? `<div class="sum" title="${esc([x.ask && '你交代的 ' + x.ask, x.watch && '盯着 ' + x.watch, x.wait && '等 ' + x.wait, x.then && '然后 ' + x.then, x.st && '状态 ' + x.st].filter(Boolean).join('\n'))}">${sum}</div>` : ''}
-      ${w ? `<div class="wt"><span>⏳</span><span class="t">后台正在等它${w.note ? ' · ' + esc(w.note) : ''}</span><span class="when">已等 ${mins(Date.now() - w.at)}</span></div>` : ''}</div>`;
+      ${need ? `<div class="need"><b>要你定</b>${esc(need)}</div>` : ''}
+      ${w ? `<div class="wt"><span>⏳</span><span class="t">后台正在等它${w.note ? ' · ' + esc(w.note) : ''}</span><span class="pill o">已等 ${mins(Date.now() - w.at)}</span></div>` : ''}</div>`;
   }).join('');
   const loose = waits.filter((w) => !used.has(w)).map((w) => (w.until
-    ? `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="when">还有 ${mins(w.until - Date.now())}</span></div>`
-    : `<div class="wt"${w.id ? ` data-open="${esc(w.id)}"` : ''}><span>⏳</span><span class="t">等「${esc(w.title ?? '')}」${w.note ? ' · ' + esc(w.note) : ''}</span><span class="when">已等 ${mins(Date.now() - w.at)}</span></div>`)).join('');
+    ? `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="pill b">还有 ${mins(w.until - Date.now())}</span></div>`
+    : `<div class="wt"${w.id ? ` data-open="${esc(w.id)}"` : ''}><span>⏳</span><span class="t">等「${esc(w.title ?? '')}」${w.note ? ' · ' + esc(w.note) : ''}</span><span class="pill o">已等 ${mins(Date.now() - w.at)}</span></div>`)).join('');
   $('#deskTodo').html = `<h4>任务${todos.length ? `<b class="count">${todos.length}</b>` : ''}</h4>${cards || loose ? cards + loose
     : '<div class="none">还没有任务。在下面交代一件，或者跟管家说「盯着某个对话，做完告诉我」「15:40 提醒我看额度」</div>'}
-    ${(state.todoDone ?? []).slice(0, 3).map((l) => `<div class="doneL" title="${esc(l)}">✓ ${esc(l)}</div>`).join('')}`;
-  const tag = (x) => (x.wait ? '<span class="tag wait">等你</span>' : x.busy ? '<span class="spin" title="正在回复"></span>' : '<span class="tag">空闲</span>');
-  $('#deskRun').html = `<h4>对话</h4><div class="counts"><span class="wait"><b>${wait.length}</b>等你</span><span><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
+    ${(state.todoDone ?? []).slice(0, 3).map((l) => `<div class="doneL" title="${esc(l)}"><b>✓</b> ${esc(l)}</div>`).join('')}`;
+  const tag = (x) => (x.wait ? '<span class="pill o">等你</span>' : x.busy ? '<span class="pill g">在回复</span>' : '<span class="pill">空闲</span>');
+  $('#deskRun').html = `<h4>对话</h4><div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
     ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" title="${esc(x.cwd)}"><i class="ad" style="background:${ACCT[x.acct % 4]}"></i><span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
   if (!tokensNow && Date.now() - tokensAt > 120000) {
     tokensAt = Date.now();
@@ -1084,14 +1089,18 @@ function drawDesk() {
   const u = state.usage, gauge = (k, p, v) => `<div class="gauge"><div class="k"><span>${k}</span><span>${v}</span></div><div class="meter"><i class="${p >= 85 ? 'bad' : p >= 60 ? 'warn' : ''}" style="width:${Math.min(100, p)}%"></i></div></div>`;
   $('#deskAcct').html = u.accounts?.length ? `<h4>账号${today ? ` · 今天共 ${fmtTok(all(today))} token` : ''}</h4>${u.accounts.map((a, i) => {
     const on = state.sessions.filter((x) => x.pid && x.acct === i).length;
-    return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}<span class="grow"></span><span class="m">${a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
+    return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="pill g">推荐</span>' : ''}<span class="grow"></span><span class="pill ${a.err ? '' : a.runway >= 2 ? 'g' : a.runway > 0 ? 'o' : 'r'}">${a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
       ${a.err ? '' : (a.windows ?? []).filter((w) => w.k === 'five_hour' || w.k === 'seven_day').map((w) => gauge(w.k === 'five_hour' ? '5 小时' : '7 天', w.pct, `${w.pct}% · ${esc(w.reset)}后重置`)).join('')}
-      ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · 约 ${usd(today.by[i].usd)}</div>` : ''}
-      <div class="m">${on ? `${on} 个对话在用` : '没有对话在用'}</div></div>`;
+      ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · <b>约 ${usd(today.by[i].usd)}</b></div>` : ''}
+      ${on ? `<span class="pill b">${on} 个对话在用</span>` : '<div class="m">没有对话在用</div>'}</div>`;
   }).join('')}` : '';
   const mine = butlerIds(), tl = (state.timeline ?? []).filter((e) => e.kind === 'butler' || e.kind === 'todo'); // its own doings (an older service sent more)
-  $('#deskLog').html = `<h4>今天做了</h4>${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id);
-    return `<div class="ev k-${esc(e.kind)}"${open ? ` data-open="${esc(e.id)}"` : ''}><span class="when">${hm(e.at)}</span><i></i><span class="t" title="${esc(e.text)}">${esc(e.text)}</span></div>`; }).join('')
+  // each kind of thing it did as a colored word, its verb taken off the text
+  const KINDS = [[/^给(「[^」]*」)发了消息：?/, '发消息', 'b', '$1：'], [/^等到了/, '等到', 'p', ''], [/^替你给?/, '替你选', 'o', ''], [/^新开了对话/, '新开', 'g', ''],
+    [/^提醒到点：?/, '提醒', 'o', ''], [/^告诉了你：?/, '告诉你', 'k', ''], [/^完成：?/, '完成', 'g', '']];
+  const kindOf = (e) => { for (const [re, w, c, to] of KINDS) if (re.test(e.text)) return [w, c, e.text.replace(re, to)]; return e.kind === 'todo' ? ['完成', 'g', e.text] : ['管家', 'k', e.text]; };
+  $('#deskLog').html = `<h4>今天做了</h4>${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id), [w, c, t] = kindOf(e);
+    return `<div class="ev"${open ? ` data-open="${esc(e.id)}"` : ''}><span class="when">${hm(e.at)}</span><span class="pill ${c}">${w}</span><span class="t" title="${esc(e.text)}">${esc(t)}</span></div>`; }).join('')
     : '<div class="none">它今天还没替你做事</div>'}`;
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
   $('#deskPc').html = pc ? `<h4>这台电脑</h4>${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
