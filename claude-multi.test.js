@@ -621,3 +621,19 @@ console.log('tokens ok');
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log('butler cost ok');
 }
+
+// A /model or /effort typed into the 管家 saves itself as every new conversation's default: put back as it was (a
+// key that wasn't there goes again), the rest of the file kept
+{
+  const { keepDefaults } = require('./claude-multi'), os = require('os'), path = require('path');
+  const f = path.join(os.tmpdir(), `cm-defaults-${process.pid}.json`);
+  fs.writeFileSync(f, JSON.stringify({ env: { A: '1' }, model: 'opus' }, null, 2) + '\n');
+  const back = keepDefaults([f]);
+  fs.writeFileSync(f, JSON.stringify({ env: { A: '1' }, model: 'sonnet', effortLevel: 'low' }, null, 2) + '\n');
+  back();
+  assert.deepEqual(JSON.parse(fs.readFileSync(f, 'utf8')), { env: { A: '1' }, model: 'opus' });
+  assert.ok(fs.readFileSync(f, 'utf8').endsWith('}\n'));
+  keepDefaults([path.join(os.tmpdir(), 'cm-no-such-file.json')])(); // a missing one: nothing
+  fs.rmSync(f);
+  console.log('defaults kept ok');
+}
