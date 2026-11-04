@@ -111,6 +111,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .sash { width: 4px; margin: 0 -2px; flex: none; position: relative; z-index: 4; cursor: col-resize; transition: background .1s .1s; }
   .sash:hover, .sash.drag { background: var(--accent); }
   #app:not(.side) #sideSash { display: none; }
+  #deskSash, #deskRSash { display: none; } #app.butler #deskSash { display: block; }
+  @media (min-width: 1280px) { #app.butler #deskRSash { display: block; } }
   body.dragging { cursor: col-resize; user-select: none; }
   body.dragging .screen { pointer-events: none; }
   @media (hover: hover) { .ico:hover { background: var(--tint); color: var(--fg); } }
@@ -255,7 +257,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #app.butler #side, #app.butler #sideSash, #app.butler #editor { display: none !important; }
   #butler.blank > .hint { display: flex; }
   /* its 操作台, beside it: how it is, what it keeps watching, the conversations, what just got done, the computer */
-  #desk { display: none; width: 260px; flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: linear-gradient(180deg, rgba(217, 119, 87, .10), transparent 200px), var(--bar); }
+  #desk { display: none; width: var(--deskW, clamp(240px, 16vw, 360px)); flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: linear-gradient(180deg, rgba(217, 119, 87, .10), transparent 200px), var(--bar); }
   /* its account and model, by its input box; and on its start page */
   .send .bsel { display: flex; gap: 6px; padding: 0 8px 6px 42px; }
   .send .bsel button { font-size: 12px; padding: 2px 9px; border-radius: 10px; background: var(--tint); color: var(--fg2); }
@@ -322,7 +324,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .send .quick { display: flex; gap: 6px; padding: 0 2px 6px; overflow-x: auto; scrollbar-width: none; }
   .send .quick button { flex: none; font-size: 12px; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--cardB); background: var(--bg); color: var(--fg2); }
   @media (hover: hover) { .send .quick button:hover { color: var(--fgHi); border-color: var(--accent); } .desk .ev[data-open]:hover { background: var(--hover); } }
-  #deskR { display: none; width: 280px; flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: var(--bar); }
+  #deskR { display: none; width: var(--deskRW, clamp(250px, 17vw, 380px)); flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: var(--bar); }
   @media (min-width: 1280px) { #app.butler #deskR { display: flex; } }
   .desk .acct { padding: 8px 6px 4px; }
   .desk .acct + .acct { border-top: 1px solid var(--border); }
@@ -495,8 +497,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     .sash:hover::after, .sash.drag::after { background: var(--accent); }
     #butler { border: 1px solid var(--cardB); border-radius: 10px; overflow: hidden; }
     #app.butler #act { margin-right: 6px; border-right: 1px solid var(--cardB); border-radius: 10px; } /* on its own: the side bar's hidden */
-    #desk { border: 1px solid var(--cardB); border-radius: 10px; margin-right: 6px; }
-    #deskR { border: 1px solid var(--cardB); border-radius: 10px; margin-left: 6px; }
+    #desk, #deskR { border: 1px solid var(--cardB); border-radius: 10px; } /* the sashes between them: the gaps */
   }
 
   /* a phone: one group; the side bar over it under the tab strip, the activity bar at the bottom */
@@ -597,7 +598,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
   <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form><div id="deskLog"></div><div id="deskRun"></div><div id="deskAcct"></div><div id="deskPc"></div></aside>
+  <div class="sash" id="deskSash" title="拖动调宽窄，双击恢复自动"></div>
   <main id="butler" class="blank"><div id="deskLine"></div><div id="peekBar"><button class="back">← 回到管家</button><span class="t"></span></div><div id="asks"></div><div class="hint"></div></main>
+  <div class="sash" id="deskRSash" title="拖动调宽窄，双击恢复自动"></div>
   <aside id="deskR" class="desk"></aside>
 </div>
 <footer id="status"><span class="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span id="host">…</span></span>
@@ -679,6 +682,7 @@ const NARROW = matchMedia('(max-width: 759px)');
 const FINE = matchMedia('(pointer: fine)').matches, FONT = FINE ? 14 : 13; // FINE: a computer's mouse and keyboard
 const saved = (() => { try { return JSON.parse(localStorage.getItem('cm-layout')) ?? {}; } catch { return {}; } })();
 let side = ['chats', 'usage', 'tokens'].includes(saved.side) ? saved.side : 'chats', sideOn = saved.sideOn ?? true, sideW = saved.sideW ?? 300;
+let deskW = saved.deskW ?? null, deskRW = saved.deskRW ?? null; // the 管家's columns as dragged (null: as the window makes them)
 let state = null, tokens = null, tokensNow = null, tokensAt = 0, groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
 let listMode = saved.listMode === 'run' ? 'run' : 'dirs'; // 对话: by folder, or (the bell) 提示 and the running ones
@@ -686,7 +690,7 @@ let butler = !!saved.butler, bConv = null, peek = null; // 管家 mode (the spar
 $('#app').classList.toggle('butler', butler);
 $('#act .logo .label').textContent = butler ? '退出管家' : '管家'; // reloaded in it: says what the spark does
 function save() { // not before the tabs are back: a first load that failed would forget them
-  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, folded: [...folded], listMode, butler, focus: groups.indexOf(focusG),
+  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, deskW, deskRW, folded: [...folded], listMode, butler, focus: groups.indexOf(focusG),
     groups: groups.map((g) => ({ size: g.size, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
 }
 const allConvs = () => groups.flatMap((g) => g.tabs), convOf = (id) => id && allConvs().find((c) => c.id === id);
@@ -1402,6 +1406,13 @@ function dragSash(el, move) {
   };
 }
 dragSash($('#sideSash'), (x) => { sideW = Math.round(Math.max(200, Math.min(640, x - $('#side').getBoundingClientRect().left))); $('#app').style.setProperty('--sideW', sideW + 'px'); });
+// the 管家's columns: as wide as the window makes them, or as dragged; a double click, back to the window's
+const deskSize = () => { for (const [k, w] of [['--deskW', deskW], ['--deskRW', deskRW]]) if (w) $('#app').style.setProperty(k, w + 'px'); else $('#app').style.removeProperty(k); };
+dragSash($('#deskSash'), (x) => { deskW = Math.round(Math.max(200, Math.min(480, x - $('#desk').getBoundingClientRect().left))); deskSize(); });
+dragSash($('#deskRSash'), (x) => { deskRW = Math.round(Math.max(220, Math.min(480, $('#deskR').getBoundingClientRect().right - x))); deskSize(); });
+$('#deskSash').ondblclick = () => { deskW = null; deskSize(); save(); };
+$('#deskRSash').ondblclick = () => { deskRW = null; deskSize(); save(); };
+deskSize();
 
 // 在右侧打开: the group right of the one in focus, a new one if there's room
 function sideGroup() {
