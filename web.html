@@ -264,23 +264,31 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #butler .send .box { border-radius: 24px; }
   #butler .send .bar { padding: 6px 6px 6px 10px; }
   #butler .send .go { border-radius: 50%; }
-  .send .bsel { display: flex; gap: 6px; flex: none; margin-bottom: 2px; }
-  .send .bsel button { font-size: 12.5px; padding: 5px 12px; border-radius: 16px; background: var(--tint); color: var(--fg2); white-space: nowrap; }
-  .send .bsel button::after { content: ' ▾'; font-size: 10px; }
-  @media (hover: hover) { .send .bsel button:hover { color: var(--fgHi); } }
+  /* one button for them: its account, model and effort at a glance; a card over it to change them */
+  .send .bsel { display: flex; flex: none; margin-bottom: 2px; }
+  .send .bset { display: flex; align-items: center; gap: 6px; padding: 4px 10px 4px 5px; border-radius: 16px; background: var(--tint); color: var(--fg); font-size: 12.5px; white-space: nowrap; }
+  .send .bset .ac { margin: 0; }
+  .send .bset::after { content: ''; width: 5px; height: 5px; margin: -3px 0 0 2px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); opacity: .55; }
+  .send .bset.open::after { transform: rotate(225deg); margin-top: 3px; }
+  @media (hover: hover) { .send .bset:hover { background: var(--hover); } }
   @media (max-width: 759px) { #butler .send .bar { flex-wrap: wrap; } #butler .send .bsel { order: 9; flex-basis: 100%; padding: 2px 0 2px 36px; } }
-  /* its thinking effort: a slider above its button, the level's name over it */
-  .effPop { position: absolute; bottom: calc(100% - 4px); width: 240px; padding: 10px 12px 12px; border-radius: 16px; background: var(--input); border: 1px solid var(--cardB); box-shadow: 0 8px 24px var(--shadow); z-index: 20; }
-  .effPop .lv { text-align: center; font-weight: 600; color: var(--fgHi); margin-bottom: 8px; }
-  .effPop .lv small { display: block; font-weight: 400; font-size: 11.5px; color: var(--fg2); margin-top: 2px; }
-  .effPop .track { position: relative; height: 28px; border-radius: 14px; display: flex; align-items: center; justify-content: space-between; padding: 0 11px;
+  .bPop { position: absolute; bottom: calc(100% - 4px); width: 300px; padding: 6px 14px 14px; border-radius: 16px; background: var(--input); border: 1px solid var(--cardB); box-shadow: 0 12px 32px var(--shadow); z-index: 20; }
+  .bPop .h { display: flex; justify-content: space-between; align-items: baseline; margin: 12px 2px 6px; font-size: 12px; font-weight: 600; color: var(--fg2); }
+  .bPop .h b { font-size: 13px; color: var(--fgHi); } .bPop .h b small { font-weight: 400; color: var(--fg2); margin-left: 4px; }
+  .bPop .seg { display: flex; gap: 3px; padding: 3px; border-radius: 10px; background: var(--tint); }
+  .bPop .seg button { flex: 1; min-width: 0; padding: 6px 2px; border-radius: 8px; font-size: 13px; line-height: 1.25; color: var(--fg2); }
+  .bPop .seg button small { display: block; font-size: 10.5px; color: var(--fg3); }
+  .bPop .seg button.on { background: var(--bg); color: var(--fgHi); font-weight: 600; box-shadow: 0 1px 3px var(--shadow); }
+  @media (hover: hover) { .bPop .seg button:not(.on):hover { color: var(--fgHi); } }
+  .bPop .track { position: relative; height: 28px; border-radius: 14px; display: flex; align-items: center; justify-content: space-between; padding: 0 11px;
     background: linear-gradient(90deg, var(--accent) calc(13px + (100% - 26px) * var(--f, 0)), var(--tint) 0); }
-  .effPop .track i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .35; pointer-events: none; }
-  .effPop input { position: absolute; inset: 0; width: 100%; height: 28px; margin: 0; padding: 0; border: 0; appearance: none; -webkit-appearance: none; background: none; cursor: pointer; }
-  .effPop input::-webkit-slider-runnable-track { height: 28px; background: none; }
-  .effPop input::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; margin-top: 1px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
-  .effPop input::-moz-range-thumb { width: 26px; height: 26px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
-  .effPop input::-moz-range-track { background: none; }
+  .bPop .track i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .35; pointer-events: none; }
+  .bPop .ticks { display: flex; justify-content: space-between; padding: 5px 4px 0; font-size: 11px; color: var(--fg3); }
+  .bPop input { position: absolute; inset: 0; width: 100%; height: 28px; margin: 0; padding: 0; border: 0; appearance: none; -webkit-appearance: none; background: none; cursor: pointer; }
+  .bPop input::-webkit-slider-runnable-track { height: 28px; background: none; }
+  .bPop input::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; margin-top: 1px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+  .bPop input::-moz-range-thumb { width: 26px; height: 26px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+  .bPop input::-moz-range-track { background: none; }
   .hint .pickRow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; }
   .hint .pickRow > span { color: var(--fg2); margin-right: 2px; }
   .hint .pickRow .opt { color: var(--fg); }
@@ -974,7 +982,7 @@ $('#peekBar .back').onclick = unpeek;
 function mountButler(c) {
   // its account and model, by its input box (drawn in drawDesk)
   if (!c.el.querySelector('.bsel')) {
-    c.el.querySelector('.send .go').insertAdjacentHTML('beforebegin', '<div class="bsel"><button data-act="acct"></button><button data-act="model"></button><button data-act="effort"></button></div>');
+    c.el.querySelector('.send .go').insertAdjacentHTML('beforebegin', '<div class="bsel"><button class="bset" data-act="bset" title="账号、模型、思考强度"></button></div>');
     c.el.querySelector('.send').insertAdjacentHTML('afterbegin', `<div class="quick">${QUICK.map((q) => `<button>${q}</button>`).join('')}<button data-hand>交代一件事…</button></div>`);
     c.el.querySelector('.quick').onclick = (e) => {
       const b = e.target.closest('button');
@@ -1008,18 +1016,6 @@ async function setButlerModel(m) { await post('/api/butler-model', { model: m })
 const EFFORTS = [['low', '低', '最快最省'], ['medium', '中', ''], ['high', '高', ''], ['xhigh', '很高', 'Claude 默认'], ['max', '最高', '最慢，额度用得最多']];
 const effortOf = (me) => state?.butlerEffort ?? me?.line?.effort ?? 'xhigh', effortName = (v) => EFFORTS.find(([k]) => k === v)?.[1] ?? v;
 async function setButlerEffort(v) { await post('/api/butler-model', { effort: v }); state.butlerEffort = v; }
-// a few choices in the sheet: the value of the one picked, or null
-function choose(title, opts, cur) {
-  return new Promise((done) => {
-    $('#sheetIn').innerHTML = `<div class="stitle">${esc(title)}</div><div class="opts" style="margin-top:12px">${opts.map((o, i) =>
-      `<button class="opt${o.v === cur ? ' on' : ''}" data-i="${i}">${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</button>`).join('')}</div>
-      <div class="btns"><button class="btn" data-no>取消</button></div>`;
-    const end = (v) => { sheetOff(); done(v); };
-    $('#sheetIn').onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) end(opts[+b.dataset.i].v); else if (e.target.closest('[data-no]')) end(null); };
-    $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') end(null); };
-    $('#sheet').classList.add('on');
-  });
-}
 // A question on a card: its header, the question, its options as buttons (a number badge, or a multi-select's box), each
 // one's description under it; Claude's own two last ones (write in, chat about it) in our words, quieter.
 const OWN_TYPE = /^Type something/i, OWN_CHAT = /^Chat about this/i;
@@ -1131,8 +1127,8 @@ function drawDesk() {
     : '<div class="none">它今天还没替你做事</div>'}`;
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
   $('#deskPc').html = pc ? `<h4>这台电脑</h4>${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
-  const sel = bConv?.el.querySelector('.bsel');
-  if (sel) { sel.children[0].textContent = `账号 ${acct ?? (me ? me.acct + 1 : '?')}`; sel.children[1].textContent = modelName(state.butlerModel ?? me?.line?.model); sel.children[2].textContent = `思考强度 ${effortName(effortOf(me))}`; }
+  const sel = bConv?.el.querySelector('.bset');
+  if (sel) sel.innerHTML = `${ac(acct ?? (me ? me.acct + 1 : 0))}<span>${esc(modelName(state.butlerModel ?? me?.line?.model))} · ${esc(effortName(effortOf(me)))}</span>`;
   $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${todo.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
 }
 $('#desk').onclick = $('#deskR').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
@@ -1673,9 +1669,7 @@ function makeConv(body, title) {
     else if (d.v) setView(d.v);
     else if (d.kb) input(KEYS[+d.kb][1]);
     else if (d.act === 'swap') swap();
-    else if (d.act === 'acct') { if (c.id && state?.sessions.some((x) => x.id === c.id)) swap(); else restartOn(); }
-    else if (d.act === 'model') pickModel();
-    else if (d.act === 'effort') pickEffort(b);
+    else if (d.act === 'bset') bset(b);
     else if (d.act === 'end') endIt();
     else if (d.act === 'resume') { if (c.id) resume(); else start(); } // a new one that never got a record: started again in its folder
     else if (d.key === 'next' || d.key === 'prev') { // several questions: the next or the one before (out of 「Type something」 first: there ← → move in the words)
@@ -1802,47 +1796,60 @@ function makeConv(body, title) {
   // 结束: the conversation's Claude exits, as Ctrl+C in its terminal does. Pressed again until it's gone (at most 4, 0.6 s
   // apart): the first one may only stop an answer, clear what's typed or close a question. Its record stays.
   // the 管家's account, before it has said anything (not listed, nothing to carry over): ended and started on the one picked
-  async function restartOn() {
-    const acct = await choose('管家换到哪个账号', acctOpts(), c.acct);
+  async function restartOn(acct) {
     if (!acct || acct === c.acct) return;
     for (let k = 0; k < 8 && !c.ended && key; k++) { input('\x03'); await new Promise((ok) => setTimeout(ok, 600)); }
     if (!c.ended && key) return toast('没能让它停下来，稍后再试');
     if (bConv === c) bConv = null;
     c.close(); startButler(acct);
   }
-  // its model: kept for its next start, and told to it now with /model (not while it works or asks: typed then, it would
-  // queue, or answer the question)
-  async function pickModel() {
-    const m = await choose('管家用哪个模型', MODELS.map(([v, l, sub]) => ({ v, label: l, sub })), state?.butlerModel);
-    if (!m) return;
-    try { await setButlerModel(m); } catch (e) { return toast(e.message); }
-    drawDesk();
-    if (!key || c.ended) return toast(`下次启动管家会用 ${modelName(m)}`);
-    if (busyNow || menuNow) return toast(`它正忙，已记下：下次启动用 ${modelName(m)}。等它答完再选一次就能马上换`, 4000);
-    input('/model ' + m); setTimeout(() => input('\r'), 500);
-    toast(`管家换成 ${modelName(m)} 了，下一句回复开始生效`);
-  }
-  // its thinking effort: a slider over its button, set on letting go; kept and told as the model is (/effort)
-  function pickEffort(btn) {
-    const was = $p('.effPop');
+  // a model or effort picked: kept for its next start, and told to it now (/model, /effort), not while it works or asks:
+  // typed then, it would queue, or answer the question
+  const tellNow = (cmd, what) => {
+    if (!key || c.ended) return toast(`下次启动管家用${what}`);
+    if (busyNow || menuNow) return toast(`它正忙，已记下：下次启动用${what}。等它答完再选一次就能马上换`, 4000);
+    input(cmd); setTimeout(() => input('\r'), 500);
+    toast(`管家换成${what}了，下一句回复开始生效`);
+  };
+  // its account, model and thinking effort: a card over the one button by its input box (as a chat app has them). Model
+  // and effort set at once; an account goes as 换账号 does (one that hasn't spoken yet: ended, started on it)
+  function bset(btn) {
+    const was = $p('.bPop');
     if (was) return was.close();
-    const send = btn.closest('.send'), cur = Math.max(0, EFFORTS.findIndex(([v]) => v === effortOf(state?.sessions.find(isButler))));
-    send.insertAdjacentHTML('beforeend', `<div class="effPop"><div class="lv"></div><div class="track">${'<i></i>'.repeat(EFFORTS.length)}<input type="range" min="0" max="${EFFORTS.length - 1}" step="1" value="${cur}" aria-label="思考强度"></div></div>`);
-    const pop = $p('.effPop'), r = pop.querySelector('input');
-    pop.style.right = `${Math.max(8, send.getBoundingClientRect().right - btn.getBoundingClientRect().right)}px`;
-    const show = () => { const [, l, sub] = EFFORTS[r.value]; pop.querySelector('.lv').innerHTML = `${l}${sub ? `<small>${sub}</small>` : ''}`; pop.style.setProperty('--f', r.value / (EFFORTS.length - 1)); };
-    show(); r.oninput = show;
-    const off = (e) => { if (!pop.contains(e.target) && !btn.contains(e.target)) close(); }, close = () => { pop.remove(); document.removeEventListener('pointerdown', off, true); };
-    document.addEventListener('pointerdown', off, true); pop.close = close;
-    r.onchange = async () => {
-      const [v, l] = EFFORTS[r.value];
-      try { await setButlerEffort(v); } catch (e) { return toast(e.message); }
-      drawDesk(); close();
-      if (!key || c.ended) return toast(`下次启动管家用「${l}」思考强度`);
-      if (busyNow || menuNow) return toast(`它正忙，已记下：下次启动用「${l}」。等它答完再选一次就能马上换`, 4000);
-      input('/effort ' + v); setTimeout(() => input('\r'), 500);
-      toast(`思考强度换成「${l}」了，下一句回复开始生效`);
+    const send = btn.closest('.send'), me = state?.sessions.find(isButler), accts = state?.usage?.accounts ?? [];
+    send.insertAdjacentHTML('beforeend', '<div class="bPop"></div>');
+    const pop = $p('.bPop');
+    const off = (e) => { if (!pop.contains(e.target) && !btn.contains(e.target)) close(); };
+    const close = () => { pop.remove(); btn.classList.remove('open'); document.removeEventListener('pointerdown', off, true); };
+    document.addEventListener('pointerdown', off, true); pop.close = close; btn.classList.add('open');
+    const draw = () => {
+      const cur = c.acct ?? (me ? me.acct + 1 : 0), m = state?.butlerModel ?? MODELS.find(([, l]) => (me?.line?.model ?? '').startsWith(l))?.[0];
+      const e = Math.max(0, EFFORTS.findIndex(([v]) => v === effortOf(me)));
+      pop.innerHTML = `<div class="h">账号</div><div class="seg">${accts.map((a, i) => `<button class="${i + 1 === cur ? 'on' : ''}" data-ba="${i + 1}">账号 ${i + 1}<small>${a.err ? '读不到' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满'}${state.usage.rec === i ? ' · 推荐' : ''}</small></button>`).join('')}</div>
+        <div class="h">模型</div><div class="seg">${MODELS.map(([v, l, sub]) => `<button class="${v === m ? 'on' : ''}" data-bm="${v}" title="${esc(sub)}">${l}</button>`).join('')}</div>
+        <div class="h">思考强度<b></b></div><div class="track">${'<i></i>'.repeat(EFFORTS.length)}<input type="range" min="0" max="${EFFORTS.length - 1}" step="1" value="${e}" aria-label="思考强度"></div>
+        <div class="ticks"><span>快、省</span><span>想得深</span></div>`;
+      const r = pop.querySelector('input');
+      const show = () => { const [, l, sub] = EFFORTS[r.value]; pop.querySelector('.h b').innerHTML = `${l}${sub ? `<small>${sub}</small>` : ''}`; pop.style.setProperty('--f', r.value / (EFFORTS.length - 1)); };
+      show(); r.oninput = show;
+      r.onchange = async () => {
+        const [v, l] = EFFORTS[r.value];
+        try { await setButlerEffort(v); } catch (er) { return toast(er.message); }
+        drawDesk(); tellNow('/effort ' + v, `「${l}」思考强度`);
+      };
     };
+    pop.onclick = async (ev) => {
+      const b = ev.target.closest('button');
+      if (b?.dataset.ba) { const n = +b.dataset.ba; if (n === (c.acct ?? 0)) return; close(); return c.id && state?.sessions.some((x) => x.id === c.id) ? swap(n) : restartOn(n); }
+      if (b?.dataset.bm) {
+        const v = b.dataset.bm;
+        try { await setButlerModel(v); } catch (er) { return toast(er.message); }
+        drawDesk(); draw(); tellNow('/model ' + v, ` ${modelName(v)} `);
+      }
+    };
+    draw();
+    // over its button, kept inside the box (on a phone the button is at the left)
+    pop.style.right = `${Math.max(8, Math.min(send.clientWidth - pop.offsetWidth - 8, send.getBoundingClientRect().right - btn.getBoundingClientRect().right))}px`;
   }
   async function endIt() {
     if (!key || c.ended || !confirm('结束这个对话？\n和在终端里按 Ctrl+C 一样，Claude 会退出，电脑上它的窗口也会关掉。对话记录会保留，之后可以从列表里接着聊。')) return;
@@ -1853,11 +1860,11 @@ function makeConv(body, title) {
   // now; nothing is sent, it waits for you there. The service does it (/api/switch) and the tab follows: one running in
   // the service comes back as event switched, one in a window on the computer as a new Claude in the same window, found
   // by asking for the conversation until it runs under another key. One not running is simply started on that account.
-  function swap() {
+  function swap(to) { // to: the account already picked (the 管家's card)
     const accts = state?.usage?.accounts ?? [], rec = state?.usage?.rec, cur = (c.acct ?? 1) - 1;
     if (!c.id || !state?.sessions.some((x) => x.id === c.id)) return toast('这个对话还没有消息，不用换账号');
     if (accts.length < 2) return toast('只有一个账号');
-    let acct = rec != null && rec !== cur ? rec + 1 : (cur + 1) % accts.length + 1, now = false;
+    let acct = to ?? (rec != null && rec !== cur ? rec + 1 : (cur + 1) % accts.length + 1), now = false;
     const draw = () => {
       $('#sheetIn').innerHTML = `<div class="stitle">换账号继续</div><div class="m" style="margin-top:4px">${esc(c.title)}</div>
         <div class="m" style="margin-top:14px">换到</div><div class="opts">${accts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}"${i === cur ? ' disabled' : ''}>
