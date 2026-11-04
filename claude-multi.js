@@ -844,10 +844,6 @@ async function chatWait(ref, until, maxMin, note) {
 async function chatSay(ref, text) {
   if (!text) throw new Error('要说什么？');
   const s = findChat(ref), t0 = Date.now();
-  // a budget: three an hour to one conversation (its record of them), or pushing a chatty one spends quota on nothing
-  let sent = 0;
-  try { sent = fs.readFileSync(BLOG, 'utf8').split('\n').filter((l) => { try { const j = JSON.parse(l); return j.id === s.id && j.text.startsWith('给「') && t0 - j.at < 3600000; } catch { return false; } }).length; } catch {}
-  if (sent >= 3) throw new Error(`一小时内已经给「${s.title}」发过 3 条了，先别再推：记成「卡住了」，或者记进「等你决定」问用户。`);
   const { key } = await webPost('/api/open', { id: s.id, acct: s.acct + 1, cols: 120, rows: 40 }); // not running: continued in the web service
   const live = await waitLive((j) => j.sessionId === s.id || j.pid === s.pid || (!s.pid && sameDir(j.cwd, s.cwd) && j.startedAt >= t0 - 5000), 60000);
   if (!live) throw new Error('它没能启动起来');
