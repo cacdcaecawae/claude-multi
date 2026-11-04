@@ -1669,10 +1669,16 @@ function makeConv(body, title) {
     go.title = stop ? '停止（让 Claude 停下）' : '发送'; go.classList.toggle('stop', stop);
   }
   // its height to the words (not while hidden: it would be 0); every change of the words goes through grow, so the
-  // draft is kept there, in this browser by conversation: a phone's page dropped in the background comes back with it
+  // draft is kept there, in this browser by conversation: a phone's page dropped in the background comes back with it.
+  // A message on its way stays in it, before what's typed since (as a failed send puts it back), till its Enter is through
   const fitLine = () => { line.style.height = ''; if (line.scrollHeight) line.style.height = Math.min(line.scrollHeight, 200) + 'px'; };
   const draftKey = () => 'cm-draft:' + c.id;
-  const grow = () => { fitLine(); if (c.id) try { if (line.value.trim()) localStorage.setItem(draftKey(), line.value); else localStorage.removeItem(draftKey()); } catch {} };
+  let going = '';
+  const grow = () => {
+    fitLine();
+    const d = [going, line.value.trim()].filter(Boolean).join('\n');
+    if (c.id) try { if (d) localStorage.setItem(draftKey(), d); else localStorage.removeItem(draftKey()); } catch {}
+  };
   if (c.id) try { line.value = localStorage.getItem(draftKey()) ?? ''; } catch {}
   line.addEventListener('input', () => { goMode(); grow(); });
   let atts = [], sending = false; // the pictures waiting to go, each { url: shown here, up: its upload, to the path }
@@ -1751,12 +1757,12 @@ function makeConv(body, title) {
     const answer = typeNow, tick = typeTick; // what you write for Claude's 「Type something」: pasted into it, then Enter (a multi-select's: none, it's ticked)
     // out of the box at once: what you type while its pictures upload is the next message, not wiped when this one goes
     sending = true; stops++; // a 停止 still watching Claude's input box: this message isn't the one to take back
-    line.value = ''; grow(); atts = []; drawAtts();
+    going = v; line.value = ''; grow(); atts = []; drawAtts();
     const wait = view === 'hist' && !answer && { text: v, imgs: imgs.filter((a) => !a.file).map((a) => a.url), at: Date.now() };
     if (wait) { sent.push(wait); drawLive(true); }
     const back = (why) => { // not sent after all: back in the box, before what you typed since, with its pictures
       if (wait) { sent = sent.filter((s) => s !== wait); drawLive(); }
-      line.value = [v, line.value.trim()].filter(Boolean).join('\n'); grow();
+      going = ''; line.value = [v, line.value.trim()].filter(Boolean).join('\n'); grow();
       atts = [...imgs.filter((a) => !a.failed), ...atts]; drawAtts();
       if (why) toast(why, 4000);
     };
@@ -1790,7 +1796,7 @@ function makeConv(body, title) {
       if (!tick && !(await step('\r'))) return back('回车没发出去，消息放回了输入框（Claude 那边的输入框里可能还留着这段字）');
       if (answer && !tick) typing = null;
       else lastSent = { text, v, imgs, wait };
-    } finally { sending = false; goMode(); }
+    } finally { sending = false; going = ''; grow(); goMode(); } // through (or back in the box): out of the draft
   };
   line.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim()) go.click(); } // only sends; Shift+Enter: a new line
@@ -2336,13 +2342,14 @@ const table = (rows) => {
 };
 // Links, opened in a new tab: [words](address), or an address as it is, on the escaped text (an &amp; in it stays: the
 // attribute reads it as &), up to a space, a tag, a quote, a backtick or Chinese text right after it; its sentence's end
-// not in it. Last: an address in a `code` or **bold** is a link in it, and neither is cut across a link's markup
-const LINK = /\[([^\]\n]+)\]\((https?:\/\/[^\s)<`]+)\)|https?:\/\/(?:[^\s<&`\u3000-\u9fff\uff00-\uffef]|&amp;)+/g;
+// not in it, nor a ")" with no "(" for it in the address (a [words](address) one may hold one pair: a wiki page's).
+// Last: an address in a `code` or **bold** is a link in it, and neither is cut across a link's markup
+const LINK = /\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()<`]|\([^\s()<`]*\))+)\)|https?:\/\/(?:[^\s<&`\u3000-\u9fff\uff00-\uffef]|&amp;)+/g;
 const anchor = (u, words) => `<a href="${u}" target="_blank" rel="noopener">${words}</a>`;
 const link = (m, words, u) => {
   if (u) return anchor(u, words);
   let end = /[.,;:!?]*$/.exec(m)[0], bare = m.slice(0, m.length - end.length);
-  if (bare.endsWith(')') && !bare.includes('(')) { bare = bare.slice(0, -1); end = ')' + end; } // "(see https://…)": its ")" not in it
+  while (bare.endsWith(')') && bare.split(')').length > bare.split('(').length) { bare = bare.slice(0, -1); end = ')' + end; } // "(see https://…)"
   return anchor(bare, bare) + end;
 };
 function md(t) {
