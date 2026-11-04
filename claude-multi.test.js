@@ -415,6 +415,8 @@ console.log('tokens ok');
   assert.equal(md('PR：https://github.com/a/b/pull/7，看看'), `PR：${a('https://github.com/a/b/pull/7')}，看看`);
   assert.equal(md('(见 https://x.com/a)。'), `(见 ${a('https://x.com/a')})。`);
   assert.equal(md('https://w.org/Foo_(bar). x'), `${a('https://w.org/Foo_(bar)')}. x`);
+  assert.equal(md('(https://w.org/Foo_(bar))'), `(${a('https://w.org/Foo_(bar)')})`);             // its own pair kept, the outer ")" not
+  assert.equal(md('[维基](https://w.org/Foo_(bar))。'), `${a('https://w.org/Foo_(bar)', '维基')}。`); // a pair inside [words](address)
   assert.equal(md('q https://a.com/x?a=1&b=2. "https://q.com"'), `q ${a('https://a.com/x?a=1&amp;b=2')}. &quot;${a('https://q.com')}&quot;`);
   assert.equal(md('[文档](https://d.com/p) `https://c.x` **https://b.x**'), `${a('https://d.com/p', '文档')} <code>${a('https://c.x')}</code> <b>${a('https://b.x')}</b>`);
   assert.ok(md('```\nhttps://in.code/x\n```').endsWith('<pre>https://in.code/x</pre></div>'));
