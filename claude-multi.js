@@ -1269,6 +1269,21 @@ function blog(text, id = null) {
     if (fs.statSync(BLOG).size > 262144) fs.writeFileSync(BLOG, fs.readFileSync(BLOG, 'utf8').split('\n').slice(-1000).join('\n'));
   } catch {}
 }
+// what it typed into a conversation (给「…」发了消息：…, 新开了对话（…）：…), the words as logged (their first 40), read
+// again when the log changes
+let blogMemo = { at: -1, list: [] };
+function blogSent(id) {
+  let at = 0; try { at = fs.statSync(BLOG).mtimeMs; } catch { return []; }
+  if (at !== blogMemo.at) {
+    const list = [];
+    for (const l of fs.readFileSync(BLOG, 'utf8').split('\n')) try {
+      const j = JSON.parse(l), m = /^(?:给「[^」]*」发了消息|新开了对话（[^）]*）)：([\s\S]+)$/.exec(j.text ?? '');
+      if (m && j.id) list.push({ id: j.id, at: j.at, text: m[1].replace(/…$/, '').trim() });
+    } catch {}
+    blogMemo = { at, list };
+  }
+  return blogMemo.list.filter((s) => s.id === id);
+}
 // The server, from tunnel.json here (not in the repository): {"ssh": "myserver", "url": "https://<its address>:8443"}.
 // Without it there is no tunnel: the page opens on this computer only. sock: the tunnel's end on the server.
 let TUNNEL = null;
@@ -1432,6 +1447,9 @@ function history(file, { from, end, keep = 120 } = {}) {
     }
   }
   const items = out.filter((o) => !o.gone);
+  // ones the 管家 typed here (chat say, chat new: its log has them, the same words within 3 minutes): not yours
+  const sent = blogSent(path.basename(file, '.jsonl'));
+  if (sent.length) for (const o of items) if (o.role === 'user' && sent.some((s) => Math.abs(s.at - o.at) < 180000 && o.text.startsWith(s.text))) o.by = 'butler';
   let cut = 0;
   if (from == null && items.length > keep) {
     cut = items.length - keep;
@@ -1813,7 +1831,7 @@ async function web() {
       return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         todo: tp.todos.map((x) => x.t), todos: tp.todos, todoDone: tp.lines.slice(0, 5), timeline: timeline(tp.lines), waits: waitsNow() };
     },
-    'GET /api/tokens': (q) => { if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) { tokCache = tokenStats(); tokAt = Date.now(); } return tokCache; },
+    'GET /api/tokens': (q) => { if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) { tokCache = { ...tokenStats(), butler: butlerCost() }; tokAt = Date.now(); } return tokCache; },
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
     'POST /api/push/sub': (q, b) => { // a page's subscription, one per endpoint
       if (!/^https:\/\/[^/]+\//.test(b.endpoint ?? '') || !b.keys?.p256dh || !b.keys?.auth) throw new Error('通知订阅不完整');
@@ -2086,8 +2104,8 @@ async function web() {
     }
   }, 60000);
   // Second part, Haiku, once an hour while something it watches has moved: has each got on, or gone in circles, off
-  // what you asked? One question, nothing kept (no record, no tools, no hooks), the recommended account. It only tells
-  // the 管家, which decides.
+  // what you asked? One question, nothing kept (no record, no tools, no hooks), the recommended account; its answer and
+  // cost as JSON, the cost logged (the 管家's 花费 counts it). It only tells the 管家, which decides.
   let dogAt = Date.now();
   setInterval(() => {
     let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch { return; }
@@ -2096,12 +2114,14 @@ async function web() {
     dogAt = Date.now();
     if (!them.length || !p || usageCache?.open === false) return;
     const what = them.map(({ x, s }) => `## ${x.t}\n用户交代：${x.ask || '（没记）'}\n待办的状态：${x.st}\n盯着的对话「${s.title}」：${s.busy ? '正在回复' : s.wait ? '在等人确认' : s.pid ? '空闲' : '没在运行'}。它最后的回答：${lastWords(s.file, 800)}`).join('\n\n');
-    const c = require('child_process').spawn(claudeExe, ['-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--settings', '{"disableAllHooks":true}'],
+    const c = require('child_process').spawn(claudeExe, ['-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--settings', '{"disableAllHooks":true}', '--output-format', 'json'],
       { cwd: os.tmpdir(), env: childEnv(p.configDir), windowsHide: true, timeout: 180000 });
-    let said = '';
-    c.stdout.setEncoding('utf8'); c.stdout.on('data', (d) => (said += d)); c.on('error', () => {});
+    let out = '';
+    c.stdout.setEncoding('utf8'); c.stdout.on('data', (d) => (out += d)); c.on('error', () => {});
     c.on('close', (code) => {
-      said = said.trim(); log('watchdog', { n: them.length, code, said: said.slice(0, 300) });
+      let j = {}; try { j = JSON.parse(out); } catch {}
+      const said = String(j.result ?? '').trim();
+      log('watchdog', { n: them.length, code, usd: j.total_cost_usd ?? null, said: said.slice(0, 300) });
       if (code === 0 && said && !/^正常/.test(said)) toTell.push({ kind: 'dog', why: said.slice(0, 600) });
     });
     c.stdin.end(`你是看门狗，替用户检查管家盯着的几件事。对每件事判断：它最近有没有实质进展，有没有在原地打转，有没有偏离用户交代的目标。只看下面给的内容，不要猜。全部正常，只回两个字：正常。否则每件有问题的写一行：「事情名」：问题（一句话）。\n\n${what}`);
@@ -2255,6 +2275,38 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
     usd: accounts.reduce((s, a) => s + a.usd, 0), today: day(Date.now()) };
 }
 
+// What the 管家 costs (its replies at the API price, as 用量 counts them), by what woke it: you, the service's
+// [系统通知], a background task of its own; and the watchdog's Haiku questions (logged with their cost). Today, the
+// last 7 days, in all. ponytail: its records read whole each time (cached 30 s with the token counts); keep sizes if slow
+function butlerCost(roots = tokenRoots(), logFile = LOG, now = Date.now()) {
+  const two = (n) => String(n).padStart(2, '0'), day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; };
+  const seen = new Map(), folder = projectFolder(BUTLER); // a reply (its id, its request) → [usd, kind, day], a copy (another account's) once
+  for (const r of roots) {
+    let files = []; try { files = fs.readdirSync(path.join(r.dir, folder)).filter((n) => n.endsWith('.jsonl')); } catch {}
+    for (const n of files) {
+      let kind = 'you';
+      for (const l of fs.readFileSync(path.join(r.dir, folder, n), 'utf8').split('\n')) {
+        let j; try { j = JSON.parse(l); } catch { continue; }
+        if (j.type === 'user' && !j.isMeta) {
+          const c = j.message?.content, t = (typeof c === 'string' ? c : Array.isArray(c) ? c.find((p) => p.type === 'text')?.text : '') ?? '';
+          if (!t || /^<(local-command|command-|system-reminder)/.test(t.trimStart())) continue; // a tool's result, a command: the same turn
+          kind = t.startsWith('[系统通知]') ? 'notice' : t.startsWith('<task-notification>') ? 'bg' : 'you';
+        } else if (j.type === 'assistant' && j.message?.usage) {
+          const u = j.message.usage, w = u.cache_creation_input_tokens ?? 0, w1 = Math.min(w, u.cache_creation?.ephemeral_1h_input_tokens ?? 0), at = Date.parse(j.timestamp);
+          const usd = replyCost([0, 0, u.input_tokens ?? 0, u.output_tokens ?? 0, w - w1, w1, u.cache_read_input_tokens ?? 0, j.message.model, u.speed === 'fast']);
+          const k = `${j.message.id}:${j.requestId ?? ''}`;
+          if (!(seen.get(k)?.[0] >= usd)) seen.set(k, [usd, seen.get(k)?.[1] ?? kind, day(at), j.message.model ?? '']);
+        }
+      }
+    }
+  }
+  try { for (const l of fs.readFileSync(logFile, 'utf8').split('\n')) if (l.includes('"watchdog"') && l.includes('"usd"')) { const j = JSON.parse(l); if (j.usd) seen.set(l, [j.usd, 'dog', day(Date.parse(j.timestamp)), 'claude-haiku-4-5']); } } catch {}
+  const zero = () => ({ usd: 0, n: 0, you: 0, notice: 0, bg: 0, dog: 0, models: {} }), out = { today: zero(), week: zero(), all: zero() };
+  const today = day(now), weekFrom = day(now - 6 * 864e5);
+  for (const [usd, kind, d, m] of seen.values()) for (const [k, on] of [['all', true], ['week', d >= weekFrom], ['today', d === today]]) if (on && usd) { const o = out[k]; o.usd += usd; o[kind] += usd; o.n++; o.models[m] = (o.models[m] ?? 0) + usd; }
+  return out;
+}
+
 const ACCOUNT_COLORS = ['38;2;10;132;255', '38;2;255;159;10', '38;2;191;90;242', '38;2;48;209;88']; // the island's blue, orange, purple, green
 function statusline(input = {}) {
   const paint = (code, s) => (process.env.NO_COLOR ? s : `\x1b[${code}m${s}\x1b[0m`);
@@ -2291,7 +2343,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { parseUntil, todoOpen, todoParts, doneAt, waitsNow, watchedIds, butlerNotice, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { butlerCost, blogSent, parseUntil, todoOpen, todoParts, doneAt, waitsNow, watchedIds, butlerNotice, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

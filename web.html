@@ -346,6 +346,10 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .wt .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .desk .acct .today { font-size: 11.5px; color: var(--fg); margin: 2px 0 4px; }
   .desk .acct .today b { color: var(--orange); }
+  .desk .cost { display: grid; grid-template-columns: 66px 1fr 54px; align-items: center; gap: 8px; padding: 3px 6px; font-size: 12px; }
+  .desk .cost .pill { justify-self: start; } .desk .cost b { text-align: right; color: var(--fgHi); }
+  #deskCost .m { padding: 6px 6px 0; font-size: 11.5px; color: var(--fg2); }
+  #deskCost .sub { padding: 6px 6px 2px; font-size: 11px; color: var(--fg3); }
   /* quick questions over the 管家's input box */
   .send .quick { display: flex; gap: 6px; padding: 0 2px 6px; overflow-x: auto; scrollbar-width: none; }
   .send .quick button { flex: none; font-size: 12px; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--cardB); background: var(--bg); color: var(--fg2); }
@@ -407,6 +411,12 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hOld, .hNew, .live { display: contents; } /* their messages sit in the column's flow */
   .hm { white-space: pre-wrap; word-break: break-word; font-size: 15px; line-height: 1.65; color: var(--msg); } /* the conversation a size up from the frame (13px), for reading */
   .hm.user { align-self: flex-end; max-width: 85%; margin-top: 14px; background: var(--accentBg); color: var(--fgHi); border-radius: 8px 8px 2px 8px; padding: 7px 12px; }
+  /* on your side but not your words: the service waking the 管家, a command, what the 管家 typed, a thing handed to it */
+  .hm.user .lab { display: block; font-size: 11px; font-weight: 600; margin-bottom: 2px; color: var(--fg2); }
+  .hm.user.sys { align-self: center; max-width: min(92%, 680px); border-radius: 10px; background: color-mix(in srgb, var(--orange) 8%, transparent); border: 1px dashed color-mix(in srgb, var(--orange) 40%, transparent); color: var(--fg2); font-size: 12.5px; }
+  .hm.user.sys .lab { color: var(--orange); }
+  .hm.user.cmd { align-self: center; margin-top: 8px; padding: 2px 8px; background: none; color: var(--fg3); font: 12px/1.5 var(--mono); }
+  .hm.user.byb { background: color-mix(in srgb, #d97757 14%, var(--bg)); } .hm.user.byb .lab { color: #d97757; }
   .hm.user.pending { opacity: .5; }
   .hm.tool { font: 12.5px/1.5 var(--mono); color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hm.tool::before { content: '● '; color: var(--green); }
@@ -623,7 +633,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <aside id="side"><div class="sideHead"><span id="sideTitle">对话</span><div id="sideActs"></div></div><div id="view"><div class="empty">加载中…</div></div></aside>
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
-  <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form><div id="deskLog"></div><div id="deskRun"></div><div id="deskAcct"></div><div id="deskPc"></div></aside>
+  <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form><div id="deskLog"></div><div id="deskRun"></div><div id="deskCost"></div><div id="deskAcct"></div><div id="deskPc"></div></aside>
   <div class="sash" id="deskSash" title="拖动调宽窄，双击恢复自动"></div>
   <main id="butler" class="blank"><div id="deskLine"></div><div id="peekBar"><button class="back">← 回到管家</button><span class="t"></span></div><div id="asks"></div><div class="hint"></div></main>
   <div class="sash" id="deskRSash" title="拖动调宽窄，双击恢复自动"></div>
@@ -1108,6 +1118,15 @@ function drawDesk() {
     tokensAt = Date.now();
     tokensNow = fetch('/api/tokens').then((r) => r.json()).then((t) => { tokens = t; setTimeout(drawDesk); return t; }).finally(() => { tokensNow = null; });
   }
+  // what the 管家 itself costs today, by what set it going (its replies at the API price; the watchdog's Haiku logged)
+  const bc = tokens?.butler, COST = [['you', '你问的', 'b', 'a1'], ['notice', '系统通知', 'o', 'orange'], ['bg', '后台任务', 'p', 'purple'], ['dog', '看门狗', 'g', 'green']];
+  // and by model: claude-opus-5-5 → Opus 5.5, its bar in the family's color
+  const mName = (id) => { const m = /claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id ?? ''); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? '.' + m[3] : ''}` : id || '其他'; };
+  const fam = (id) => ({ opus: 'purple', sonnet: 'a1', haiku: 'green', fable: 'orange' })[/claude-([a-z]+)/.exec(id ?? '')?.[1]] ?? 'fg3';
+  const row = (pill, v, color) => `<div class="cost">${pill}<div class="meter"><i style="width:${bc.today.usd ? Math.round((100 * v) / bc.today.usd) : 0}%;background:var(--${color})"></i></div><b>${usd(v)}</b></div>`;
+  $('#deskCost').html = bc ? `<h4>管家花费 · 今天约 ${usd(bc.today.usd)}</h4><div class="sub">按用途</div>${COST.map(([k, l, c, v]) => row(`<span class="pill ${c}">${l}</span>`, bc.today[k], v)).join('')}
+    <div class="sub">按模型</div>${Object.entries(bc.today.models ?? {}).sort((a, b) => b[1] - a[1]).map(([id, v]) => row(`<span class="pill">${esc(mName(id))}</span>`, v, fam(id))).join('') || '<div class="m">今天还没有回复</div>'}
+    <div class="m">今天 ${bc.today.n} 次回复 · 最近 7 天约 ${usd(bc.week.usd)} · 累计约 ${usd(bc.all.usd)}</div>` : '';
   const today = tokens?.days?.find((d) => d.d === tokens.today), all = (d) => (d ? d.i + d.o + d.cw + d.cr : 0);
   const u = state.usage, gauge = (k, p, v) => `<div class="gauge"><div class="k"><span>${k}</span><span>${v}</span></div><div class="meter"><i class="${p >= 85 ? 'bad' : p >= 60 ? 'warn' : ''}" style="width:${Math.min(100, p)}%"></i></div></div>`;
   $('#deskAcct').html = u.accounts?.length ? `<h4>账号${today ? ` · 今天共 ${fmtTok(all(today))} token` : ''}</h4>${u.accounts.map((a, i) => {
@@ -1132,7 +1151,7 @@ function drawDesk() {
   $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${todo.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
 }
 $('#desk').onclick = $('#deskR').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
-const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskRun', 'deskAcct', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id)); };
+const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskRun', 'deskCost', 'deskAcct', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id)); };
 WIDE.addEventListener('change', placeDesk); placeDesk();
 function startButler(acct = startAcct || (state.usage.rec ?? 0) + 1) {
   if (!state?.butler) return toast('网页服务还是旧版本，重启后才能启动管家', 4000);
@@ -2093,6 +2112,16 @@ window.addEventListener('focus', () => shownConvs().forEach((c) => c.claim())); 
 const KIND = { Bash: '命令', PowerShell: '命令', Read: '读文件', Edit: '改文件', Write: '改文件', NotebookEdit: '改文件', Grep: '搜索', Glob: '搜索',
   WebSearch: '查网页', WebFetch: '查网页', Agent: '子任务' };
 const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${Math.floor(s / 3600)} 小时 ${Math.floor(s / 60) % 60} 分`; };
+// a message on your side that isn't your words, each its own way: the service waking the 管家 ([系统通知]), a command
+// (the page's /model, /effort, or one you typed), what the 管家 typed into a conversation (the service knows: by), a
+// thing handed to the 管家 from the 操作台
+function userHtml(m, mark) {
+  const t = m.text, [cls, lab, words] = t.startsWith('[系统通知]') ? ['sys', '🔔 系统通知', t.slice(6).trim()]
+    : /^\/[a-z][\w-]*(\s|$)/.test(t) && !t.includes('\n') ? ['cmd', '', t]
+    : m.by === 'butler' ? ['byb', '管家发的', t]
+    : t.startsWith(HAND) ? ['', '📌 交代给管家', t.slice(HAND.length)] : ['', '', t];
+  return `<div class="hm user${cls ? ' ' + cls : ''}"${mark}>${lab ? `<span class="lab">${lab}</span>` : ''}${md(words)}</div>`;
+}
 function addItems(box, items) {
   for (const m of items) {
     // Claude's answer begins (its words or its first tool call right after your message): marked as Claude's
@@ -2118,8 +2147,7 @@ function addItems(box, items) {
       continue;
     }
     if (m.role !== 'tool') {
-      box.insertAdjacentHTML('beforeend', m.role === 'done' ? `<div class="hm done">✓ 回复完成 · 用时 ${dur(+m.text)}</div>`
-        : `<div class="hm ${m.role}"${mark}>${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
+      box.insertAdjacentHTML('beforeend', m.role === 'user' ? userHtml(m, mark) : `<div class="hm ${m.role}"${mark}>${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
       continue;
     }
     const words = []; // Claude's words since the turn's 过程 (or its start): on the way after all

@@ -602,3 +602,22 @@ console.log('tokens ok');
   assert.equal(todoParts('## 声速场\n- 原话：盯着声速场做完\n- 状态：在跑\n').todos[0].ask, '盯着声速场做完');
   console.log('butler notice ok');
 }
+
+// What the 管家 costs, by what set it going: you, a [系统通知], a background task (a tool's result in between keeps
+// the one before), a reply counted once however many lines carry it, the watchdog's logged Haiku; by model too
+{
+  const { butlerCost } = require('./claude-multi'), os = require('os'), path = require('path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-cost-')), dir = path.join(tmp, 'projects', path.join(__dirname, 'butler').replace(/[^a-zA-Z0-9]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  const T = new Date().toISOString(), u = (content) => ({ type: 'user', timestamp: T, message: { content } });
+  const a = (id, usage) => ({ type: 'assistant', timestamp: T, requestId: 'r' + id, message: { id, model: 'claude-sonnet-5', usage } });
+  fs.writeFileSync(path.join(dir, 's.jsonl'), [u('你好'), a('m1', { input_tokens: 1e6 }), a('m1', { input_tokens: 1e6 }), u('[系统通知] 有动静'), a('m2', { output_tokens: 1e5 }),
+    u([{ type: 'tool_result', content: 'ok' }]), a('m3', { input_tokens: 5e5 }), u('<task-notification>\n<status>completed</status>'), a('m4', { input_tokens: 1e6 })].map((x) => JSON.stringify(x)).join('\n'));
+  const log = path.join(tmp, 'events.jsonl');
+  fs.writeFileSync(log, JSON.stringify({ timestamp: T, event: 'watchdog', usd: 0.01 }) + '\n');
+  const c = butlerCost([{ dir: path.join(tmp, 'projects') }], log).today, r = (x) => Math.round(x * 100) / 100;
+  assert.deepEqual([r(c.you), r(c.notice), r(c.bg), r(c.dog), c.n], [2, 2, 2, 0.01, 5]);
+  assert.deepEqual(Object.fromEntries(Object.entries(c.models).map(([k, v]) => [k, r(v)])), { 'claude-sonnet-5': 6, 'claude-haiku-4-5': 0.01 });
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log('butler cost ok');
+}
