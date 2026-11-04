@@ -1334,16 +1334,18 @@ const notesUnseen = (notes, seenTo, now = Date.now()) => notes.filter((n) => n.a
 // on a question as held; each is news for the 管家. Taken twice (the tickets saved, the place not, when the service
 // ended), a note changes nothing: each is kept once, by its time, and only those after the ticket was given to this
 // conversation count. The ids of the tickets with news; a turn you set going yourself (quiet) is kept, not news: you're
-// there, the 管家 stays out of it.
+// there, the 管家 stays out of it. Unless the worker reported in it (做完, a question): that still goes to the 管家, to
+// check the result against what you asked and close the ticket.
 function notesInto(all, notes, words, quiet = () => false) {
   const news = new Set();
   for (const n of notes) for (const t of all) {
     if (!n.id || t.end || t.conv !== n.id) continue;
     const ev = t.ev ?? [], given = ev.findLast((e) => e.k === 'give')?.at ?? 0;
     if (n.at <= given || ev.some((e) => (e.k === 'stop' || e.k === 'held') && e.at === n.at)) continue;
+    const from = ev.findLast((e) => e.k === 'stop')?.at ?? given, said = ev.some((e) => (e.k === 'ask' || REPORT_WORDS.includes(e.k)) && e.at > from && e.at <= n.at);
     (t.ev ??= []).push(n.kind === 'done' ? { at: n.at, k: 'stop', text: words(n.id) } : { at: n.at, k: 'held', text: '' });
     t.ev.splice(0, Math.max(0, t.ev.length - 60));
-    if (!quiet(n)) news.add(t.id);
+    if (!quiet(n) || said) news.add(t.id);
   }
   return [...news];
 }
@@ -1354,7 +1356,10 @@ function notesInto(all, notes, words, quiet = () => false) {
 function turnBy(prompt, sent, at) {
   const flat = (t) => String(t ?? '').replace(/\s+/g, ' ').trim(), p = flat(prompt);
   if (!p) return null;
-  return sent.some((s) => s.at <= at + 60000 && at - s.at < 6 * 3600e3 && p.startsWith(flat(s.text))) ? 'butler' : 'you';
+  // the log keeps a message whole up to 40 characters, else its first 40: a short one (「继续」) must be the very words,
+  // or the user's own 「继续做第三部分」 would pass for it
+  const same = (s) => { const w = flat(s.text); return s.text.length >= 40 ? p.startsWith(w) : p === w; };
+  return sent.some((s) => s.at <= at + 60000 && at - s.at < 6 * 3600e3 && same(s)) ? 'butler' : 'you';
 }
 // of the tickets queued for the 管家: those to tell now, each as it stands, and those kept (back at work, or so a list read
 // a moment ago says: told once they stop)
