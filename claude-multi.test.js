@@ -641,7 +641,7 @@ console.log('tokens ok');
 // ticket; the notes a restart came between are still taken (from where the last service left off); a link to the
 // claude-multi in use is it
 {
-  const { ticketOp, stageOf, tellAgain, readSeen, notesUnseen, notesInto, inLive } = require('./claude-multi'), os = require('os'), path = require('path');
+  const { ticketOp, stageOf, tellAgain, readSeen, allNotes, notesUnseen, notesInto, inLive } = require('./claude-multi'), os = require('os'), path = require('path');
   const all = [], op = (b, at) => ticketOp(all, b, at), s = (id) => ({ id, pid: 9, busy: false, wait: false });
   const t = op({ op: 'new', name: 'T', ask: 't' }, 1);
   op({ op: 'give', id: t.id, conv: 'c1', n: 1 }, 2);
@@ -659,21 +659,36 @@ console.log('tokens ok');
   assert.deepEqual(tellAgain(tries, [2, 1]), [2, 1]); // 1 dropped last time: counted from the start again
   // notes: after where the last service left off (a restart in between), 1.5 s old at least, oldest first
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'seen-')), f = path.join(dir, 'tickets-seen.json');
-  assert.equal(readSeen(f, 500), 500); // never: from now
+  assert.equal(readSeen(f), 0); // never saved: from the start (safe: a note taken twice changes nothing)
   fs.writeFileSync(f, '100');
-  assert.equal(readSeen(f, 500), 100); // the last service's
-  const notes = [{ at: 5000, id: 'c2', kind: 'done' }, { at: 300, id: 'c9', kind: 'ask' }, { at: 200, id: 'c2', kind: 'done' }, { at: 90, id: 'c2', kind: 'done' }]; // newest first, as read
+  assert.equal(readSeen(f), 100); // the last service's
+  const notes = [{ at: 90, id: 'c2', kind: 'done' }, { at: 200, id: 'c2', kind: 'done' }, { at: 300, id: 'c9', kind: 'ask' }, { at: 5000, id: 'c2', kind: 'done' }]; // oldest first, as in the file
   assert.deepEqual(notesUnseen(notes, 100, 5500).map((n) => n.at), [200, 300]); // 90 taken already, 5000 too new
-  const tk = [{ id: 1, conv: 'c2', ev: [] }, { id: 2, conv: 'c9', ev: [] }, { id: 3, conv: 'c2', ev: [], end: { at: 1 } }];
+  const tk = [{ id: 1, conv: 'c2', ev: [{ at: 50, k: 'give' }] }, { id: 2, conv: 'c9', ev: [] }, { id: 3, conv: 'c2', ev: [], end: { at: 1 } }];
   assert.deepEqual(notesInto(tk, notesUnseen(notes, 100, 5500), (id) => `${id} 的最后一句`), [1, 2]);
-  assert.deepEqual(tk[0].ev, [{ at: 200, k: 'stop', text: 'c2 的最后一句' }]); // a turn ended: kept
-  assert.deepEqual(tk[1].ev, []); // stopped on a question: news, nothing kept
+  assert.deepEqual(tk[0].ev.slice(1), [{ at: 200, k: 'stop', text: 'c2 的最后一句' }]); // a turn ended: kept
+  assert.deepEqual(tk[1].ev, [{ at: 300, k: 'held', text: '' }]); // stopped on a question: kept as held
   assert.deepEqual(tk[2].ev, []); // ended: left alone
+  // taken again (the tickets were saved, the place wasn't, when the service ended): nothing changes, no news
+  assert.deepEqual(notesInto(tk, notesUnseen(notes, 100, 5500), () => '又一次'), []); // the same notes, from the same place
+  assert.equal(tk[0].ev.length, 2); assert.equal(tk[1].ev.length, 1);
+  // so a ticket waiting for your review stays so (a second stop at the same time made it 停下了)
+  const r = { id: 4, conv: 'c4', n: 1, ev: [{ at: 10, k: 'give' }, { at: 20, k: '做完', text: '好了' }] };
+  notesInto([r], [{ at: 30, id: 'c4', kind: 'done' }], () => ''); notesInto([r], [{ at: 30, id: 'c4', kind: 'done' }], () => '');
+  assert.deepEqual(stageOf(r, s('c4')), ['等你验收', 'you', '好了']);
+  // one from before the ticket was given to this conversation isn't its
+  assert.deepEqual(notesInto([{ id: 5, conv: 'c5', ev: [{ at: 100, k: 'give' }] }], [{ at: 100, id: 'c5', kind: 'done' }, { at: 60, id: 'c5', kind: 'done' }], () => ''), []);
+  // a backlog of any length: 40 notes piled up after the place, all of them read
+  const nf = path.join(dir, 'notes.jsonl');
+  fs.writeFileSync(nf, Array.from({ length: 45 }, (_, i) => JSON.stringify({ at: 1000 + i, id: 'c2', kind: 'done' })).join('\n') + '\n');
+  assert.equal(notesUnseen(allNotes(nf), 1004, 9999).length, 40);
+  assert.deepEqual(allNotes(path.join(dir, 'none.jsonl')), []);
+  fs.rmSync(nf);
   // a link (a junction on Windows) to the claude-multi in use is it
   const link = path.join(dir, 'link');
   fs.symlinkSync(__dirname, link, 'junction');
   assert.ok(inLive(link) && inLive(path.join(link, 'butler')));
-  fs.rmdirSync(link); fs.rmSync(f); fs.rmdirSync(dir);
+  fs.unlinkSync(link); fs.rmSync(f); fs.rmdirSync(dir); // the link alone (a junction too), never through it
   console.log('ticket review 2 ok');
 }
 

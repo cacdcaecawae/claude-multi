@@ -1316,17 +1316,26 @@ function stageOf(t, s) {
   if (r) return [r.k === '失败' ? '失败' : '卡住了', 'stuck', r.text];
   return ['停下了', 'idle', s?.pid ? (stops.at(-1)?.text ?? '') : '没在运行'];
 }
-// The notes tickets haven't taken yet: after where the last service left off (its file; none: from now), each 1.5 s old
-// at least (Claude writes its last words after the note), oldest first
+// The notes tickets haven't taken yet: all of the file (notify keeps it under 256 KB: a backlog of any length a restart
+// leaves is there), after where the last service left off (its file; none: from the start, which notesInto makes safe),
+// each 1.5 s old at least (Claude writes its last words after the note), oldest first.
+// ponytail: notify trims the file to its last 200 notes past 256 KB: more than that piling up unread would lose the rest
 const TICKETS_SEEN = path.join(ROOT, 'tickets-seen.json');
-function readSeen(f = TICKETS_SEEN, now = Date.now()) { try { return Number(JSON.parse(fs.readFileSync(f, 'utf8'))) || now; } catch { return now; } }
-const notesUnseen = (notes, seenTo, now = Date.now()) => notes.filter((n) => n.at > seenTo && now - n.at > 1500).reverse();
-// and what they do to the open tickets: a turn ended (done) is kept with its last words (what it stopped on); either
-// kind (done, or stopped on a question) is news for the 管家. The ids of the tickets with news.
+function readSeen(f = TICKETS_SEEN) { try { return Number(JSON.parse(fs.readFileSync(f, 'utf8'))) || 0; } catch { return 0; } }
+function allNotes(f = NOTES) { try { return fs.readFileSync(f, 'utf8').split('\n').flatMap((l) => { try { return l ? [JSON.parse(l)] : []; } catch { return []; } }); } catch { return []; } }
+const notesUnseen = (notes, seenTo, now = Date.now()) => notes.filter((n) => n.at > seenTo && now - n.at > 1500);
+// and what they do to the open tickets: a turn ended (done) is kept with its last words (what it stopped on), one stopped
+// on a question as held; each is news for the 管家. Taken twice (the tickets saved, the place not, when the service
+// ended), a note changes nothing: each is kept once, by its time, and only those after the ticket was given to this
+// conversation count. The ids of the tickets with news.
 function notesInto(all, notes, words) {
   const news = new Set();
-  for (const n of notes) for (const t of all) if (n.id && !t.end && t.conv === n.id) {
-    if (n.kind === 'done') { (t.ev ??= []).push({ at: n.at, k: 'stop', text: words(n.id) }); t.ev.splice(0, Math.max(0, t.ev.length - 60)); }
+  for (const n of notes) for (const t of all) {
+    if (!n.id || t.end || t.conv !== n.id) continue;
+    const ev = t.ev ?? [], given = ev.findLast((e) => e.k === 'give')?.at ?? 0;
+    if (n.at <= given || ev.some((e) => (e.k === 'stop' || e.k === 'held') && e.at === n.at)) continue;
+    (t.ev ??= []).push(n.kind === 'done' ? { at: n.at, k: 'stop', text: words(n.id) } : { at: n.at, k: 'held', text: '' });
+    t.ev.splice(0, Math.max(0, t.ev.length - 60));
     news.add(t.id);
   }
   return [...news];
@@ -1872,14 +1881,14 @@ async function web() {
 
   // A ticket's conversation ended a turn (its last words kept: what it stopped on), or stopped on a question: the 管家 told.
   // Read from where the last service left off (kept in a file): one written just before a restart, or during it, isn't
-  // missed (phones go on from the start: older ones were the island's).
+  // missed; one taken twice changes nothing (notesInto). Phones go on from the start: older ones were the island's.
   let seenTo = readSeen();
   setInterval(() => {
-    const fresh = notesUnseen(readNotes(30), seenTo);
+    const fresh = notesUnseen(allNotes(), seenTo);
     if (!fresh.length) return;
     try {
       const words = (id) => lastWords(sessions().find((x) => x.id === id)?.file, 300);
-      if (fresh.some((n) => n.id && readTickets().some((t) => !t.end && t.conv === n.id)))
+      if (fresh.some((n) => n.id && readTickets().some((t) => !t.end && t.conv === n.id))) // the tickets first, then the place
         for (const i of editTickets((all) => notesInto(all, fresh, words))) { toTell.add(i); tries.delete(i); } // news: its tries start again
       seenTo = fresh.at(-1).at;
       fs.writeFileSync(TICKETS_SEEN, JSON.stringify(seenTo));
@@ -2454,7 +2463,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { inLive, keepDefaults, butlerCost, blogSent, parseUntil, todoOpen, ticketOp, stageOf, tellSplit, tellAgain, readSeen, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { inLive, keepDefaults, butlerCost, blogSent, parseUntil, todoOpen, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
