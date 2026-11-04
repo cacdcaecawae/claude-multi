@@ -293,8 +293,18 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hint .pickRow > span { color: var(--fg2); margin-right: 2px; }
   .hint .pickRow .opt { color: var(--fg); }
   #app.butler #desk { display: flex; }
-  .desk:empty, .desk > div:empty, #deskLine { display: none; }
-  .desk h4 { margin: 0 0 6px; padding: 0 6px; font-size: 11px; font-weight: 600; color: var(--fg2); }
+  .desk:empty, .desk > div:empty, #deskLine, .desk .dsec:has(> div:empty) { display: none; }
+  /* each part a section you can fold: its title over what's in it (bigger, darker), the line on its right still telling
+     you something when it's closed, a rule between sections */
+  .desk .dsec { border-top: 1px solid var(--border); padding-top: 10px; }
+  .desk > .dsec:first-child { border-top: 0; padding-top: 0; }
+  .desk .dsec > summary { list-style: none; cursor: pointer; padding-bottom: 8px; } .desk .dsec > summary::-webkit-details-marker { display: none; }
+  .desk .dsec:not([open]) > summary { padding-bottom: 0; }
+  .desk h4 { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 6px; font-size: 13px; font-weight: 700; color: var(--fgHi); }
+  .desk h4 .dg { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .desk h4::after { content: ''; flex: none; width: 6px; height: 6px; margin: 0 2px 0 4px; border: solid var(--fg3); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); transition: transform .15s; }
+  .desk .dsec[open] > summary h4::after { transform: rotate(45deg); margin-top: -4px; }
+  @media (hover: hover) { .desk .dsec > summary:hover h4::after { border-color: var(--fgHi); } }
   .desk .me { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
   .desk .me .spark { width: 34px; height: 34px; flex: none; color: #d97757; }
   .desk .me.busy .spark { animation: spin 6s linear infinite; }
@@ -312,7 +322,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .item .pt { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #d97757; }
   .desk .counts { display: flex; gap: 6px; padding: 0 6px 6px; }
   .desk .counts span { flex: 1; text-align: center; padding: 4px 0; border-radius: 6px; background: var(--tint); font-size: 11px; color: var(--fg2); }
-  .desk .counts b { display: block; font-size: 15px; color: var(--fgHi); }
+  .desk .counts b { display: block; font-size: 14px; color: var(--fgHi); }
   .desk .counts span.o, .desk .counts span.g { color: var(--orange); background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
   .desk .counts span.g { color: var(--green); } .desk .counts span.o b, .desk .counts span.g b { color: inherit; }
   .desk .none { padding: 0 6px; font-size: 12px; color: var(--fg3); }
@@ -350,6 +360,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .cost .pill { justify-self: start; } .desk .cost b { text-align: right; color: var(--fgHi); }
   #deskCost .m { padding: 6px 6px 0; font-size: 11.5px; color: var(--fg2); }
   #deskCost .sub { padding: 6px 6px 2px; font-size: 11px; color: var(--fg3); }
+  #deskAcct .tot { padding: 0 6px 2px; font-size: 11.5px; color: var(--fg2); }
   /* quick questions over the 管家's input box */
   .send .quick { display: flex; gap: 6px; padding: 0 2px 6px; overflow-x: auto; scrollbar-width: none; }
   .send .quick button { flex: none; font-size: 12px; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--cardB); background: var(--bg); color: var(--fg2); }
@@ -359,7 +370,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .acct { padding: 8px 6px 4px; }
   .desk .acct + .acct { border-top: 1px solid var(--border); }
   .desk .ah { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-  .desk .ah b { color: var(--fgHi); }
+  .desk .ah b { font-size: 13px; color: var(--fgHi); }
   .desk .acct .gauge { padding: 0 0 6px; }
   .desk .acct .m { font-size: 11.5px; color: var(--fg3); }
   /* a conversation looked at in its place: 「← 回到管家」 over it, the 管家's own things put away meanwhile */
@@ -633,7 +644,13 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <aside id="side"><div class="sideHead"><span id="sideTitle">对话</span><div id="sideActs"></div></div><div id="view"><div class="empty">加载中…</div></div></aside>
   <div class="sash" id="sideSash"></div>
   <main id="editor"></main>
-  <aside id="desk" class="desk"><div id="deskMe"></div><div id="deskTodo"></div><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form><div id="deskLog"></div><div id="deskRun"></div><div id="deskCost"></div><div id="deskAcct"></div><div id="deskPc"></div></aside>
+  <aside id="desk" class="desk"><div id="deskMe"></div>
+    <details class="dsec" data-sec="todo" open><summary><h4></h4></summary><div id="deskTodo"></div></details><form id="deskAdd"><input placeholder="交代一件事，比如：rag检索 跑完告诉我结果" enterkeyhint="send"><button>交代</button></form>
+    <details class="dsec" data-sec="log" open><summary><h4></h4></summary><div id="deskLog"></div></details>
+    <details class="dsec" data-sec="run" open><summary><h4></h4></summary><div id="deskRun"></div></details>
+    <details class="dsec" data-sec="cost"><summary><h4></h4></summary><div id="deskCost"></div></details>
+    <details class="dsec" data-sec="acct"><summary><h4></h4></summary><div id="deskAcct"></div></details>
+    <details class="dsec" data-sec="pc"><summary><h4></h4></summary><div id="deskPc"></div></details></aside>
   <div class="sash" id="deskSash" title="拖动调宽窄，双击恢复自动"></div>
   <main id="butler" class="blank"><div id="deskLine"></div><div id="peekBar"><button class="back">← 回到管家</button><span class="t"></span></div><div id="asks"></div><div class="hint"></div></main>
   <div class="sash" id="deskRSash" title="拖动调宽窄，双击恢复自动"></div>
@@ -719,6 +736,7 @@ const FINE = matchMedia('(pointer: fine)').matches, FONT = FINE ? 14 : 13; // FI
 const saved = (() => { try { return JSON.parse(localStorage.getItem('cm-layout')) ?? {}; } catch { return {}; } })();
 let side = ['chats', 'usage', 'tokens'].includes(saved.side) ? saved.side : 'chats', sideOn = saved.sideOn ?? true, sideW = saved.sideW ?? 300;
 let deskW = saved.deskW ?? null, deskRW = saved.deskRW ?? null; // the 管家's columns as dragged (null: as the window makes them)
+const secs = saved.secs ?? {}; // its 操作台's sections opened or closed by you (by data-sec), the rest as the page has them
 let state = null, tokens = null, tokensNow = null, tokensAt = 0, groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
 let listMode = saved.listMode === 'run' ? 'run' : 'dirs'; // 对话: by folder, or (the bell) 提示 and the running ones
@@ -726,7 +744,7 @@ let butler = !!saved.butler, bConv = null, peek = null; // 管家 mode (the spar
 $('#app').classList.toggle('butler', butler);
 $('#act .logo .label').textContent = butler ? '退出管家' : '管家'; // reloaded in it: says what the spark does
 function save() { // not before the tabs are back: a first load that failed would forget them
-  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, deskW, deskRW, folded: [...folded], listMode, butler, focus: groups.indexOf(focusG),
+  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, deskW, deskRW, secs, folded: [...folded], listMode, butler, focus: groups.indexOf(focusG),
     groups: groups.map((g) => ({ size: g.size, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
 }
 const allConvs = () => groups.flatMap((g) => g.tabs), convOf = (id) => id && allConvs().find((c) => c.id === id);
@@ -1078,6 +1096,8 @@ function mood(up, thinking, run, decide = 0) {
   if (busy) return [busy >= 3 ? '💪' : '🙂', `盯着 ${busy} 个在干活的对话`];
   return ['😌', '一切顺利，很清闲'];
 }
+// a section's title, and on its right what it comes to (what a closed one still tells you)
+const head = (id, title, digest) => { $('#' + id).parentElement.querySelector('h4').html = `${title}<span class="dg">${esc(digest)}</span>`; };
 function drawDesk() {
   if (!butler || !state) return;
   const me = state.sessions.find(isButler), run = state.sessions.filter((x) => x.pid && !isButler(x)), todo = state.todo ?? [], pc = state.pc;
@@ -1108,11 +1128,14 @@ function drawDesk() {
   const loose = waits.filter((w) => !used.has(w)).map((w) => (w.until
     ? `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="pill b">还有 ${mins(w.until - Date.now())}</span></div>`
     : `<div class="wt"${w.id ? ` data-open="${esc(w.id)}"` : ''}><span>⏳</span><span class="t">等「${esc(w.title ?? '')}」${w.note ? ' · ' + esc(w.note) : ''}</span><span class="pill o">已等 ${mins(Date.now() - w.at)}</span></div>`)).join('');
-  $('#deskTodo').html = `<h4>任务${todos.length ? `<b class="count">${todos.length}</b>` : ''}</h4>${cards || loose ? cards + loose
+  const nYou = todos.filter((x) => /^等你/.test(x.st)).length;
+  head('deskTodo', `任务${todos.length ? `<b class="count">${todos.length}</b>` : ''}`, nYou ? `${nYou} 件等你定` : '');
+  $('#deskTodo').html = `${cards || loose ? cards + loose
     : '<div class="none">还没有任务。在下面交代一件，或者跟管家说「盯着某个对话，做完告诉我」「15:40 提醒我看额度」</div>'}
     ${(state.todoDone ?? []).slice(0, 3).map((l) => `<div class="doneL" title="${esc(l)}"><b>✓</b> ${esc(l)}</div>`).join('')}`;
   const tag = (x) => (x.wait ? '<span class="pill o">等你</span>' : x.busy ? '<span class="pill g">在回复</span>' : '<span class="pill">空闲</span>');
-  $('#deskRun').html = `<h4>对话</h4><div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
+  head('deskRun', '对话', `${run.length} 个在运行${wait.length ? ` · ${wait.length} 个等你` : ''}`);
+  $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
     ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" title="${esc(x.cwd)}"><i class="ad" style="background:${ACCT[x.acct % 4]}"></i><span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
   if (!tokensNow && Date.now() - tokensAt > 120000) {
     tokensAt = Date.now();
@@ -1124,12 +1147,15 @@ function drawDesk() {
   const mName = (id) => { const m = /claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id ?? ''); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? '.' + m[3] : ''}` : id || '其他'; };
   const fam = (id) => ({ opus: 'purple', sonnet: 'a1', haiku: 'green', fable: 'orange' })[/claude-([a-z]+)/.exec(id ?? '')?.[1]] ?? 'fg3';
   const row = (pill, v, color) => `<div class="cost">${pill}<div class="meter"><i style="width:${bc.today.usd ? Math.round((100 * v) / bc.today.usd) : 0}%;background:var(--${color})"></i></div><b>${usd(v)}</b></div>`;
-  $('#deskCost').html = bc ? `<h4>管家花费 · 今天约 ${usd(bc.today.usd)}</h4><div class="sub">按用途</div>${COST.map(([k, l, c, v]) => row(`<span class="pill ${c}">${l}</span>`, bc.today[k], v)).join('')}
+  head('deskCost', '管家花费', bc ? `今天约 ${usd(bc.today.usd)}` : '');
+  $('#deskCost').html = bc ? `<div class="sub">按用途</div>${COST.map(([k, l, c, v]) => row(`<span class="pill ${c}">${l}</span>`, bc.today[k], v)).join('')}
     <div class="sub">按模型</div>${Object.entries(bc.today.models ?? {}).sort((a, b) => b[1] - a[1]).map(([id, v]) => row(`<span class="pill">${esc(mName(id))}</span>`, v, fam(id))).join('') || '<div class="m">今天还没有回复</div>'}
     <div class="m">今天 ${bc.today.n} 次回复 · 最近 7 天约 ${usd(bc.week.usd)} · 累计约 ${usd(bc.all.usd)}</div>` : '';
   const today = tokens?.days?.find((d) => d.d === tokens.today), all = (d) => (d ? d.i + d.o + d.cw + d.cr : 0);
   const u = state.usage, gauge = (k, p, v) => `<div class="gauge"><div class="k"><span>${k}</span><span>${v}</span></div><div class="meter"><i class="${p >= 85 ? 'bad' : p >= 60 ? 'warn' : ''}" style="width:${Math.min(100, p)}%"></i></div></div>`;
-  $('#deskAcct').html = u.accounts?.length ? `<h4>账号${today ? ` · 今天共 ${fmtTok(all(today))} token` : ''}</h4>${u.accounts.map((a, i) => {
+  const ra = u.accounts?.[u.rec];
+  head('deskAcct', '账号', !u.open ? '都到上限了' : ra ? `推荐 ${u.rec + 1} · 可连续用 ${ra.runway}h` : '');
+  $('#deskAcct').html = u.accounts?.length ? `${today ? `<div class="m tot">今天共 ${fmtTok(all(today))} token</div>` : ''}${u.accounts.map((a, i) => {
     const on = state.sessions.filter((x) => x.pid && x.acct === i).length;
     return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="pill g">推荐</span>' : ''}<span class="grow"></span><span class="pill ${a.err ? '' : a.runway >= 2 ? 'g' : a.runway > 0 ? 'o' : 'r'}">${a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
       ${a.err ? '' : (a.windows ?? []).filter((w) => w.k === 'five_hour' || w.k === 'seven_day').map((w) => gauge(w.k === 'five_hour' ? '5 小时' : '7 天', w.pct, `${w.pct}% · ${esc(w.reset)}后重置`)).join('')}
@@ -1141,17 +1167,20 @@ function drawDesk() {
   const KINDS = [[/^给(「[^」]*」)发了消息：?/, '发消息', 'b', '$1：'], [/^等到了/, '等到', 'p', ''], [/^替你给?/, '替你选', 'o', ''], [/^新开了对话/, '新开', 'g', ''],
     [/^提醒到点：?/, '提醒', 'o', ''], [/^告诉了你：?/, '告诉你', 'k', ''], [/^完成：?/, '完成', 'g', '']];
   const kindOf = (e) => { for (const [re, w, c, to] of KINDS) if (re.test(e.text)) return [w, c, e.text.replace(re, to)]; return e.kind === 'todo' ? ['完成', 'g', e.text] : ['管家', 'k', e.text]; };
-  $('#deskLog').html = `<h4>今天做了</h4>${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id), [w, c, t] = kindOf(e);
+  head('deskLog', '今天做了', tl.length ? `${tl.length} 件` : '');
+  $('#deskLog').html = `${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id), [w, c, t] = kindOf(e);
     return `<div class="ev"${open ? ` data-open="${esc(e.id)}"` : ''}><span class="when">${hm(e.at)}</span><span class="pill ${c}">${w}</span><span class="t" title="${esc(e.text)}">${esc(t)}</span></div>`; }).join('')
     : '<div class="none">它今天还没替你做事</div>'}`;
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
-  $('#deskPc').html = pc ? `<h4>这台电脑</h4>${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
+  head('deskPc', '这台电脑', pc?.cpu != null ? `CPU ${pc.cpu}% · 内存 ${memPct}%` : '');
+  $('#deskPc').html = pc ? `${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
   const sel = bConv?.el.querySelector('.bset');
   if (sel) sel.innerHTML = `${ac(acct ?? (me ? me.acct + 1 : 0))}<span>${esc(modelName(state.butlerModel ?? me?.line?.model))} · ${esc(effortName(effortOf(me)))}</span>`;
   $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${todo.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
 }
 $('#desk').onclick = $('#deskR').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
-const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskRun', 'deskCost', 'deskAcct', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id)); };
+const WIDE = matchMedia('(min-width: 1280px)'), placeDesk = () => { for (const id of ['deskRun', 'deskCost', 'deskAcct', 'deskPc']) (WIDE.matches ? $('#deskR') : $('#desk')).append($('#' + id).parentElement); };
+document.querySelectorAll('.desk .dsec').forEach((d) => { if (d.dataset.sec in secs) d.open = secs[d.dataset.sec]; d.ontoggle = () => { secs[d.dataset.sec] = d.open; save(); }; });
 WIDE.addEventListener('change', placeDesk); placeDesk();
 function startButler(acct = startAcct || (state.usage.rec ?? 0) + 1) {
   if (!state?.butler) return toast('网页服务还是旧版本，重启后才能启动管家', 4000);
