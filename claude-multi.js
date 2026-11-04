@@ -2046,7 +2046,7 @@ async function web() {
     const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
     for (const id of ranBefore) {
       const s = all.find((x) => x.id === id), p = s && !s.pid && s !== me && reg.profiles[s.acct];
-      if (p) { startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); }
+      if (p) try { startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
     }
     let todo = ''; try { todo = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
     const open = todoOpen(todo), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
@@ -2065,8 +2065,9 @@ async function web() {
   // The watchdog. First part, no model: a conversation its 待办 has as going on (not 等你决定 or 卡住了), idle or
   // waiting 10 minutes on: the 管家 is told again (a notice lost, or it took a promise for work going on). Each at
   // most every 30 minutes.
-  const flagged = new Map();
+  const flagged = new Map(), bootAt = Date.now();
   setInterval(() => {
+    if (Date.now() - bootAt < 300000) return; // after a restart the 管家 looks at them all first
     let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch { return; }
     const all = sessions(), now = Date.now();
     for (const x of todoParts(tx).todos) {
@@ -2097,7 +2098,7 @@ async function web() {
     });
     c.stdin.end(`你是看门狗，替用户检查管家盯着的几件事。对每件事判断：它最近有没有实质进展，有没有在原地打转，有没有偏离用户交代的目标。只看下面给的内容，不要猜。全部正常，只回两个字：正常。否则每件有问题的写一行：「事情名」：问题（一句话）。\n\n${what}`);
   }, 3600000);
-  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); setTimeout(wakeUp, 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
+  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); setTimeout(() => wakeUp().catch((e) => log('wake_fail', { err: e.message })), 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
   // the way in from outside, kept up: dialed again 5 s after a drop, waiting longer (up to a minute) while each try
   // fails at once (the server or the network down). A connection the network swallowed (a proxy's TUN switched on or
   // off moves it to another interface) is found dead within 15 s, by either side. On the server its end is a socket
