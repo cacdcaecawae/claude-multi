@@ -567,7 +567,7 @@ console.log('tokens ok');
     '## 15:40 提醒看额度', '- 状态：进行中', '', '## 二次返修 部署', '- 盯着：二次返修', '', '## 已完成', '- 11-02 09:10 早一件', '- 11-03 15:20 undt-sim 跑完：已转告', '- 没写时间的一件'].join('\n');
   const { todos, lines } = todoParts(md);
   assert.deepEqual(todos.map((t) => t.t), ['rag检索 跑完告诉我', '15:40 提醒看额度', '二次返修 部署']);
-  assert.deepEqual(todos[0], { t: 'rag检索 跑完告诉我', watch: 'rag检索（智能体rag）', wait: '它回复完', then: '告诉用户结果', st: '等待中（11-03 记下）' });
+  assert.deepEqual(todos[0], { t: 'rag检索 跑完告诉我', ask: '', watch: 'rag检索（智能体rag）', wait: '它回复完', then: '告诉用户结果', st: '等待中（11-03 记下）' });
   assert.equal(todos[1].watch, ''); assert.equal(todos[1].st, '进行中');
   assert.deepEqual(lines, ['没写时间的一件', '11-03 15:20 undt-sim 跑完：已转告', '11-02 09:10 早一件']);
   const d = doneAt(lines[1], new Date(2026, 10, 3, 18));
@@ -593,5 +593,11 @@ console.log('tokens ok');
   assert.deepEqual([...watchedIds(md, list)].sort(), ['a', 'abc-123']);
   const t = butlerNotice([{ id: 'a', title: '声速场', kind: 'ask' }, { id: 'b', title: '层析', kind: 'done' }, { id: 'a', title: '声速场', kind: 'done' }]);
   assert.ok(t.startsWith('[系统通知]') && t.includes('「声速场」回复完了，现在空闲；「层析」回复完了') && !t.includes('在等人确认'), t);
+  // the watchdog's: idle too long (by conversation), and its Haiku's word (one, the latest)
+  const w = butlerNotice([{ id: 'b', title: '层析', kind: 'stale', why: '空闲已经 12 分钟' }, { kind: 'dog', why: '旧的' }, { kind: 'dog', why: '「声速场」在打转' }]);
+  assert.ok(w.includes('「层析」空闲已经 12 分钟；看门狗觉得：「声速场」在打转') && !w.includes('旧的'), w);
+  // a task's 原话
+  const { todoParts } = require('./claude-multi');
+  assert.equal(todoParts('## 声速场\n- 原话：盯着声速场做完\n- 状态：在跑\n').todos[0].ask, '盯着声速场做完');
   console.log('butler notice ok');
 }

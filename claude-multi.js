@@ -844,6 +844,10 @@ async function chatWait(ref, until, maxMin, note) {
 async function chatSay(ref, text) {
   if (!text) throw new Error('要说什么？');
   const s = findChat(ref), t0 = Date.now();
+  // a budget: three an hour to one conversation (its record of them), or pushing a chatty one spends quota on nothing
+  let sent = 0;
+  try { sent = fs.readFileSync(BLOG, 'utf8').split('\n').filter((l) => { try { const j = JSON.parse(l); return j.id === s.id && j.text.startsWith('给「') && t0 - j.at < 3600000; } catch { return false; } }).length; } catch {}
+  if (sent >= 3) throw new Error(`一小时内已经给「${s.title}」发过 3 条了，先别再推：记成「卡住了」，或者记进「等你决定」问用户。`);
   const { key } = await webPost('/api/open', { id: s.id, acct: s.acct + 1, cols: 120, rows: 40 }); // not running: continued in the web service
   const live = await waitLive((j) => j.sessionId === s.id || j.pid === s.pid || (!s.pid && sameDir(j.cwd, s.cwd) && j.startedAt >= t0 - 5000), 60000);
   if (!live) throw new Error('它没能启动起来');
@@ -1208,7 +1212,7 @@ async function usage(args) {
 // browser that had the old one is out.
 const NOTES = path.join(ROOT, 'notes.jsonl');
 const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes running in the web service
-const WEB_BUTLER = path.join(ROOT, 'web-butler.json'); // whether the 管家 runs in it
+const WEB_RUN = path.join(ROOT, 'web-running.json'); // the conversations running in it (their ids): continued after a restart
 const WEB_USAGE = path.join(ROOT, 'web-usage.json'); // the quota as the page last got it
 const WEB_PORT = 7788;
 const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus', 'haiku']; // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
@@ -1219,22 +1223,25 @@ function todoParts(text) {
   const [open, done = ''] = String(text ?? '').split(/^## 已完成.*$/m);
   const todos = open.split(/^## /m).slice(1).map((sec) => {
     const [t, ...ls] = sec.split('\n'), f = (k) => ls.map((l) => new RegExp(`^-\\s*${k}[：:]\\s*(.+)`).exec(l.trim())?.[1]).find(Boolean) ?? '';
-    return { t: t.trim(), watch: f('盯着'), wait: f('等'), then: f('然后'), st: f('状态') };
+    return { t: t.trim(), ask: f('原话'), watch: f('盯着'), wait: f('等'), then: f('然后'), st: f('状态') };
   });
   const lines = [...done.matchAll(/^-\s*(.+)$/gm)].map((m) => m[1].trim()).reverse();
   return { todos, lines };
 }
-// the conversations its 待办 watches: 盯着 a title (maybe with （its folder） after it) or a 编号 (one it just started has
-// no title yet)
-function watchedIds(text, list) {
-  const keys = todoParts(text).todos.map((x) => x.watch.replace(/[（(].*$/, '').trim()).filter(Boolean);
-  return new Set(list.filter((x) => keys.some((k) => k === x.id || k === x.title)).map((x) => x.id));
+// the conversation a 盯着 line names: its title (maybe with （its folder） after it) or its 编号 (one just started has no
+// title yet)
+function watchOf(watch, list) {
+  const k = String(watch ?? '').replace(/[（(].*$/, '').trim();
+  return (k && list.find((x) => k === x.id || k === x.title)) || null;
 }
-// what it's told of them: one [系统通知], each conversation once (its latest)
+const watchedIds = (text, list) => new Set(todoParts(text).todos.map((x) => watchOf(x.watch, list)?.id).filter(Boolean));
+// what it's told: one [系统通知], each conversation once (its latest). kind: done / ask (a note), stale (the
+// watchdog: idle too long for what its 待办 says), dog (the watchdog's Haiku, on them all)
 function butlerNotice(notes) {
   const last = new Map();
-  for (const n of notes) last.set(n.id, n);
-  return `[系统通知] 你盯着的对话停下来了：${[...last.values()].map((n) => `「${n.title || n.project || n.id}」${n.kind === 'ask' ? '在等人确认' : '回复完了，现在空闲'}`).join('；')}。逐个 chat look 看清它现在怎样，按规矩决定：推它继续、替用户回答，还是记进「等你决定」，然后更新待办。`;
+  for (const n of notes) last.set(n.id ?? n.kind, n);
+  const say = (n) => (n.kind === 'dog' ? `看门狗觉得：${n.why}` : `「${n.title || n.project || n.id}」${n.kind === 'ask' ? '在等人确认' : n.kind === 'stale' ? n.why : '回复完了，现在空闲'}`);
+  return `[系统通知] 你盯着的事有动静：${[...last.values()].map(say).join('；')}。逐个 chat look 看清它现在怎样，按规矩决定：推它继续、替用户回答，还是记进「等你决定」，然后更新待办。`;
 }
 // a 已完成 line's time, "11-03 15:20 …": that moment this year; null without one
 function doneAt(line, now = new Date()) {
@@ -1612,7 +1619,7 @@ async function web() {
       t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
     });
     // ended to go on with another account (switching): its pages are sent to the new one instead of told it's gone
-    proc.onExit(() => { t.gone = true; saveTerms(); if (!t.switching) send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
+    proc.onExit(() => { t.gone = true; saveTerms(); saveRun(); if (!t.switching) send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t);
     log('web_session', { profile_id: p.id, cwd, args: args.join(' ') });
     return t;
@@ -1677,8 +1684,14 @@ async function web() {
   function saveTerms() {
     const up = [...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid);
     try { fs.writeFileSync(WEB_TERMS, JSON.stringify(up.map((t) => t.pid))); } catch {}
-    // and whether the 管家 runs here: a service killed never writes again, so after a restart this says it did
-    try { fs.writeFileSync(WEB_BUTLER, JSON.stringify(up.some((t) => sameDir(t.cwd, BUTLER)))); } catch {}
+  }
+  // and which conversations run here, by id (one just started has it once listed: looked at every 10 s too). A service
+  // killed never writes again, so after a restart this says what ran, and each is continued.
+  let ranHere = null;
+  function saveRun() {
+    const pids = new Set([...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid).map((t) => t.pid));
+    const now = JSON.stringify(sessions().filter((s) => s.pid && pids.has(s.pid)).map((s) => s.id));
+    if (now !== ranHere) try { fs.writeFileSync(WEB_RUN, now); ranHere = now; } catch {}
   }
 
   // the record of the conversation asked for (?key, ?id): by the open terminal's key, else by its id
@@ -1697,11 +1710,11 @@ async function web() {
   // Its text has Claude's last words (gist), read from the record here a moment after the note: the hook runs before
   // Claude has written them (the hook found the words before them).
   let pushedTo = Date.now(); // the ones before the service started were for the island
-  const lastWords = (f) => {
+  const lastWords = (f, max) => {
     if (!f) return '';
     const fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size, tail = slice(fd, Math.max(0, size - 4194304), 4194304);
     fs.closeSync(fd);
-    return gist(tail);
+    return gist(tail, max);
   };
   setInterval(() => {
     const fresh = readNotes(20).filter((n) => n.at > pushedTo && Date.now() - n.at > 1500).reverse();
@@ -2006,10 +2019,13 @@ async function web() {
   });
   server.keepAliveTimeout = 5000; // the relay's nginx lets its idle ones go at 4 s, before: it never reuses one closing here
   server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
-  // A restart ended the 管家, and its background waits with it. It ran in the last service (as that one last wrote, read
-  // before this one writes) or has something left in its 待办: it's continued, on its own account. With something left,
-  // it's told so, to read the list and wait again for it. (Its Claude, ended with its terminal, takes its session file.)
-  const ranBefore = (() => { try { return JSON.parse(fs.readFileSync(WEB_BUTLER, 'utf8')) === true; } catch { return false; } })();
+  // A restart ended the conversations running here (as the last service last wrote, read before this one writes), and
+  // the 管家's reminders with it (chat wait --until, still ahead, its process gone)
+  const ranBefore = (() => { try { return JSON.parse(fs.readFileSync(WEB_RUN, 'utf8')); } catch { return []; } })();
+  const lost = (() => { try { return fs.readdirSync(WAITS); } catch { return []; } })()
+    .flatMap((n) => { try { return [JSON.parse(fs.readFileSync(path.join(WAITS, n), 'utf8'))]; } catch { return []; } })
+    .filter((w) => w.until > Date.now() && !alive(w.pid));
+  setInterval(saveRun, 10000);
   // a [系统通知] typed into the 管家's terminal as you'd paste it, then Enter (only once it's idle: typed while it waits on
   // a question, it would answer it)
   const tellIn = async (t, text) => { t.proc.write(`\x1b[200~${text}\x1b[201~`); await sleep(400); t.proc.write('\r'); };
@@ -2023,20 +2039,65 @@ async function web() {
     const ns = toTell.splice(0);
     tellIn(t, butlerNotice(ns)); log('butler_told', { n: ns.length });
   }, 3000);
-  async function wakeButler() {
+  // After a restart each one that ran here is continued on its account, back idle (one cut mid-answer isn't told to go
+  // on: the 管家 is, for those it watches). The 管家 also when its 待办 has something left; then told to look at them
+  // all again, and to set again the reminders that ended. (A Claude ended with its terminal takes its session file.)
+  async function wakeUp() {
+    const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
+    for (const id of ranBefore) {
+      const s = all.find((x) => x.id === id), p = s && !s.pid && s !== me && reg.profiles[s.acct];
+      if (p) { startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); }
+    }
     let todo = ''; try { todo = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
-    const open = todoOpen(todo), s = (ranBefore || open) && sessions().find((x) => sameDir(x.cwd, BUTLER)), p = s && !s.pid && load().profiles[s.acct];
+    const open = todoOpen(todo), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
     if (!p) return;
-    const t = startPty(p, s.cwd, ['--resume', s.id]);
-    if (!open) return log('butler_woken', { session_id: s.id }); // nothing it was watching: back, waiting for you
+    const t = startPty(p, me.cwd, ['--resume', me.id]);
+    if (!open && !lost.length) return log('butler_woken', { session_id: me.id }); // nothing it was watching: back, waiting for you
+    const hm = (ms) => new Date(ms).toTimeString().slice(0, 5);
+    const again = lost.length ? `你设的这些定时提醒也断了，还要的就重新设：${lost.map((w) => `${hm(w.until)} ${w.note || w.title || ''}`.trim()).join('；')}。` : '';
     for (let k = 0; k < 60 && !t.gone; k++, await sleep(1000)) {
       let st = null; try { st = JSON.parse(fs.readFileSync(path.join(p.configDir, 'sessions', `${t.pid}.json`), 'utf8')).status; } catch {}
       if (st !== 'idle') continue;
-      await tellIn(t, '[系统通知] 网页服务刚重启，你在后台等着的事都断了。读一遍 待办.md，逐个 chat look 你盯着的对话，看清它们现在怎样，按规矩决定下一步，更新待办。');
-      return log('butler_woken', { session_id: s.id });
+      await tellIn(t, `[系统通知] 网页服务刚重启。读一遍 待办.md，逐个 chat look 你盯着的对话，看清它们现在怎样，按规矩决定下一步，更新待办。${again}`);
+      return log('butler_woken', { session_id: me.id, reminders: lost.length });
     }
   }
-  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); setTimeout(wakeButler, 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
+  // The watchdog. First part, no model: a conversation its 待办 has as going on (not 等你决定 or 卡住了), idle or
+  // waiting 10 minutes on: the 管家 is told again (a notice lost, or it took a promise for work going on). Each at
+  // most every 30 minutes.
+  const flagged = new Map();
+  setInterval(() => {
+    let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch { return; }
+    const all = sessions(), now = Date.now();
+    for (const x of todoParts(tx).todos) {
+      const s = !/^(等你|卡住)/.test(x.st) && watchOf(x.watch, all);
+      if (!s || s.busy || now - s.at < 600000 || now - (flagged.get(s.id) ?? 0) < 1800000) continue;
+      flagged.set(s.id, now);
+      toTell.push({ id: s.id, title: s.title, kind: 'stale', why: `${s.wait ? '在等人确认' : s.pid ? '空闲' : '没在运行'}已经 ${Math.round((now - s.at) / 60000)} 分钟，待办里却写着「${x.st.replace(/[（(].*$/, '')}」` });
+    }
+  }, 60000);
+  // Second part, Haiku, once an hour while something it watches has moved: has each got on, or gone in circles, off
+  // what you asked? One question, nothing kept (no record, no tools, no hooks), the recommended account. It only tells
+  // the 管家, which decides.
+  let dogAt = Date.now();
+  setInterval(() => {
+    let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch { return; }
+    const all = sessions(), them = todoParts(tx).todos.map((x) => ({ x, s: watchOf(x.watch, all) })).filter((o) => o.s && o.s.at > dogAt);
+    const p = load().profiles[usageCache?.rec ?? 0];
+    dogAt = Date.now();
+    if (!them.length || !p || usageCache?.open === false) return;
+    const what = them.map(({ x, s }) => `## ${x.t}\n用户交代：${x.ask || '（没记）'}\n待办的状态：${x.st}\n盯着的对话「${s.title}」：${s.busy ? '正在回复' : s.wait ? '在等人确认' : s.pid ? '空闲' : '没在运行'}。它最后的回答：${lastWords(s.file, 800)}`).join('\n\n');
+    const c = require('child_process').spawn(claudeExe, ['-p', '--model', 'haiku', '--no-session-persistence', '--tools', '', '--settings', '{"disableAllHooks":true}'],
+      { cwd: os.tmpdir(), env: childEnv(p.configDir), windowsHide: true, timeout: 180000 });
+    let said = '';
+    c.stdout.setEncoding('utf8'); c.stdout.on('data', (d) => (said += d)); c.on('error', () => {});
+    c.on('close', (code) => {
+      said = said.trim(); log('watchdog', { n: them.length, code, said: said.slice(0, 300) });
+      if (code === 0 && said && !/^正常/.test(said)) toTell.push({ kind: 'dog', why: said.slice(0, 600) });
+    });
+    c.stdin.end(`你是看门狗，替用户检查管家盯着的几件事。对每件事判断：它最近有没有实质进展，有没有在原地打转，有没有偏离用户交代的目标。只看下面给的内容，不要猜。全部正常，只回两个字：正常。否则每件有问题的写一行：「事情名」：问题（一句话）。\n\n${what}`);
+  }, 3600000);
+  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); setTimeout(wakeUp, 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
   // the way in from outside, kept up: dialed again 5 s after a drop, waiting longer (up to a minute) while each try
   // fails at once (the server or the network down). A connection the network swallowed (a proxy's TUN switched on or
   // off moves it to another interface) is found dead within 15 s, by either side. On the server its end is a socket

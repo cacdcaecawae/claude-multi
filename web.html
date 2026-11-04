@@ -299,7 +299,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .todo [data-open] { color: var(--link); cursor: pointer; }
   .desk .st { flex: none; font-size: 11px; padding: 0 6px; border-radius: 8px; line-height: 18px; background: var(--tint); color: var(--fg2); }
   .desk .st.you { color: var(--orange); font-weight: 600; } .desk .todo.you { border-color: var(--orange); }
-  .desk .todo .stnow { font-style: normal; margin-left: 4px; color: var(--fg3); } .desk .todo .stnow.s-busy { color: var(--green); } .desk .todo .stnow.s-ask { color: var(--orange); }
+  .desk .todo .stnow { font-style: normal; margin-left: 4px; color: var(--fg3); } .desk .todo .stnow.s-busy { color: var(--green); } .desk .todo .stnow.s-ask { color: var(--orange); } .desk .todo .stnow.s-lost { color: var(--red); }
   .desk .st.wait { color: var(--a1); } .desk .st.run { color: var(--orange); } .desk .st.bad { color: var(--red); } .desk .st.ok { color: var(--green); }
   .desk .doneL { font-size: 12px; color: var(--fg3); padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #deskAdd { display: flex; gap: 6px; margin-top: -10px; padding: 0 2px; }
@@ -1060,10 +1060,11 @@ function drawDesk() {
   const cards = [...todos].sort((a, b) => /^等你/.test(b.st) - /^等你/.test(a.st)).map((x) => { // waiting on you: first
     const conv = byName(x.watch), w = (x.watch || conv) && waitOf(x, conv);
     // the watched one as it is now, whatever the card says (a conversation idle has stopped: it doesn't go on by itself)
-    const now = conv && (!conv.pid ? ['', '没在运行'] : conv.wait ? ['s-ask', '在等人确认'] : conv.busy ? ['s-busy', '在回复'] : ['', '空闲']);
+    // one its name doesn't find isn't watched at all: shown, not left silent
+    const now = !conv ? x.watch && ['s-lost', '找不到这个对话'] : !conv.pid ? ['', '没在运行'] : conv.wait ? ['s-ask', '在等人确认'] : conv.busy ? ['s-busy', '在回复'] : ['', '空闲'];
     const sum = [x.watch && `盯着 <span${conv ? ` data-open="${esc(conv.id)}"` : ''}>${esc(x.watch.replace(/[（(].*$/, ''))}</span>${now ? `<i class="stnow ${now[0]}">${now[1]}</i>` : ''}`, x.wait && `等 ${esc(x.wait)}`].filter(Boolean).join(' · ');
     return `<div class="todo${/^等你/.test(x.st) ? ' you' : ''}"><div class="tt"><b>${esc(x.t)}</b>${x.st ? `<span class="st ${stCls(x.st)}">${esc(x.st.replace(/[（(：:].*$/, ''))}</span>` : ''}</div>
-      ${sum ? `<div class="sum" title="${esc([x.watch && '盯着 ' + x.watch, x.wait && '等 ' + x.wait, x.then && '然后 ' + x.then, x.st && '状态 ' + x.st].filter(Boolean).join('\n'))}">${sum}</div>` : ''}
+      ${sum ? `<div class="sum" title="${esc([x.ask && '你交代的 ' + x.ask, x.watch && '盯着 ' + x.watch, x.wait && '等 ' + x.wait, x.then && '然后 ' + x.then, x.st && '状态 ' + x.st].filter(Boolean).join('\n'))}">${sum}</div>` : ''}
       ${w ? `<div class="wt"><span>⏳</span><span class="t">后台正在等它${w.note ? ' · ' + esc(w.note) : ''}</span><span class="when">已等 ${mins(Date.now() - w.at)}</span></div>` : ''}</div>`;
   }).join('');
   const loose = waits.filter((w) => !used.has(w)).map((w) => (w.until
