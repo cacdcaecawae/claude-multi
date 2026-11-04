@@ -1284,6 +1284,8 @@ function ticketOp(all, b, now = Date.now()) {
     if (!b.conv) throw new Error('要派给哪个对话？');
     const other = all.find((x) => x !== t && !x.end && x.conv === String(b.conv)); // its turns couldn't be told apart
     if (other) throw new Error(`这个对话已经在做工单 #${other.id}「${other.name}」，先结束它（ticket end），或者换一个对话`);
+    // already on it: the number stays (its worker's reports carry it); more to say goes by chat say
+    if (String(b.conv) === t.conv) throw new Error(`工单 #${t.id} 已经在这个对话上了，补充说明用 chat say`);
     if (b.n != null && Number(b.n) !== (t.n ?? 0) + 1) throw new Error(`工单 #${t.id} 刚被改派过，再用 ticket 看一下`); // its brief has that number
     t.conv = String(b.conv); t.n = (t.n ?? 0) + 1; add('give', b.title || b.conv);
     return t;

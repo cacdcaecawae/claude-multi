@@ -591,7 +591,7 @@ console.log('tokens ok');
   assert.throws(() => op({ op: 'report', id: 9, k: '做完', text: 'x' }, 14));
   const n = butlerNotice([{ t, st: stageOf(t, s()) }, { t: { id: 2, name: '层析' }, st: ['停下了', 'idle', '下一步写理论稿'] }]);
   assert.ok(n.startsWith('[系统通知]') && n.includes('#1「声速场 Stage 4」等用户验收：方案写好了；#2「层析」停下了：下一步写理论稿'), n);
-  assert.equal(op({ op: 'give', id: 1, conv: 'c1', ask: '改掉', name: '改掉' }, 14).ask, '把声速场做到成熟'); // never changed (given again: it starts clean)
+  assert.equal(op({ op: 'give', id: 1, conv: 'c9', ask: '改掉', name: '改掉' }, 14).ask, '把声速场做到成熟'); // never changed (given again: it starts clean)
   op({ op: 'end', id: 1, how: 'done', text: '交给你了' }, 15);
   assert.deepEqual(stageOf(t, s()), ['完成', 'end', '交给你了']);
   assert.throws(() => op({ op: 'report', id: '1-1', k: '做完', text: 'x' }, 16)); // ended
@@ -615,7 +615,7 @@ console.log('tokens ok');
   op({ op: 'report', id: `${a.id}-1`, k: '做完', text: 'A 好了' }, 3); a.ev.push({ at: 4, k: 'stop', text: '' });
   assert.throws(() => op({ op: 'give', id: b.id, conv: 'c1' }, 5), /#1/); // c1 has A open
   assert.equal(stageOf(a, s('c1'))[0], '等你验收'); // A as it was
-  op({ op: 'give', id: a.id, conv: 'c1' }, 5); // the same ticket to its own conversation again: fine
+  assert.throws(() => op({ op: 'give', id: a.id, conv: 'c1' }, 5), /chat say/); // already on it: its worker's number stays
   op({ op: 'end', id: a.id, how: 'done' }, 6);
   op({ op: 'give', id: b.id, conv: 'c1' }, 7); // A ended: c1 free
   // B given to c2 after c1 got stuck on it: c1's 卡住 isn't c2's
