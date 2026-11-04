@@ -914,6 +914,7 @@ async function ticket([sub, ...a]) {
         + `\n做完了、要用户决定、或者卡住了，用命令告诉管家（不用等它来问）：\n  claude-multi report ${t.id} 做完 <一句话结果>\n  claude-multi ask ${t.id} <要用户决定的问题>\n  claude-multi report ${t.id} 卡住 <原因>（失败、不用做 也这样报）`
         + '\n只是告一段落、下一步你自己清楚的，不用报告，停下就行，管家会让你接着做。）';
       const dir = fs.existsSync(where) && fs.statSync(where).isDirectory();
+      if (dir && sameDir(where, __dirname)) throw new Error(`这是正在用的 claude-multi 代码，不能在这里改：在单独的副本（${__dirname}-dev 这类 git worktree）里新开对话，交代里写明建分支、发 PR`);
       const c = dir ? await chatNew(where, brief, n) : await chatSay(where, brief);
       await webPost('/api/ticket', { op: 'give', id: t.id, conv: c.id, title: c.title || path.basename(path.resolve(where)) });
       console.log(`工单 #${t.id} 已交给${dir ? '新开的对话' : `「${c.title}」`}（编号 ${c.id}）。它停下时你会收到通知。`);
