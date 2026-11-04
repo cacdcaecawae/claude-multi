@@ -937,8 +937,14 @@ function retitle() {
 // 对话, newest first (by its record's last write): by folder, the folders by their newest; or, behind the bell, the unread
 // 提示 and the running ones, with their folder on a second line
 // a conversation waiting on you ('ask') or answered and not looked at ('done'), its dot; a row's right end: that, whether
-// it's answering, where it runs or how long ago, and (on hover) 在右侧打开
-const chatMark = (x) => { const k = notesOut().find((n) => n.id === x.id)?.kind; return x.wait || k === 'ask' ? 'ask' : k ? 'done' : ''; };
+// it's answering, where it runs or how long ago, and (on hover) 在右侧打开. The 提示 by conversation made once for each list
+// of them (a new one with every look, and once one is read), not again for every row and every key typed in 搜索
+let marks = new Map(), marksOf = null;
+const chatMark = (x) => {
+  if (marksOf !== state?.notes) { marksOf = state?.notes; marks = new Map(); for (const n of notesOut()) if (marks.get(n.id) !== 'ask') marks.set(n.id, n.kind); }
+  const k = marks.get(x.id);
+  return x.wait || k === 'ask' ? 'ask' : k ? 'done' : '';
+};
 const nd = (k) => (k ? `<i class="nd ${k}" title="${k === 'ask' ? '在等你' : '答完了，还没看'}"></i>` : '');
 const chatEnd = (x) => `${nd(chatMark(x))}${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}${x.pid ? `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(x.at)}</span>`}
     <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
@@ -1458,23 +1464,25 @@ function newSheet() {
   draw(); $('#sheet').classList.add('on');
 }
 // 搜索对话 (Ctrl+K, or the magnifier over the list), as VS Code's quick open: every word typed in its title, its last
-// message or its folder; ↑ ↓ and Enter (Ctrl+Enter: to the side), or a click. Only the list under the box is drawn again
+// message or its folder; ↑ ↓ and Enter (Ctrl+Enter: to the side), or a click. Only the list under the box is drawn again,
+// the newest 100 found (ponytail: a cap, not paging: more than that, a word more narrows it)
 function findSheet() {
   if (!state) return toast('还在加载，稍等');
   $('#sheetIn').innerHTML = '<input type="text" id="findIn" placeholder="搜索对话：标题、最后一句话、文件夹" enterkeyhint="go" autocomplete="off"><div id="findList"></div>';
   const box = $('#findIn'), list = $('#findList');
   let hits = [], at = 0;
+  const pick = () => { list.querySelector('.sel')?.classList.remove('sel'); list.children[at]?.classList.add('sel'); list.children[at]?.scrollIntoView({ block: 'nearest' }); };
   const draw = () => {
     const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
-    hits = state.sessions.filter((x) => !isButler(x) && words.every((w) => `${x.title}\n${x.prompt ?? ''}\n${x.cwd}`.toLowerCase().includes(w)));
-    at = Math.min(at, Math.max(0, hits.length - 1));
+    hits = state.sessions.filter((x) => !isButler(x) && words.every((w) => `${x.title}\n${x.prompt ?? ''}\n${x.cwd}`.toLowerCase().includes(w))).slice(0, 100);
+    at = 0;
     list.innerHTML = hits.map(chatRow).join('') || '<div class="empty">没有找到</div>';
-    list.children[at]?.classList.add('sel'); list.children[at]?.scrollIntoView({ block: 'nearest' });
+    pick();
   };
   const open = (i, aside) => { const x = hits[i]; if (!x) return; sheetOff(); openSession(x.id, aside ? 'aside' : undefined); };
-  box.oninput = () => { at = 0; draw(); };
+  box.oninput = draw;
   box.onkeydown = (e) => {
-    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && hits.length) { e.preventDefault(); at = (at + (e.key === 'ArrowDown' ? 1 : hits.length - 1)) % hits.length; draw(); }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && hits.length) { e.preventDefault(); at = (at + (e.key === 'ArrowDown' ? 1 : hits.length - 1)) % hits.length; pick(); }
     else if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); open(at, e.ctrlKey || e.metaKey); }
     else if (e.key === 'Escape') sheetOff();
   };
@@ -1482,8 +1490,12 @@ function findSheet() {
   list.ondragstart = (e) => e.preventDefault(); // its rows are the list's, draggable on a computer: not from here
   draw(); $('#sheet').classList.add('on'); box.focus();
 }
-addEventListener('keydown', (e) => { // not in the terminal: there Ctrl+K is Claude's
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && !e.target.closest?.('.xterm')) { e.preventDefault(); findSheet(); }
+addEventListener('keydown', (e) => { // not in the terminal (there Ctrl+K is Claude's), nor over another card (换账号's
+  // question, say: put away by this one, what waits on its answer would wait for good)
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && !e.target.closest?.('.xterm')) {
+    e.preventDefault();
+    if (!$('#sheet').classList.contains('on') || $('#findIn')) findSheet();
+  }
 });
 sheetOff();
 
@@ -1743,10 +1755,16 @@ function makeConv(body, title) {
     go.title = stop ? '停止（让 Claude 停下）' : '发送'; go.classList.toggle('stop', stop);
   }
   // its height to the words (not while hidden: it would be 0); every change of the words goes through grow, so the
-  // draft is kept there, in this browser by conversation: a phone's page dropped in the background comes back with it
+  // draft is kept there, in this browser by conversation: a phone's page dropped in the background comes back with it.
+  // A message on its way stays in it, before what's typed since (as a failed send puts it back), till its Enter is through
   const fitLine = () => { line.style.height = ''; if (line.scrollHeight) line.style.height = Math.min(line.scrollHeight, 200) + 'px'; };
   const draftKey = () => 'cm-draft:' + c.id;
-  const grow = () => { fitLine(); if (c.id) try { if (line.value.trim()) localStorage.setItem(draftKey(), line.value); else localStorage.removeItem(draftKey()); } catch {} };
+  let going = '';
+  const grow = () => {
+    fitLine();
+    const d = [going, line.value.trim()].filter(Boolean).join('\n');
+    if (c.id) try { if (d) localStorage.setItem(draftKey(), d); else localStorage.removeItem(draftKey()); } catch {}
+  };
   if (c.id) try { line.value = localStorage.getItem(draftKey()) ?? ''; } catch {}
   line.addEventListener('input', () => { goMode(); grow(); });
   let atts = [], sending = false; // the pictures waiting to go, each { url: shown here, up: its upload, to the path }
@@ -1825,12 +1843,12 @@ function makeConv(body, title) {
     const answer = typeNow, tick = typeTick; // what you write for Claude's 「Type something」: pasted into it, then Enter (a multi-select's: none, it's ticked)
     // out of the box at once: what you type while its pictures upload is the next message, not wiped when this one goes
     sending = true; stops++; // a 停止 still watching Claude's input box: this message isn't the one to take back
-    line.value = ''; grow(); atts = []; drawAtts();
+    going = v; line.value = ''; grow(); atts = []; drawAtts();
     const wait = view === 'hist' && !answer && { text: v, imgs: imgs.filter((a) => !a.file).map((a) => a.url), at: Date.now() };
     if (wait) { sent.push(wait); drawLive(true); }
     const back = (why) => { // not sent after all: back in the box, before what you typed since, with its pictures
       if (wait) { sent = sent.filter((s) => s !== wait); drawLive(); }
-      line.value = [v, line.value.trim()].filter(Boolean).join('\n'); grow();
+      going = ''; line.value = [v, line.value.trim()].filter(Boolean).join('\n'); grow();
       atts = [...imgs.filter((a) => !a.failed), ...atts]; drawAtts();
       if (why) toast(why, 4000);
     };
@@ -1864,7 +1882,7 @@ function makeConv(body, title) {
       if (!tick && !(await step('\r'))) return back('回车没发出去，消息放回了输入框（Claude 那边的输入框里可能还留着这段字）');
       if (answer && !tick) typing = null;
       else lastSent = { text, v, imgs, wait };
-    } finally { sending = false; goMode(); }
+    } finally { sending = false; going = ''; grow(); goMode(); } // through (or back in the box): out of the draft
   };
   line.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim()) go.click(); } // only sends; Shift+Enter: a new line
@@ -2419,13 +2437,14 @@ const table = (rows) => {
 };
 // Links, opened in a new tab: [words](address), or an address as it is, on the escaped text (an &amp; in it stays: the
 // attribute reads it as &), up to a space, a tag, a quote, a backtick or Chinese text right after it; its sentence's end
-// not in it. Last: an address in a `code` or **bold** is a link in it, and neither is cut across a link's markup
-const LINK = /\[([^\]\n]+)\]\((https?:\/\/[^\s)<`]+)\)|https?:\/\/(?:[^\s<&`\u3000-\u9fff\uff00-\uffef]|&amp;)+/g;
+// not in it, nor a ")" with no "(" for it in the address (a [words](address) one may hold one pair: a wiki page's).
+// Last: an address in a `code` or **bold** is a link in it, and neither is cut across a link's markup
+const LINK = /\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()<`]|\([^\s()<`]*\))+)\)|https?:\/\/(?:[^\s<&`\u3000-\u9fff\uff00-\uffef]|&amp;)+/g;
 const anchor = (u, words) => `<a href="${u}" target="_blank" rel="noopener">${words}</a>`;
 const link = (m, words, u) => {
   if (u) return anchor(u, words);
   let end = /[.,;:!?]*$/.exec(m)[0], bare = m.slice(0, m.length - end.length);
-  if (bare.endsWith(')') && !bare.includes('(')) { bare = bare.slice(0, -1); end = ')' + end; } // "(see https://…)": its ")" not in it
+  while (bare.endsWith(')') && bare.split(')').length > bare.split('(').length) { bare = bare.slice(0, -1); end = ')' + end; } // "(see https://…)"
   return anchor(bare, bare) + end;
 };
 function md(t) {
