@@ -697,7 +697,7 @@ console.log('tokens ok');
   fs.mkdirSync(dir, { recursive: true });
   const T = new Date().toISOString(), u = (content) => ({ type: 'user', timestamp: T, message: { content } });
   const a = (id, usage) => ({ type: 'assistant', timestamp: T, requestId: 'r' + id, message: { id, model: 'claude-sonnet-5', usage } });
-  fs.writeFileSync(path.join(dir, 's.jsonl'), [u('你好'), a('m1', { input_tokens: 1e6 }), a('m1', { input_tokens: 1e6 }), u('[系统通知] 有动静'), a('m2', { output_tokens: 1e5 }),
+  fs.writeFileSync(path.join(dir, 's.jsonl'), [u('你好'), a('m1', { input_tokens: 1e6 }), a('m1', { input_tokens: 1e6 }), u('\n\n<pasted_content id="a1">\n[系统通知] 有动静\n</pasted_content id="a1">\n'), a('m2', { output_tokens: 1e5 }), // a long notice: a paste
     u([{ type: 'tool_result', content: 'ok' }]), a('m3', { input_tokens: 5e5 }), u('<task-notification>\n<status>completed</status>'), a('m4', { input_tokens: 1e6 })].map((x) => JSON.stringify(x)).join('\n'));
   const log = path.join(tmp, 'events.jsonl');
   fs.writeFileSync(log, JSON.stringify({ timestamp: T, event: 'watchdog', usd: 0.01 }) + '\n');
@@ -705,6 +705,10 @@ console.log('tokens ok');
   assert.deepEqual([r(c.you), r(c.notice), r(c.bg), r(c.dog), c.n], [2, 2, 2, 0.01, 5]);
   assert.deepEqual(Object.fromEntries(Object.entries(c.models).map(([k, v]) => [k, r(v)])), { 'claude-sonnet-5': 6, 'claude-haiku-4-5': 0.01 });
   fs.rmSync(tmp, { recursive: true, force: true });
+  // what the 管家 typed, found under the paste Claude Code wraps a long one in (so it shows as 管家发的)
+  const { unwrapPaste } = require('./claude-multi');
+  assert.equal(unwrapPaste('<pasted_content id="adb0">\n继续改图。重点：1) 图4\n</pasted_content id="adb0">\n'), '继续改图。重点：1) 图4');
+  assert.equal(unwrapPaste('短的不包'), '短的不包');
   console.log('butler cost ok');
 }
 

@@ -1382,6 +1382,9 @@ function blog(text, id = null) {
 // what it typed into a conversation (给「…」发了消息：…, 新开了对话（…）：…), the words as logged (their first 40), read
 // again when the log changes
 let blogMemo = { at: -1, list: [] };
+// a long paste as Claude Code records it, inside <pasted_content id="N"> … </pasted_content id="N">: the words alone (as
+// the page shows it), for what checks how a message begins
+const unwrapPaste = (t) => String(t ?? '').replace(/<pasted_content id="[^"]*">\n?([\s\S]*?)\n?<\/pasted_content id="[^"]*">/g, '$1').trim();
 function blogSent(id) {
   let at = 0; try { at = fs.statSync(BLOG).mtimeMs; } catch { return []; }
   if (at !== blogMemo.at) {
@@ -1573,7 +1576,7 @@ function history(file, { from, end, keep = 120 } = {}) {
   const items = out.filter((o) => !o.gone);
   // ones the 管家 typed here (chat say, chat new: its log has them, the same words within 3 minutes): not yours
   const sent = blogSent(path.basename(file, '.jsonl'));
-  if (sent.length) for (const o of items) if (o.role === 'user' && sent.some((s) => Math.abs(s.at - o.at) < 180000 && o.text.startsWith(s.text))) o.by = 'butler';
+  if (sent.length) for (const o of items) if (o.role === 'user' && sent.some((s) => Math.abs(s.at - o.at) < 180000 && unwrapPaste(o.text).startsWith(s.text))) o.by = 'butler';
   let cut = 0;
   if (from == null && items.length > keep) {
     cut = items.length - keep;
@@ -2407,7 +2410,8 @@ function butlerCost(roots = tokenRoots(), logFile = LOG, now = Date.now()) {
         if (j.type === 'user' && !j.isMeta) {
           const c = j.message?.content, t = (typeof c === 'string' ? c : Array.isArray(c) ? c.find((p) => p.type === 'text')?.text : '') ?? '';
           if (!t || /^<(local-command|command-|system-reminder)/.test(t.trimStart())) continue; // a tool's result, a command: the same turn
-          kind = t.startsWith('[系统通知]') ? 'notice' : t.startsWith('<task-notification>') ? 'bg' : 'you';
+          const w = unwrapPaste(t); // a long [系统通知] comes as a paste
+          kind = w.startsWith('[系统通知]') ? 'notice' : w.startsWith('<task-notification>') ? 'bg' : 'you';
         } else if (j.type === 'assistant' && j.message?.usage) {
           const u = j.message.usage, w = u.cache_creation_input_tokens ?? 0, w1 = Math.min(w, u.cache_creation?.ephemeral_1h_input_tokens ?? 0), at = Date.parse(j.timestamp);
           const usd = replyCost([0, 0, u.input_tokens ?? 0, u.output_tokens ?? 0, w - w1, w1, u.cache_read_input_tokens ?? 0, j.message.model, u.speed === 'fast']);
@@ -2460,7 +2464,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { inLive, keepDefaults, butlerCost, blogSent, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
