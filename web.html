@@ -258,11 +258,29 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #butler.blank > .hint { display: flex; }
   /* its 操作台, beside it: how it is, what it keeps watching, the conversations, what just got done, the computer */
   #desk { display: none; width: var(--deskW, clamp(240px, 16vw, 360px)); flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: linear-gradient(180deg, rgba(217, 119, 87, .10), transparent 200px), var(--bar); }
-  /* its account and model, by its input box; and on its start page */
-  .send .bsel { display: flex; gap: 6px; padding: 0 8px 6px 42px; }
-  .send .bsel button { font-size: 12px; padding: 2px 9px; border-radius: 10px; background: var(--tint); color: var(--fg2); }
+  /* its input box as one rounded bar, its account, model and thinking effort in it before the send button (as a chat
+     app has them); on a phone those three on a row under the words */
+  #butler .send { position: relative; }
+  #butler .send .box { border-radius: 24px; }
+  #butler .send .bar { padding: 6px 6px 6px 10px; }
+  #butler .send .go { border-radius: 50%; }
+  .send .bsel { display: flex; gap: 6px; flex: none; margin-bottom: 2px; }
+  .send .bsel button { font-size: 12.5px; padding: 5px 12px; border-radius: 16px; background: var(--tint); color: var(--fg2); white-space: nowrap; }
   .send .bsel button::after { content: ' ▾'; font-size: 10px; }
   @media (hover: hover) { .send .bsel button:hover { color: var(--fgHi); } }
+  @media (max-width: 759px) { #butler .send .bar { flex-wrap: wrap; } #butler .send .bsel { order: 9; flex-basis: 100%; padding: 2px 0 2px 36px; } }
+  /* its thinking effort: a slider above its button, the level's name over it */
+  .effPop { position: absolute; bottom: calc(100% - 4px); width: 240px; padding: 10px 12px 12px; border-radius: 16px; background: var(--input); border: 1px solid var(--cardB); box-shadow: 0 8px 24px var(--shadow); z-index: 20; }
+  .effPop .lv { text-align: center; font-weight: 600; color: var(--fgHi); margin-bottom: 8px; }
+  .effPop .lv small { display: block; font-weight: 400; font-size: 11.5px; color: var(--fg2); margin-top: 2px; }
+  .effPop .track { position: relative; height: 28px; border-radius: 14px; display: flex; align-items: center; justify-content: space-between; padding: 0 11px;
+    background: linear-gradient(90deg, var(--accent) calc(13px + (100% - 26px) * var(--f, 0)), var(--tint) 0); }
+  .effPop .track i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .35; pointer-events: none; }
+  .effPop input { position: absolute; inset: 0; width: 100%; height: 28px; margin: 0; padding: 0; border: 0; appearance: none; -webkit-appearance: none; background: none; cursor: pointer; }
+  .effPop input::-webkit-slider-runnable-track { height: 28px; background: none; }
+  .effPop input::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; margin-top: 1px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+  .effPop input::-moz-range-thumb { width: 26px; height: 26px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+  .effPop input::-moz-range-track { background: none; }
   .hint .pickRow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; }
   .hint .pickRow > span { color: var(--fg2); margin-right: 2px; }
   .hint .pickRow .opt { color: var(--fg); }
@@ -956,7 +974,7 @@ $('#peekBar .back').onclick = unpeek;
 function mountButler(c) {
   // its account and model, by its input box (drawn in drawDesk)
   if (!c.el.querySelector('.bsel')) {
-    c.el.querySelector('.send .box').insertAdjacentHTML('beforeend', '<div class="bsel"><button data-act="acct"></button><button data-act="model"></button></div>');
+    c.el.querySelector('.send .go').insertAdjacentHTML('beforebegin', '<div class="bsel"><button data-act="acct"></button><button data-act="model"></button><button data-act="effort"></button></div>');
     c.el.querySelector('.send').insertAdjacentHTML('afterbegin', `<div class="quick">${QUICK.map((q) => `<button>${q}</button>`).join('')}<button data-hand>交代一件事…</button></div>`);
     c.el.querySelector('.quick').onclick = (e) => {
       const b = e.target.closest('button');
@@ -977,6 +995,7 @@ function drawButler() {
   if (!bConv) $('#butler > .hint').html = `${SPARK}<div class="bt">管家</div><div>你的助理：替你看着所有对话，谁在等你、谁做完了，问它就行。</div>
     <div class="pickRow"><span>账号</span>${acctOpts().map((o) => `<button class="opt${o.v === n ? ' on' : ''}" data-sa="${o.v}">${o.v}<small>${esc(o.sub)}</small></button>`).join('')}</div>
     <div class="pickRow"><span>模型</span>${MODELS.map(([v, l]) => `<button class="opt${v === state.butlerModel ? ' on' : ''}" data-sm="${v}">${l}</button>`).join('')}</div>
+    <div class="pickRow"><span>思考</span>${EFFORTS.map(([v, l]) => `<button class="opt${v === (state.butlerEffort ?? 'xhigh') ? ' on' : ''}" data-se="${v}">${l}</button>`).join('')}</div>
     <div class="btns"><button class="btn primary" data-bstart>用账号 ${n} 启动管家</button></div>`;
 }
 // the 管家's models, and the accounts as the choices show them
@@ -985,6 +1004,10 @@ const modelName = (m) => MODELS.find(([v]) => v === m)?.[1] ?? m ?? '模型';
 const acctOpts = () => (state?.usage?.accounts ?? []).map((a, i) => ({ v: i + 1, label: `账号 ${i + 1}`, sub: a.err ? '读不到额度' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满' }));
 let startAcct = 0; // the account picked on its start page (0: the recommended one)
 async function setButlerModel(m) { await post('/api/butler-model', { model: m }); state.butlerModel = m; }
+// its thinking effort (Claude Code's levels); Claude's own when none is set: xhigh
+const EFFORTS = [['low', '低', '最快最省'], ['medium', '中', ''], ['high', '高', ''], ['xhigh', '很高', 'Claude 默认'], ['max', '最高', '最慢，额度用得最多']];
+const effortOf = (me) => state?.butlerEffort ?? me?.line?.effort ?? 'xhigh', effortName = (v) => EFFORTS.find(([k]) => k === v)?.[1] ?? v;
+async function setButlerEffort(v) { await post('/api/butler-model', { effort: v }); state.butlerEffort = v; }
 // a few choices in the sheet: the value of the one picked, or null
 function choose(title, opts, cur) {
   return new Promise((done) => {
@@ -1109,7 +1132,7 @@ function drawDesk() {
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
   $('#deskPc').html = pc ? `<h4>这台电脑</h4>${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
   const sel = bConv?.el.querySelector('.bsel');
-  if (sel) { sel.children[0].textContent = `账号 ${acct ?? (me ? me.acct + 1 : '?')}`; sel.children[1].textContent = modelName(state.butlerModel ?? me?.line?.model); }
+  if (sel) { sel.children[0].textContent = `账号 ${acct ?? (me ? me.acct + 1 : '?')}`; sel.children[1].textContent = modelName(state.butlerModel ?? me?.line?.model); sel.children[2].textContent = `思考强度 ${effortName(effortOf(me))}`; }
   $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${todo.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}`;
 }
 $('#desk').onclick = $('#deskR').onclick = (e) => { const r = e.target.closest('[data-open]'); if (r) openSession(r.dataset.open); };
@@ -1125,6 +1148,7 @@ $('#butler > .hint').onclick = async (e) => {
   if (b.dataset.bstart != null) startButler();
   else if (b.dataset.sa) { startAcct = +b.dataset.sa; drawButler(); }
   else if (b.dataset.sm) { try { await setButlerModel(b.dataset.sm); drawButler(); } catch (er) { toast(er.message); } }
+  else if (b.dataset.se) { try { await setButlerEffort(b.dataset.se); drawButler(); } catch (er) { toast(er.message); } }
 };
 $('#butler').ondragover = (e) => { if (bConv && !drag && e.dataTransfer.types.includes('Files')) e.preventDefault(); };
 $('#butler').ondrop = (e) => { e.preventDefault(); if (!drag) bConv?.attach([...e.dataTransfer.files]); };
@@ -1651,6 +1675,7 @@ function makeConv(body, title) {
     else if (d.act === 'swap') swap();
     else if (d.act === 'acct') { if (c.id && state?.sessions.some((x) => x.id === c.id)) swap(); else restartOn(); }
     else if (d.act === 'model') pickModel();
+    else if (d.act === 'effort') pickEffort(b);
     else if (d.act === 'end') endIt();
     else if (d.act === 'resume') { if (c.id) resume(); else start(); } // a new one that never got a record: started again in its folder
     else if (d.key === 'next' || d.key === 'prev') { // several questions: the next or the one before (out of 「Type something」 first: there ← → move in the words)
@@ -1796,6 +1821,28 @@ function makeConv(body, title) {
     if (busyNow || menuNow) return toast(`它正忙，已记下：下次启动用 ${modelName(m)}。等它答完再选一次就能马上换`, 4000);
     input('/model ' + m); setTimeout(() => input('\r'), 500);
     toast(`管家换成 ${modelName(m)} 了，下一句回复开始生效`);
+  }
+  // its thinking effort: a slider over its button, set on letting go; kept and told as the model is (/effort)
+  function pickEffort(btn) {
+    const was = $p('.effPop');
+    if (was) return was.close();
+    const send = btn.closest('.send'), cur = Math.max(0, EFFORTS.findIndex(([v]) => v === effortOf(state?.sessions.find(isButler))));
+    send.insertAdjacentHTML('beforeend', `<div class="effPop"><div class="lv"></div><div class="track">${'<i></i>'.repeat(EFFORTS.length)}<input type="range" min="0" max="${EFFORTS.length - 1}" step="1" value="${cur}" aria-label="思考强度"></div></div>`);
+    const pop = $p('.effPop'), r = pop.querySelector('input');
+    pop.style.right = `${Math.max(8, send.getBoundingClientRect().right - btn.getBoundingClientRect().right)}px`;
+    const show = () => { const [, l, sub] = EFFORTS[r.value]; pop.querySelector('.lv').innerHTML = `${l}${sub ? `<small>${sub}</small>` : ''}`; pop.style.setProperty('--f', r.value / (EFFORTS.length - 1)); };
+    show(); r.oninput = show;
+    const off = (e) => { if (!pop.contains(e.target) && !btn.contains(e.target)) close(); }, close = () => { pop.remove(); document.removeEventListener('pointerdown', off, true); };
+    document.addEventListener('pointerdown', off, true); pop.close = close;
+    r.onchange = async () => {
+      const [v, l] = EFFORTS[r.value];
+      try { await setButlerEffort(v); } catch (e) { return toast(e.message); }
+      drawDesk(); close();
+      if (!key || c.ended) return toast(`下次启动管家用「${l}」思考强度`);
+      if (busyNow || menuNow) return toast(`它正忙，已记下：下次启动用「${l}」。等它答完再选一次就能马上换`, 4000);
+      input('/effort ' + v); setTimeout(() => input('\r'), 500);
+      toast(`思考强度换成「${l}」了，下一句回复开始生效`);
+    };
   }
   async function endIt() {
     if (!key || c.ended || !confirm('结束这个对话？\n和在终端里按 Ctrl+C 一样，Claude 会退出，电脑上它的窗口也会关掉。对话记录会保留，之后可以从列表里接着聊。')) return;

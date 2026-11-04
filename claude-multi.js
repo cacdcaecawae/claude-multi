@@ -1215,7 +1215,7 @@ const WEB_TERMS = path.join(ROOT, 'web-terms.json'); // pids of the Claudes runn
 const WEB_RUN = path.join(ROOT, 'web-running.json'); // the conversations running in it (their ids): continued after a restart
 const WEB_USAGE = path.join(ROOT, 'web-usage.json'); // the quota as the page last got it
 const WEB_PORT = 7788;
-const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus', 'haiku']; // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
+const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus', 'haiku'], BUTLER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // the page's 管家 runs here (its CLAUDE.md beside the code); its newest conversation is the 管家
 // its 待办.md has something still to do: a "## " section above "## 已完成"
 const todoOpen = (text) => /^## (?!已完成)/m.test(String(text ?? '').split(/^## 已完成/m)[0]);
 // and its parts for the 操作台: each open thing (its 盯着 / 等 / 然后 / 状态 lines), the 已完成 lines (newest first)
@@ -1760,8 +1760,9 @@ async function web() {
     return out.sort((a, b) => b.at - a.at).slice(0, 30);
   };
   let tokAt = 0, tokCache = null;
-  // the model it starts with: its folder's settings.local.json (chosen on the page) over settings.json
-  const butlerModel = () => { for (const n of ['settings.local.json', 'settings.json']) try { const m = JSON.parse(fs.readFileSync(path.join(BUTLER, '.claude', n), 'utf8')).model; if (m) return m; } catch {} return null; };
+  // the model and effort it starts with (model, effortLevel): its folder's settings.local.json (chosen on the page) over
+  // settings.json
+  const butlerSet = (k) => { for (const n of ['settings.local.json', 'settings.json']) try { const m = JSON.parse(fs.readFileSync(path.join(BUTLER, '.claude', n), 'utf8'))[k]; if (m) return m; } catch {} return null; };
   const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
   const api = {
     // the questions other conversations wait on, as their screens show them (管家 mode has them as cards): each read again
@@ -1772,13 +1773,14 @@ async function web() {
       return { id: s.id, title: s.title, acct: s.acct + 1, menu: await a.menu };
     })),
     // one answered from such a card: by you, so it isn't held back as the 管家's typing is
-    // the 管家's model, for its next start (the page also tells a running one, with /model)
+    // the 管家's model or effort, for its next start (the page also tells a running one, with /model or /effort)
     'POST /api/butler-model': (q, b) => {
-      if (!BUTLER_MODELS.includes(b.model)) throw new Error('没有这个模型');
+      if (b.model != null && !BUTLER_MODELS.includes(b.model)) throw new Error('没有这个模型');
+      if (b.effort != null && !BUTLER_EFFORTS.includes(b.effort)) throw new Error('没有这个思考强度');
       const f = path.join(BUTLER, '.claude', 'settings.local.json');
       let j = {}; try { j = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
-      fs.writeFileSync(f, JSON.stringify({ ...j, model: b.model }, null, 2));
-      return { model: b.model };
+      fs.writeFileSync(f, JSON.stringify({ ...j, ...(b.model && { model: b.model }), ...(b.effort && { effortLevel: b.effort }) }, null, 2));
+      return { model: b.model, effort: b.effort };
     },
     'POST /api/pick': async (q, b) => {
       try {
@@ -1802,7 +1804,7 @@ async function web() {
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
       let tx = ''; try { tx = fs.readFileSync(path.join(BUTLER, '待办.md'), 'utf8'); } catch {}
       const tp = todoParts(tx);
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerModel(), pc: pcNow(),
+      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         todo: tp.todos.map((x) => x.t), todos: tp.todos, todoDone: tp.lines.slice(0, 5), timeline: timeline(tp.lines), waits: waitsNow() };
     },
     'GET /api/tokens': (q) => { if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) { tokCache = tokenStats(); tokAt = Date.now(); } return tokCache; },
