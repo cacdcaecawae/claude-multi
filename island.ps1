@@ -513,6 +513,7 @@ $PAY = @{
 # An account at its limit while conversations run on it: one notice (per account, until it's off its limit again) that
 # they wait for the reset; a click opens the running ones, each with 换账号继续. Nothing switches by itself.
 $script:limitTold = @{}
+$script:kind = 'claude' # the panel's cards: 'claude', or 'gpt' (GPT accounts, once there are any)
 function Check-Limits {
   $accs = @($script:data.accounts)
   for ($i = 0; $i -lt $accs.Count; $i++) {
@@ -555,6 +556,24 @@ function Render {
 
   $names = @{ five_hour = '5 小时'; seven_day = '7 天'; seven_day_opus = 'Opus 7 天'; seven_day_sonnet = 'Sonnet 7 天' }
   $Rows.Children.Clear()
+  # with a GPT account: Claude / GPT over the cards, which of them the panel shows (the pill stays on Claude)
+  $gs = @($d.gpt | Where-Object { $_ })
+  $kind = if ($gs.Count) { $script:kind } else { 'claude' }
+  if ($gs.Count) {
+    $seg = New-Object Windows.Controls.StackPanel
+    $seg.Orientation = 'Horizontal'; $seg.Margin = '4,0,0,8'
+    foreach ($k in 'claude', 'gpt') {
+      $b = New-Object Windows.Controls.Button
+      $b.Style = $win.FindResource('Text'); $b.Tag = $k; $b.Margin = '0,0,16,0'
+      $b.Content = if ($k -eq 'gpt') { "GPT · $($gs.Count) 个账号" } else { "Claude · $($all.Count) 个账号" }
+      $b.Opacity = if ($k -eq $kind) { 1 } else { 0.45 }
+      $b.FontWeight = if ($k -eq $kind) { 'SemiBold' } else { 'Normal' }
+      $b.Add_Click({ param($x) $script:kind = $x.Tag; Render })
+      [void]$seg.Children.Add($b)
+    }
+    [void]$Rows.Children.Add($seg)
+  }
+  if ($kind -eq 'gpt') { Render-Gpt $gs $names; return }
   $order = @(@($d.rec | Where-Object { $null -ne $_ }) + @(0..($all.Count - 1) | Where-Object { $_ -ne $d.rec }))
   foreach ($i in $order) {
     # Every account shows the same details; the recommended one is the bright card with the big button,
@@ -636,10 +655,40 @@ function Render {
   $add.Add_Click({ Open-Terminal $env:USERPROFILE 'new'; Collapse })
   [void]$Rows.Children.Add($add)
 }
+# The GPT accounts' cards: G1, G2… with each window Codex last reported (none till a reply on it), a launch button that
+# starts Codex on it in the folder picked (claude-multi start G1), and ＋ 添加 GPT 账号 (claude-multi new gpt)
+function Render-Gpt($gs, $names) {
+  for ($i = 0; $i -lt $gs.Count; $i++) {
+    $g = $gs[$i]
+    $lines = if (-not @($g.windows | Where-Object { $_ }).Count) { "<TextBlock Text='额度还没读到：在它上面回复过一次后才有' Margin='0,8,0,0' FontSize='11' Foreground='#8CFFFFFF' TextWrapping='Wrap'/>" } else {
+      foreach ($w in @($g.windows)) {
+        $nm = if ($names[$w.k]) { $names[$w.k] } else { $w.k }
+        $reset = if ($w.reset) { "$($w.reset)后重置" } else { '' }
+        "<StackPanel Orientation='Horizontal' Margin='0,8,0,0'><TextBlock Text='$(Esc $nm)' Width='64' FontSize='11' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
+        "$(Bar $w.pct 170 5 '0' 0.9)<TextBlock Text='$($w.pct)%' Width='46' TextAlignment='Right' FontSize='12' FontWeight='SemiBold' VerticalAlignment='Center'/>" +
+        "<TextBlock Text='$(Esc $reset)' Margin='14,0,0,0' FontSize='11' Foreground='#73FFFFFF' VerticalAlignment='Center'/></StackPanel>"
+      }
+    }
+    $card = X ("<Border $ns Background='#0AFFFFFF' CornerRadius='14' Padding='14,11,14,12' Margin='0,0,0,6'><StackPanel><DockPanel>" +
+      "<Button x:Name='Go' DockPanel.Dock='Right' Content='&#xE768;' ToolTip='用这个账号启动 Codex' Margin='6,-6,-8,-6'/>" +
+      "<TextBlock DockPanel.Dock='Right' Text='$(Esc $g.plan)' FontSize='12' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
+      "<Border Background='#2E19C37D' CornerRadius='6' Padding='6,1' VerticalAlignment='Center'><TextBlock Text='G$($i + 1)' FontSize='11' FontWeight='SemiBold' Foreground='#19C37D'/></Border>" +
+      "<TextBlock Text='$(Esc ("$($g.label)".Split('@')[0]))' ToolTip='$(Esc $g.label)' FontSize='13' FontWeight='SemiBold' Foreground='#CCFFFFFF' Margin='10,0,12,0' TextTrimming='CharacterEllipsis' VerticalAlignment='Center'/>" +
+      "</DockPanel>$($lines -join '')</StackPanel></Border>")
+    $go = $card.FindName('Go'); $go.Style = $win.FindResource('Icon'); $go.Tag = "G$($i + 1)"
+    $go.Add_Click({ param($s) Show-Projects $s.Tag })
+    [void]$Rows.Children.Add($card)
+  }
+  $add = New-Object Windows.Controls.Button
+  $add.Style = $win.FindResource('Text'); $add.Content = '＋ 添加 GPT 账号'; $add.HorizontalAlignment = 'Left'; $add.Margin = '4,0,0,0'
+  $add.Add_Click({ Open-Terminal $env:USERPROFILE 'new gpt'; Collapse })
+  [void]$Rows.Children.Add($add)
+}
 
 # --- launching ----------------------------------------------------------------------------------
-function Show-Projects([int]$n) {
-  $ProjTitle.Text = "用 $($script:data.accounts[$n - 1].label.Split('@')[0]) 启动到："
+function Show-Projects([string]$n) { # n: an account's number, or a GPT one's G1 (Codex then)
+  $who = if ($n -like 'G*') { "GPT $n · $(@($script:data.gpt)[[int]$n.Substring(1) - 1].label)" } else { $script:data.accounts[[int]$n - 1].label }
+  $ProjTitle.Text = "用 $($who.Split('@')[0]) 启动到："
   $ProjList.Children.Clear()
   foreach ($p in @($script:data.projects) + '') {
     $b = New-Object Windows.Controls.Button
@@ -663,7 +712,7 @@ function Show-Projects([int]$n) {
   $Rows.Visibility = 'Collapsed'; $ProjView.Visibility = 'Visible'; Pop
 }
 function Show-Rows { $ProjView.Visibility = 'Collapsed'; $Rows.Visibility = 'Visible' }
-function Launch([int]$n, [string]$dir) { Open-Terminal $dir "start $n"; Collapse }
+function Launch([string]$n, [string]$dir) { Open-Terminal $dir "start $n"; Collapse } # start 2, or start G1 (Codex)
 function Open-Terminal([string]$dir, [string]$cmdArgs) { # a new Windows Terminal window running claude-multi in $dir
   if ($dir.EndsWith('\')) { $dir += '.' } # "D:\" would escape its closing quote
   Start-Process wt.exe -ArgumentList "-d `"$dir`" node `"$js`" $cmdArgs"
@@ -829,6 +878,11 @@ function Live-Pid([string]$id) {
     $p = Get-Process -Id $j.pid -ErrorAction SilentlyContinue
     if ($p -and (-not $j.procStart -or "$($p.StartTime.ToFileTimeUtc())" -eq "$($j.procStart)")) { return [int]$j.pid }
   }
+  # a GPT conversation's Codex, by its marker (claude-multi writes one for each Codex it starts, in a terminal or the web service)
+  foreach ($f in @(Get-ChildItem "$root\gpt-live\*.json" -ErrorAction SilentlyContinue)) {
+    try { $j = [IO.File]::ReadAllText($f.FullName, [Text.Encoding]::UTF8) | ConvertFrom-Json } catch { continue }
+    if ($j.id -eq $id -and (Get-Process -Id $j.pid -ErrorAction SilentlyContinue)) { return [int]$j.pid }
+  }
   0
 }
 function Drop-Read($id) { # '*' = all of them
@@ -992,7 +1046,7 @@ function Open-Chats {
 
 function Load-Chats {
   $script:chatsAt = Get-Date
-  Run-Node 'sessions --json' {
+  Run-Node 'sessions --json --all' { # the GPT ones too (gpt: true; acct, from 0, their G number)
     param($out)
     # not @(...): PowerShell 5.1 hands back a JSON array as one item, which @() would wrap again
     try { $script:chats = ConvertFrom-Json $out } catch { $script:chats = @() }
@@ -1034,28 +1088,35 @@ function Draw-NewBar {
   $show = $script:folder -and $script:folder -notin '*', '#tokens'
   $cNewBar.Visibility = if ($show) { 'Visible' } else { 'Collapsed' }
   if (-not $show) { return }
-  $u = $script:data; $accs = @($u.accounts)
+  $u = $script:data; $accs = @($u.accounts); $gs = @($u.gpt | Where-Object { $_ })
   $rec = if ($u -and $null -ne $u.rec) { [int]$u.rec + 1 } else { 1 }
-  $n = if ($script:newAcct) { $script:newAcct } else { $rec }
-  $cNewGo.Content = "＋ 新建对话 · 账号 $n$(if ($n -eq $rec) { '（推荐）' })"
+  $n = if ($script:newAcct) { "$($script:newAcct)" } else { "$rec" } # an account's number, or a GPT one's G1
+  $cNewGo.Content = if ($n -like 'G*') { "＋ 新建 GPT 对话 · $n" } else { "＋ 新建对话 · 账号 $n$(if ($n -eq "$rec") { '（推荐）' })" }
   $cNewAccts.Children.Clear()
-  if ($accs.Count -lt 2) { return }
-  for ($i = 0; $i -lt $accs.Count; $i++) {
+  if ($accs.Count + $gs.Count -lt 2) { return }
+  $chips = @(for ($i = 0; $i -lt $accs.Count; $i++) {
     $a = $accs[$i]
     $note = if ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
-    $chip = X ((Chip-Xaml ($i + 1) "账号 $($i + 1)" $note $false) -replace '^<Border ', "<Border $ns ")
-    $chip.ToolTip = $a.label
-    $chip.Add_MouseLeftButtonUp({ param($x) $script:newAcct = [int]$x.Tag; Draw-NewBar })
+    @{ tag = $i + 1; text = "账号 $($i + 1)"; note = $note; tip = $a.label }
+  }) + @(for ($i = 0; $i -lt $gs.Count; $i++) { # the GPT accounts, by how much of their most used window is left
+    $w = @($gs[$i].windows | Sort-Object { $_.pct } -Descending)[0]
+    @{ tag = "G$($i + 1)"; text = "GPT G$($i + 1)"; note = $(if ($w) { "剩 $([Math]::Max(0, 100 - $w.pct))%" } else { '' }); tip = $gs[$i].label }
+  })
+  foreach ($c in $chips) {
+    $chip = X ((Chip-Xaml $c.tag $c.text $c.note $false) -replace '^<Border ', "<Border $ns ")
+    $chip.ToolTip = $c.tip
+    $chip.Add_MouseLeftButtonUp({ param($x) $script:newAcct = "$($x.Tag)"; Draw-NewBar })
     [void]$cNewAccts.Children.Add($chip)
   }
   Paint-Chips $cNewAccts $n
 }
 function New-Chat {
   $dir = $script:folder
-  $n = if ($script:newAcct) { $script:newAcct } elseif ($script:data -and $null -ne $script:data.rec) { [int]$script:data.rec + 1 } else { 1 }
+  $n = if ($script:newAcct) { "$($script:newAcct)" } elseif ($script:data -and $null -ne $script:data.rec) { [int]$script:data.rec + 1 } else { 1 }
   if (-not (Test-Path -LiteralPath $dir -PathType Container)) { Say "这个文件夹已经不在了：$dir"; return }
   Open-Terminal $dir "start $n"
-  Say "正在新窗口里用账号 $n 打开 Claude（$(Split-Path $dir -Leaf)），发出第一句话后它会出现在这个列表里"
+  $what = if ("$n" -like 'G*') { "GPT 账号 $n 打开 Codex" } else { "账号 $n 打开 Claude" }
+  Say "正在新窗口里用$what（$(Split-Path $dir -Leaf)），发出第一句话后它会出现在这个列表里"
 }
 
 function Render-List {
@@ -1780,14 +1841,14 @@ function Switch-Chat($s) {
 }
 # The dialog: which account (each with what it can still give; the conversation's own one not offered), while it
 # answers 答完再换 or 立即换. @{ n; now }, or $null when cancelled.
-function Chip-Xaml([int]$tag, [string]$text, [string]$note, [bool]$off) {
+function Chip-Xaml([string]$tag, [string]$text, [string]$note, [bool]$off) { # tag: an account's number, or a GPT one's G1
   "<Border Tag='$tag' CornerRadius='10' Padding='12,6' Margin='0,0,8,8' BorderThickness='1' Cursor='Hand' IsEnabled='$(-not $off)' Opacity='$(if ($off) { 0.4 } else { 1 })'>" +
   "<StackPanel Orientation='Horizontal'><TextBlock Text='$(Esc $text)' FontSize='13' FontWeight='SemiBold'/>" +
   "$(if ($note) { "<TextBlock Text='$(Esc $note)' FontSize='12' Foreground='#8CFFFFFF' Margin='6,0,0,0'/>" })</StackPanel></Border>"
 }
-function Paint-Chips($panel, [int]$sel) {
+function Paint-Chips($panel, [string]$sel) {
   foreach ($b in $panel.Children) {
-    $on = [int]$b.Tag -eq $sel
+    $on = "$($b.Tag)" -eq "$sel"
     $b.Background = if ($on) { '#330A84FF' } else { '#14FFFFFF' }
     $b.BorderBrush = if ($on) { '#B30A84FF' } else { '#1AFFFFFF' }
   }
@@ -1858,12 +1919,14 @@ function Add-Chat($s) {
   $rest = if ($s.web) { "<Border Background='#2E0A84FF' CornerRadius='8' Padding='8,2'><TextBlock Text='网页上' FontSize='11' FontWeight='SemiBold' Foreground='#64B5FF'/></Border>" }
     elseif ($s.pid) { "<Border Background='#2E30D158' CornerRadius='8' Padding='8,2'><TextBlock Text='运行中' FontSize='11' FontWeight='SemiBold' Foreground='#30D158'/></Border>" }
     else { "<TextBlock Text='$(Ago $s.at)' FontSize='12' Foreground='#66FFFFFF'/>" }
-  $act = if ($s.web) { '在电脑上打开' } elseif ($s.pid) { '切回窗口' } else { "继续 · 账号 $n" }
-  $who = if ($script:data) { "（$($script:data.accounts[$n - 1].label)）" } else { '' }
-  $tip = if ($s.web) { '在网页上运行：点击开一个终端标签接上它，两边同步，关掉标签不会结束对话' } elseif ($s.pid) { '还开着，点击切回它的终端标签' } else { "用账号 $n$who 在 $($s.cwd) 继续" }
+  # a GPT one (Codex): its own account always (G1, G2…), no switching nor renaming here; deleted is archived
+  $acctName = if ($s.gpt) { "GPT G$n" } else { "账号 $n" }
+  $act = if ($s.web) { '在电脑上打开' } elseif ($s.pid) { '切回窗口' } else { "继续 · $acctName" }
+  $who = if (-not $script:data) { '' } elseif ($s.gpt) { "（$(@($script:data.gpt)[$n - 1].label)）" } else { "（$($script:data.accounts[$n - 1].label)）" }
+  $tip = if ($s.web) { '在网页上运行：点击开一个终端标签接上它，两边同步，关掉标签不会结束对话' } elseif ($s.pid) { '还开着，点击切回它的终端标签' } else { "用$acctName$who 在 $($s.cwd) 继续" }
   # one folder can hold conversations of several accounts
   $sub = @(@(if ($mixed) { "<Run Text='$(Esc (Split-Path $s.cwd -Leaf))' Foreground='#99FFFFFF'/>" }) +
-    "<Run Text='账号 $([int]$s.acct + 1)'/>" +
+    $(if ($s.gpt) { "<Run Text='$acctName' Foreground='#19C37D'/>" } else { "<Run Text='$acctName'/>" }) +
     @(if ($s.prompt) { "<Run Text='$(Esc $s.prompt)' Foreground='#80FFFFFF'/>" })) -join "<Run Text='   ·   '/>"
   $b = New-Object Windows.Controls.Button
   $b.Style = $script:cw.FindResource('Item')
@@ -1877,28 +1940,27 @@ function Add-Chat($s) {
     "<TextBox x:Name='E' Visibility='Collapsed' FontSize='14' FontWeight='SemiBold' Background='#26FFFFFF' Foreground='White' CaretBrush='White' BorderThickness='0' Padding='4,1'/></Grid>" +
     "$(if ($sub) { "<TextBlock FontSize='12' Foreground='#59FFFFFF' Margin='0,4,0,0' TextTrimming='CharacterEllipsis'>$($sub -join '')</TextBlock>" })</StackPanel>" +
     "<StackPanel Grid.Column='2' Orientation='Horizontal' Margin='20,0,0,0' VerticalAlignment='Center'>" +
-    "<Button x:Name='Sure' Visibility='Collapsed' Cursor='Hand' VerticalAlignment='Center' Margin='0,0,8,0' ToolTip='放进回收站，Token 统计照常保留'>" +
+    "<Button x:Name='Sure' Visibility='Collapsed' Cursor='Hand' VerticalAlignment='Center' Margin='0,0,8,0' ToolTip='$(if ($s.gpt) { '归档（Codex 自己的功能，codex unarchive 能找回）' } else { '放进回收站，Token 统计照常保留' })'>" +
     "<Button.Template><ControlTemplate TargetType='Button'><Border Background='#FF453A' CornerRadius='10' Padding='11,3'><ContentPresenter/></Border></ControlTemplate></Button.Template>" +
-    "<TextBlock Text='确认删除' FontSize='12' FontWeight='SemiBold' Foreground='White'/></Button>" +
-    "$(if (-not $s.pid) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Del' Content='&#xE74D;' ToolTip='删除'/></Border>" })" +
-    "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Sw' Content='&#xE8AB;' ToolTip='换账号继续'/></Border>" +
-    "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,6,0'><Button x:Name='Ren' Content='&#xE70F;' ToolTip='改名'/></Border><Grid VerticalAlignment='Center'>" +
+    "<TextBlock Text='$(if ($s.gpt) { '确认归档' } else { '确认删除' })' FontSize='12' FontWeight='SemiBold' Foreground='White'/></Button>" +
+    "$(if (-not $s.pid) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Del' Content='&#xE74D;' ToolTip='$(if ($s.gpt) { '归档' } else { '删除' })'/></Border>" })" +
+    "$(if (-not $s.gpt) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Sw' Content='&#xE8AB;' ToolTip='换账号继续'/></Border>" })" +
+    "$(if (-not $s.gpt) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,6,0'><Button x:Name='Ren' Content='&#xE70F;' ToolTip='改名'/></Border>" })<Grid VerticalAlignment='Center'>" +
     "<ContentControl Style='{DynamicResource OffHover}' HorizontalAlignment='Right' VerticalAlignment='Center'>$rest</ContentControl>" +
     "<Border Style='{DynamicResource OnHover}' Background='$(if ($s.pid) { '#30D158' } else { '#E6FFFFFF' })' CornerRadius='10' Padding='11,3' HorizontalAlignment='Right'>" +
     "<TextBlock Text='$act' FontSize='12' FontWeight='SemiBold' Foreground='Black'/></Border></Grid></StackPanel></Grid>")
-  $sw = $b.Content.FindName('Sw'); $sw.Style = $script:cw.FindResource('Icon'); $sw.Tag = $s
-  $sw.Add_Click({ param($x, $e) $e.Handled = $true; Switch-Chat $x.Tag }) # not a click on the row
+  $sw = $b.Content.FindName('Sw') # none for a GPT one, nor 改名
+  if ($sw) { $sw.Style = $script:cw.FindResource('Icon'); $sw.Tag = $s; $sw.Add_Click({ param($x, $e) $e.Handled = $true; Switch-Chat $x.Tag }) } # not a click on the row
   $ren = $b.Content.FindName('Ren'); $ed = $b.Content.FindName('E')
-  $ren.Style = $script:cw.FindResource('Icon')
   $ed.Tag = @{ s = $s; t = $b.Content.FindName('T') }
-  $ren.Tag = $ed
-  $ren.Add_Click({
+  if ($ren) { $ren.Style = $script:cw.FindResource('Icon'); $ren.Tag = $ed }
+  if ($ren) { $ren.Add_Click({
     param($x, $e)
     $e.Handled = $true # not a click on the row
     $ed = $x.Tag
     $ed.Text = $ed.Tag.s.title; $ed.Tag.t.Visibility = 'Collapsed'; $ed.Visibility = 'Visible'
     [void]$ed.Focus(); $ed.SelectAll()
-  })
+  }) }
   $ed.Add_PreviewKeyDown({
     param($x, $e)
     if ($e.Key -eq 'Return') { $e.Handled = $true; Save-Name $x }
@@ -1918,7 +1980,7 @@ function Add-Chat($s) {
       $x.IsEnabled = $false
       Run-Node "delete $($x.Tag.id)" {
         param($out)
-        if ("$out" -notmatch '已删除') { Add-Alert @{ kind = 'ask'; info = $true; project = '没删成'; msg = ("$out".Trim(), '删除时出错了')[-not "$out".Trim()] } }
+        if ("$out" -notmatch '已删除|已归档') { Add-Alert @{ kind = 'ask'; info = $true; project = '没删成'; msg = ("$out".Trim(), '删除时出错了')[-not "$out".Trim()] } }
         Load-Chats
       }
     })
@@ -1929,6 +1991,7 @@ function Add-Chat($s) {
     $s = $x.Tag
     if ($s.web) { Open-WebChat $s.id $s.cwd }
     elseif ($s.pid) { Focus-Claude $s.pid }
+    elseif ($s.gpt) { Open-Terminal $s.cwd "resume $($s.id)" } # on its own account
     else { $n = Pick-Account $s; if ($n) { Open-Terminal $s.cwd "resume $($s.id) $n" } }
   })
   [void]$cList.Children.Add($b)
