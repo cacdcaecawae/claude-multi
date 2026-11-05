@@ -2231,7 +2231,7 @@ const table = (rows) => {
 // after a space doesn't end one: 「$5 和 $6」 stays money). Taken out before the markdown rules (its | and * aren't
 // theirs) and put back drawn; inline code is stepped over, a code block never looked in. One KaTeX can't read shows in
 // red as written (throwOnError: false); without KaTeX loaded, as written.
-const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]+?)(?<=\S)\$(?!\d)/g;
+const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]*?[^$\s])\$(?!\d)/g; // no lookbehind: an older Safari fails to read the whole script on one
 const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
 function md(t) {
   return t.split(/```[^\n]*\n?/).map((p, i) => {
