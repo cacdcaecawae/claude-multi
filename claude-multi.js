@@ -587,6 +587,17 @@ function gptMark(m) {
   fs.writeFileSync(`${f}.tmp`, JSON.stringify(m)); fs.renameSync(`${f}.tmp`, f);
 }
 const gptUnmark = (pid) => { try { fs.unlinkSync(path.join(GPT_LIVE, `${pid}.json`)); } catch {} };
+// what the page and the 管家 type, as a Codex (0.166, Windows) takes it: it has no paste marks (they arrive as plain
+// keys and nothing gets sent), and takes a new line inside the words as Enter (the first line would go alone) — so the
+// words without the marks, each new line as Shift+Enter in win32-input-mode (the pty and console-bridge.ps1 both turn
+// that into the key). Words: anything printable besides escape sequences.
+const SHIFT_ENTER = '\x1b[13;28;13;1;16;1_\x1b[13;28;13;0;16;1_';
+function codexKeys(raw) {
+  let data = String(raw).replace(/\x1b\[20[01]~/g, '');
+  const words = /[^\x00-\x1f\x7f]/.test(data.replace(/\x1b(\[[0-9;?]*[A-Za-z~_]|O.)/g, ''));
+  if (words) data = data.replace(/\r\n?|\n/g, SHIFT_ENTER);
+  return { data, words };
+}
 function gptMarks() {
   const out = [];
   for (const f of ls(GPT_LIVE).filter((x) => x.endsWith('.json'))) {
@@ -2602,7 +2613,7 @@ async function web() {
         if (t) return { key: t.key, kind: 'pty' };
         const s = gptSessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
-        if (s.pid && !s.web) { const t = mirror(s.pid); return { key: t.key, kind: t.kind }; } // in a terminal window: shown from there, as a Claude is (not a second Codex on it)
+        if (s.pid && !s.web) { const t = mirror(s.pid); t.codex = true; return { key: t.key, kind: t.kind }; } // in a terminal window: shown from there, as a Claude is (not a second Codex on it)
         if (b.live) throw new Error('这个对话已经不在运行了');
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         return { key: startGpt(s.acct + 1, s.cwd, s.id, cols, rows).key, kind: 'pty' };
@@ -2668,7 +2679,16 @@ async function web() {
       // Keys a page sends by itself (focus reports, arrows, Enter) aren't words.
       if (b.by === 'butler') { if (Date.now() - (t.typed ?? 0) < 120000) throw new Error('用户两分钟内在这个对话里打过字，先别发，过一会儿再试'); }
       else if (/[^\x00-\x1f\x7f]/.test(String(b.data).replace(/\x1b(\[[0-9;?]*[A-Za-z~]|O.)/g, ''))) t.typed = Date.now();
-      if (t.kind === 'pty') t.proc.write(String(b.data)); else t.proc.stdin.write(JSON.stringify({ k: String(b.data) }) + '\n');
+      const write = (d) => { if (t.kind === 'pty') t.proc.write(d); else t.proc.stdin.write(JSON.stringify({ k: d }) + '\n'); };
+      if (!t.gpt && !t.codex) { write(String(b.data)); return {}; }
+      // a Codex: in turn, an Enter alone waits until 600 ms after the last words (sooner, it's a new line in them)
+      const { data, words } = codexKeys(b.data);
+      t.q = (t.q ?? Promise.resolve()).then(async () => {
+        if (data === '\r') { const w = (t.wordsAt ?? 0) + 600 - Date.now(); if (w > 0) await sleep(w); }
+        if (t.gone) return;
+        write(data);
+        if (words) t.wordsAt = Date.now();
+      }).catch(() => {});
       return {};
     },
     'POST /api/resize': (q, b) => { // phone-sized for our own terminals; a window here keeps its own size
@@ -3052,7 +3072,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { codexBlocked, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

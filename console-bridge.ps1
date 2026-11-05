@@ -123,6 +123,9 @@ public static class Bridge {
         while (j < s.Length && !(s[j] >= '@' && s[j] <= '~')) j++;
         string seq = s.Substring(i + 2, Math.Min(j, s.Length - 1) - i - 1);
         i = j;
+        // win32-input-mode, Vk;Sc;Uc;Kd;Cs;Rc_: a key as Windows describes it (the press; its release is ours to add), e.g.
+        // Shift+Enter, which a Codex takes as a new line in what you write
+        if (seq.EndsWith("_")) { var f = seq.TrimEnd('_').Split(';'); if (f.Length >= 5 && f[3] == "1") Key(k, ushort.Parse(f[0]), (char)int.Parse(f[2]), uint.Parse(f[4])); continue; }
         // a paste's marks go through as typed: Claude takes what's between them as one paste, new lines and all
         if (seq == "200~" || seq == "201~") { foreach (char x in "\x1b[" + seq) Key(k, x == '\x1b' ? (ushort)0x1B : (ushort)0, x, 0); continue; }
         uint mod = seq.Contains(";2") ? SHIFT : seq.Contains(";5") ? CTRL : seq.Contains(";3") ? ALT : 0;
