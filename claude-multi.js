@@ -2166,11 +2166,12 @@ async function web() {
       if (!keyMatch(keyCookie(req.headers.cookie), webKey())) return out(403, '要用链接打开：在电脑上运行 claude-multi web-link。', text);
       if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
       if (req.method === 'GET' && url.pathname === '/screen.js') return out(200, fs.readFileSync(path.join(ROOT, 'screen.js'), 'utf8'), 'text/javascript; charset=utf-8');
-      // the terminal's files, from our node_modules: from the CDN abroad they took 7-8 s, and the page waits for
-      // them. Kept a year: the page asks with the version, ?6.0.0, so a new one is a new address.
-      const lib = /^\/lib\/(@xterm\/[\w-]+\/(?:lib|css)\/[\w.-]+\.(js|css))$/.exec(url.pathname);
+      // the terminal's files, and KaTeX's (the math in messages, its fonts too), from our node_modules: from the CDN
+      // abroad they took 7-8 s, and the page waits for them. Kept a year: the page asks with the version, ?6.0.0, so a
+      // new one is a new address.
+      const lib = /^\/lib\/((?:@xterm\/[\w-]+\/(?:lib|css)|katex\/dist(?:\/fonts)?)\/[\w.-]+\.(js|css|woff2))$/.exec(url.pathname);
       if (req.method === 'GET' && lib) {
-        const type = lib[2] === 'css' ? 'text/css' : 'text/javascript';
+        const type = { css: 'text/css', js: 'text/javascript', woff2: 'font/woff2' }[lib[2]];
         return reply(200, { 'content-type': type, 'cache-control': 'max-age=31536000, immutable' }, fs.readFileSync(path.join(ROOT, 'node_modules', lib[1])));
       }
       if (req.method === 'GET' && url.pathname === '/api/term') { // the terminal's output, as server-sent events
