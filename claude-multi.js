@@ -756,23 +756,24 @@ function gptLast(home, id, kind) {
     } finally { d.close(); }
   } catch { return ''; }
 }
+// its last turn ({status, started: when, in ms}), or null
 function gptTurn(home, id) {
   try {
     const d = codexDb(home, 'thread_history_1.sqlite');
-    try { return d.prepare('select status from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1').get(id)?.status ?? null; } finally { d.close(); }
+    try { const r = d.prepare('select status, started_at s from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1').get(id); return r ? { status: r.status, started: r.s * 1000 } : null; } finally { d.close(); }
   } catch { return null; }
 }
-// Codex's notify, which the web service sets on the ones it starts (-c notify=[node, this, notify, gpt]), its JSON the last
-// argument: a turn over (agent-turn-complete), or a permission asked (approval-requested). As Claude's hooks do: the
-// island's inbox and the notes the page and the phones read, named as the account's list names it. A helper agent's
-// thread notifies nothing.
-function notifyGpt(arg) {
+// Codex's notify, which the web service sets on the ones it starts (-c notify=[node, this, notify, gpt, its CODEX_HOME]),
+// its JSON the last argument: a turn over (agent-turn-complete), or a permission asked (approval-requested). As Claude's
+// hooks do: the island's inbox and the notes the page and the phones read, named as the account's list names it. A helper
+// agent's thread notifies nothing.
+function notifyGpt(arg, home = process.env.CODEX_HOME) {
   let j;
   try { j = JSON.parse(arg); } catch { return; }
   const kind = j.type === 'agent-turn-complete' ? 'done' : j.type === 'approval-requested' ? 'ask' : null, id = j['thread-id'];
   if (!kind || !id) return;
   let t = null;
-  try { const d = codexDb(process.env.CODEX_HOME, 'state_5.sqlite'); try { t = d.prepare('select title, name, first_user_message first, cwd, source from threads where id = ?').get(id); } finally { d.close(); } } catch {}
+  try { const d = codexDb(home, 'state_5.sqlite'); try { t = d.prepare('select title, name, first_user_message first, cwd, source from threads where id = ?').get(id); } finally { d.close(); } } catch {}
   if (/subagent/.test(t?.source ?? '')) return;
   const dir = longPath(t?.cwd) || j.cwd || '';
   dropNote({ kind, project: dir ? path.basename(dir) : '', msg: kind === 'done' ? '任务完成，等你下一步指示' : '需要你确认一下',
@@ -1059,8 +1060,8 @@ async function typeIn(key, live, text) {
 // A GPT conversation for the 管家's commands (Codex writes no session file: its state is in its records). Not while its
 // turn goes on; 2 minutes at most: a permission it asks keeps its turn going, and isn't read yet. Taken in: what it was
 // sent is its last message from you (within 20 s)
-async function gptUntilReady(s, ms = 120000) {
-  for (const end = Date.now() + ms; gptTurn(s.home, s.id) === 'inProgress'; await sleep(2000))
+async function gptUntilReady(s, ms = 120000) { // as the web service tells it: at work in the Codex running there
+  for (const end = Date.now() + ms; (await webPost(`/api/gpt?id=${encodeURIComponent(s.id)}`, null, 'GET')).busy; await sleep(2000))
     if (Date.now() >= end) throw new Error('它一直在忙，或者在等人确认（GPT 的确认还认不出来），没有发。用 chat look 看看，或让用户在网页上打开它');
 }
 async function gptWent(home, id, text) {
@@ -2117,8 +2118,10 @@ async function web() {
       const t = live.find((x) => x.gpt.id === s.id);
       if (!t) continue;
       s.pid = t.pid;
+      // its last turn going, and begun since this Codex started: one that died mid-turn left its turn marked going for good
       // ponytail: its records opened afresh each look (3 s) for each one running here; cache on the database's change, as listGpt does, if many run
-      try { const d = codexDb(s.home, 'thread_history_1.sqlite'); try { s.busy = d.prepare('select status from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1').get(s.id)?.status === 'inProgress'; } finally { d.close(); } } catch {}
+      const last = gptTurn(s.home, s.id);
+      s.busy = last?.status === 'inProgress' && last.started >= t.gpt.since - 5000;
     }
     gptCache = list; gptAt = Date.now();
     return list;
@@ -2189,9 +2192,9 @@ async function web() {
     if (!codex) throw new Error('没找到 codex，先装好 Codex：npm i -g @openai/codex');
     gptTrust(g.home, cwd);
     const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`;
-    // its turns' ends and its questions told as Claude's hooks tell them (claude-multi notify gpt): for the ones started here
+    // its turns' ends and its questions told as Claude's hooks tell them (claude-multi notify gpt <its CODEX_HOME>): for the ones started here
     // in place of the notify the account's config may name (a copy of ~/.codex's, for Codex's own app)
-    const told = ['-c', `notify=${JSON.stringify([process.execPath, __filename, 'notify', 'gpt'].map((p) => p.split(path.sep).join('/')))}`];
+    const told = ['-c', `notify=${JSON.stringify([process.execPath, __filename, 'notify', 'gpt', g.home].map((p) => p.split(path.sep).join('/')))}`];
     const proc = pty.spawn(codex.file, [...codex.pre, ...told, ...(resume ? ['resume', resume] : [])], { name: 'xterm-256color', cols, rows, cwd, env: { ...codexEnv(codex, g.home), TERM: 'xterm-256color' } });
     const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, gpt: { acct: acct - 1, home: g.home, id: resume ?? null, since: Date.now() } };
     proc.onData((d) => { t.buf = (t.buf + d).slice(-262144); send(t, 'data', d); });
@@ -2962,7 +2965,7 @@ if (require.main === module) {
   else if (cmd === 'list') list();
   else if (cmd === 'usage') usage(process.argv.slice(3));
   else if (cmd === 'warmup') warmup();
-  else if (cmd === 'notify') { if (process.argv[3] === 'gpt') notifyGpt(process.argv.at(-1)); else notify(process.argv[3]); } // gpt: Codex's, its JSON last
+  else if (cmd === 'notify') { if (process.argv[3] === 'gpt') { const a = process.argv.slice(4); notifyGpt(a.at(-1), a.length > 1 ? a[0] : undefined); } else notify(process.argv[3]); } // gpt [home]: Codex's, its JSON last
   else if (cmd === 'notes') { // the unread notifications, for the island: the same list the web page shows
     const list = listSessions(load()), pid = new Map(list.map((x) => [x.id, x.pid]));
     console.log(JSON.stringify(unreadNotes(list).map((n) => ({ ...n, pid: pid.get(n.id) ?? null }))));

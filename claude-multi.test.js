@@ -519,7 +519,8 @@ console.log('tokens ok');
   assert.deepEqual([r.items.length, r.items.at(-1).role, r.start], [6, 'done', 0]);
   // what the 管家 and the phones read of it: your last words (who set its turn going), its last reply, its turn's state
   const { gptLast, gptTurn, gistText } = require('./claude-multi');
-  assert.deepEqual([gptLast(home, 't1', 'userMessage'), gptLast(home, 't1', 'agentMessage'), gptTurn(home, 't1'), gptTurn(home, 'none')], ['再加个测试', '写好了', 'completed', null]);
+  h.exec('alter table thread_turns add column started_at integer'); // when each began, in seconds (Codex's column)
+  assert.deepEqual([gptLast(home, 't1', 'userMessage'), gptLast(home, 't1', 'agentMessage'), gptTurn(home, 't1')?.status, gptTurn(home, 'none')], ['再加个测试', '写好了', 'completed', null]);
   assert.equal(gistText('好的。\n\n已经改好了 `a.js`，测试都过了。\n\n```js\nx\n```'), '好的。 已经改好了 a.js，测试都过了。');
   h.close();
   const now = Math.floor(Date.now() / 1000);
@@ -538,11 +539,13 @@ console.log('tokens ok');
   const notifyGpt = (x) => require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), 'notify', 'gpt', j(x)],
     { env: { ...process.env, USERPROFILE: root, HOME: root, CODEX_HOME: home }, encoding: 'utf8' });
   notifyGpt({ type: 'agent-turn-complete', 'thread-id': 't1', 'last-assistant-message': '写好了' });
+  require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), 'notify', 'gpt', home, j({ type: 'approval-requested', 'thread-id': 't1' })],
+    { env: { ...process.env, USERPROFILE: root, HOME: root, CODEX_HOME: '' } }); // its home given, as the web service gives it
   notifyGpt({ type: 'agent-turn-complete', 'thread-id': 't3' });                 // a helper agent's
   notifyGpt({ type: 'something-else', 'thread-id': 't1' });
   const notes = fs.readFileSync(path.join(cm, 'notes.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  assert.deepEqual(notes.map((n) => [n.kind, n.id, n.title, n.project, n.gpt]), [['done', 't1', '修复登录', path.basename(work), true]]);
-  assert.equal(fs.readdirSync(path.join(cm, 'inbox')).length, 1);
+  assert.deepEqual(notes.map((n) => [n.kind, n.id, n.title, n.project, n.gpt]), [['done', 't1', '修复登录', path.basename(work), true], ['ask', 't1', '修复登录', path.basename(work), true]]);
+  assert.equal(fs.readdirSync(path.join(cm, 'inbox')).length, 2);
   fs.rmSync(root, { recursive: true, force: true });
   fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(work, { recursive: true, force: true });
   console.log('gpt ok');
