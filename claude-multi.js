@@ -2016,6 +2016,7 @@ async function web() {
       const t = live.find((x) => x.gpt.id === s.id);
       if (!t) continue;
       s.pid = t.pid;
+      // ponytail: its records opened afresh each look (3 s) for each one running here; cache on the database's change, as listGpt does, if many run
       try { const d = codexDb(s.home, 'thread_history_1.sqlite'); try { s.busy = d.prepare('select status from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1').get(s.id)?.status === 'inProgress'; } finally { d.close(); } } catch {}
     }
     gptCache = list; gptAt = Date.now();
