@@ -547,6 +547,33 @@ console.log('tokens ok');
   assert.deepEqual(notes.map((n) => [n.kind, n.id, n.title, n.project, n.gpt]), [['done', 't1', '修复登录', path.basename(work), true], ['ask', 't1', '修复登录', path.basename(work), true]]);
   assert.equal(fs.readdirSync(path.join(cm, 'inbox')).length, 2);
   fs.rmSync(root, { recursive: true, force: true });
+  // Running ones, by their markers (gpt-live/<pid>.json), in a ROOT of its own: a live Codex's marker bound to the thread made
+  // in its folder since it started, that thread listed running (in a terminal window: not web); a dead one's marker
+  // dropped. The first notify binds a marker not bound yet, and its note gives the island that Codex's pid
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-home-')), cm2 = path.join(root2, '.claude-multi'), marks = path.join(cm2, 'gpt-live');
+  fs.mkdirSync(marks, { recursive: true }); fs.writeFileSync(path.join(cm2, 'island.ps1.pid'), String(process.pid));
+  const env2 = { ...process.env, USERPROFILE: root2, HOME: root2, CODEX_HOME: home }, cli = path.join(__dirname, 'claude-multi.js');
+  const keep = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)']); // a Codex running
+  const mark = path.join(marks, `${keep.pid}.json`), unbound = () => fs.writeFileSync(mark, j({ pid: keep.pid, home, cwd: work, since: 0, id: null, web: false }));
+  unbound();
+  fs.writeFileSync(path.join(marks, '999999.json'), j({ pid: 999999, home, cwd: work, since: 0, id: null })); // its Codex gone (no such pid)
+  const listed = require('child_process').spawnSync(process.execPath, ['-e', `console.log(JSON.stringify(require(${j(cli)}).listGpt({ gpt: [{ home: ${j(home)} }] }).map((s) => [s.id, s.pid, s.web])))`],
+    { env: env2, encoding: 'utf8' });
+  assert.deepEqual(JSON.parse(listed.stdout), [['t1', keep.pid, false]], listed.stderr);
+  assert.deepEqual([fs.readdirSync(marks), JSON.parse(fs.readFileSync(mark, 'utf8')).id], [[`${keep.pid}.json`], 't1']);
+  unbound();
+  require('child_process').spawnSync(process.execPath, [cli, 'notify', 'gpt', j({ type: 'agent-turn-complete', 'thread-id': 't1' })], { env: env2 });
+  const card = JSON.parse(fs.readFileSync(path.join(cm2, 'inbox', fs.readdirSync(path.join(cm2, 'inbox'))[0]), 'utf8'));
+  assert.deepEqual([JSON.parse(fs.readFileSync(mark, 'utf8')).id, card.pid, card.gpt], ['t1', keep.pid, true]);
+  keep.kill();
+  fs.rmSync(root2, { recursive: true, force: true });
+  // Codex on a question of its own (a new account's first start: its plugins' hooks to trust), not at its input box: the
+  // 管家 is told its first line instead of typing into it; at the input box, or still starting, nothing to tell
+  const { codexBlocked } = require('./claude-multi');
+  assert.equal(codexBlocked(['', '  Hooks need review', '  3 hooks are new or changed.', '› 1. Review hooks', '  2. Trust all and continue', '  enter confirm · esc skip']), 'Hooks need review');
+  assert.equal(codexBlocked(['>_ OpenAI Codex (v0.166.0)', '› Ask Codex to do anything', '  GPT-6-Astra max · ~\\Desktop\\x', '  ? for shortcuts']), null);
+  assert.equal(codexBlocked(['>_ OpenAI Codex (v0.166.0) loading']), null);
+  assert.equal(codexBlocked(null), null);
   fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(work, { recursive: true, force: true });
   console.log('gpt ok');
 }

@@ -251,17 +251,20 @@ function newProfile() {
   return p;
 }
 
-function pick(header) {
+// gpt: the GPT accounts listed too, G1, G2… (typed g1): one picked comes back as { gpt: account }
+function pick(header, gpt = false) {
   for (;;) {
-    const reg = load();
-    if (!reg.profiles.length) {
+    const reg = load(), gs = gpt ? gptAccounts(reg) : [];
+    if (!reg.profiles.length && !gs.length) {
       console.log('没有已保存账号，请先运行 claude-multi new。');
       process.exit(1);
     }
     console.log(header);
     reg.profiles.forEach((p, i) => console.log(`  ${i + 1}. ${p.id === reg.active ? '*' : ' '} ${label(p)}`));
+    gs.forEach((g, i) => console.log(`  G${i + 1}.  ${g.label} (GPT${g.plan ? ` · ${g.plan}` : ''})`));
     console.log(`  ${reg.profiles.length + 1}. + 登录新账号\n`);
     const t = ask('请选择账号：');
+    if (/^g\d+$/i.test(t)) { const g = gs[Number(t.slice(1)) - 1]; return g ? { gpt: g } : null; }
     const n = /^\d+$/.test(t) ? Number(t) : 0;
     if (n !== reg.profiles.length + 1) return reg.profiles[n - 1] || null;
     newProfile(); // then show the menu again: adding an account never picks it implicitly
@@ -270,8 +273,9 @@ function pick(header) {
 }
 
 function launch(args) {
-  const p = pick('选择 Claude 账号：');
-  if (!p) { console.log('无效选择，未启动 Claude。'); process.exit(1); }
+  const p = pick('选择账号：', true);
+  if (!p) { console.log('无效选择，未启动。'); process.exit(1); }
+  if (p.gpt) return runGpt(p.gpt, args);
   start(p, args, 'interactive_select');
 }
 
@@ -568,6 +572,45 @@ function codexEnv(codex, home) {
   delete env.OPENAI_API_KEY;
   return env;
 }
+// its turns' ends and its questions told as Claude's hooks tell them (claude-multi notify gpt <its CODEX_HOME>), in place
+// of the notify the account's config may name (a copy of ~/.codex's, for Codex's own app)
+const gptNotifyArgs = (home) => ['-c', `notify=${JSON.stringify([process.execPath, __filename, 'notify', 'gpt', home].map((p) => p.split(path.sep).join('/')))}`];
+// The GPT conversations running (Codex writes no session file, as Claude does): a marker for each Codex, gpt-live\<pid>.json
+// {pid, home, cwd, since, id, web}, from whoever started it (claude-multi start Gn in a terminal, or the web service), gone
+// when it ends. Its thread id once known: resumed, at once; new, bound by account, folder and time, or by its first
+// notify. One whose Codex is gone (a terminal closed under it, the service stopped) is dropped when read.
+// ponytail: a pid reused after a crash reads as that conversation running; Claude's session files carry the process's start time for this
+const GPT_LIVE = path.join(ROOT, 'gpt-live');
+function gptMark(m) {
+  fs.mkdirSync(GPT_LIVE, { recursive: true });
+  const f = path.join(GPT_LIVE, `${m.pid}.json`);
+  fs.writeFileSync(`${f}.tmp`, JSON.stringify(m)); fs.renameSync(`${f}.tmp`, f);
+}
+const gptUnmark = (pid) => { try { fs.unlinkSync(path.join(GPT_LIVE, `${pid}.json`)); } catch {} };
+function gptMarks() {
+  const out = [];
+  for (const f of ls(GPT_LIVE).filter((x) => x.endsWith('.json'))) {
+    let m; try { m = JSON.parse(fs.readFileSync(path.join(GPT_LIVE, f), 'utf8')); } catch { continue; }
+    if (m.pid && alive(m.pid)) out.push(m); else gptUnmark(m.pid ?? f.slice(0, -5));
+  }
+  return out;
+}
+// claude-multi start Gn (or the menu's Gn, or resume): Codex on GPT account g in this terminal, as Claude is started, the
+// folder trusted in that account first; its marker kept while it runs. Ctrl+C is Codex's: this process waits for it.
+function runGpt(g, args = []) {
+  const codex = codexCmd();
+  if (!codex) { console.log('没找到 codex，先装好 Codex：npm i -g @openai/codex'); process.exit(1); }
+  gptTrust(g.home, process.cwd());
+  log('gpt_started', { profile_id: g.id });
+  console.log(`使用 GPT 账号：${g.label}\n正在启动 Codex……`);
+  process.on('SIGINT', () => {});
+  const child = require('child_process').spawn(codex.file, [...codex.pre, ...gptNotifyArgs(g.home), ...args], { stdio: 'inherit', env: codexEnv(codex, g.home) });
+  if (child.pid) gptMark({ pid: child.pid, home: g.home, cwd: process.cwd(), since: Date.now(), id: args[0] === 'resume' ? args[1] ?? null : null, web: false });
+  child.on('error', (e) => { gptUnmark(child.pid); console.error(`无法启动 codex：${e.message}`); process.exit(1); });
+  child.on('exit', (code) => { gptUnmark(child.pid); process.exit(code ?? 1); });
+}
+// a GPT account by its G name (g1, G2): null if there's none
+const gptByName = (x, reg) => (/^g\d+$/i.test(x ?? '') ? gptAccounts(reg)[Number(x.slice(1)) - 1] ?? null : null);
 // who a GPT account is, from its login (the ChatGPT id token's email and plan): read, never kept
 function gptWho(home) {
   try {
@@ -648,24 +691,30 @@ function codexDb(home, name) {
 // its write-ahead log written); a read that fails (a write in flight) keeps the last one.
 const gptHeads = new Map();
 function listGpt(reg = load()) {
-  const out = [];
+  const out = [], marks = gptMarks();
   gptAccounts(reg).forEach((g, acct) => {
     const f = path.join(g.home, 'state_5.sqlite'), at = Math.max(0, ...['', '-wal'].map((x) => { try { return fs.statSync(f + x).mtimeMs; } catch { return 0; } }));
     let r = gptHeads.get(f);
     if (at && r?.at !== at) try {
       const d = codexDb(g.home, 'state_5.sqlite');
       try {
-        r = { at, rows: d.prepare(`select id, cwd, title, name, preview, first_user_message first, updated_at_ms up, model, reasoning_effort effort from threads
+        r = { at, rows: d.prepare(`select id, cwd, title, name, preview, first_user_message first, updated_at_ms up, created_at_ms made, model, reasoning_effort effort from threads
           where archived = 0 and first_user_message != '' and source not like '%subagent%' order by updated_at_ms desc`).all() };
       } finally { d.close(); }
       gptHeads.set(f, r);
     } catch {}
+    // its running ones: a marker not bound yet takes the first thread made here, in its folder, since it started
+    const mine = marks.filter((m) => sameDir(m.home, g.home)), taken = new Set(mine.map((m) => m.id).filter(Boolean));
+    for (const m of mine.filter((x) => !x.id)) {
+      const t = [...(r?.rows ?? [])].sort((a, b) => a.made - b.made).find((x) => x.made >= m.since - 5000 && !taken.has(x.id) && sameDir(longPath(x.cwd), m.cwd));
+      if (t) { m.id = t.id; taken.add(t.id); gptMark(m); }
+    }
     for (const t of r?.rows ?? []) {
       const cwd = longPath(t.cwd), title = String(t.name || t.title || t.first || t.preview || '').split('\n')[0].trim().slice(0, 100);
       if (!cwd || !title || !fs.existsSync(cwd)) continue;
-      const prompt = String(t.preview ?? '').split('\n')[0].trim().slice(0, 200);
+      const prompt = String(t.preview ?? '').split('\n')[0].trim().slice(0, 200), m = mine.find((x) => x.id === t.id);
       out.push({ id: t.id, gpt: true, acct, home: g.home, cwd, title, prompt: prompt && prompt !== title ? prompt : null, at: t.up,
-        model: t.model, effort: t.effort, pid: null, busy: false, wait: false });
+        model: t.model, effort: t.effort, pid: m?.pid ?? null, web: !!m?.web, since: m?.since ?? null, busy: false, wait: false });
     }
   });
   return out.sort((a, b) => b.at - a.at);
@@ -776,8 +825,12 @@ function notifyGpt(arg, home = process.env.CODEX_HOME) {
   try { const d = codexDb(home, 'state_5.sqlite'); try { t = d.prepare('select title, name, first_user_message first, cwd, source from threads where id = ?').get(id); } finally { d.close(); } } catch {}
   if (/subagent/.test(t?.source ?? '')) return;
   const dir = longPath(t?.cwd) || j.cwd || '';
+  // its Codex, by its marker (a click on the island's card finds its window by that pid): this thread's, or the one in its
+  // folder not bound yet, which this binds
+  const mine = home ? gptMarks().filter((m) => sameDir(m.home, home)) : [], m = mine.find((x) => x.id === id) ?? (dir && mine.find((x) => !x.id && sameDir(x.cwd, dir)));
+  if (m && !m.id) gptMark({ ...m, id });
   dropNote({ kind, project: dir ? path.basename(dir) : '', msg: kind === 'done' ? '任务完成，等你下一步指示' : '需要你确认一下',
-    title: String(t?.name || t?.title || t?.first || '').split('\n')[0].trim().slice(0, 100) || null, id, gpt: true });
+    title: String(t?.name || t?.title || t?.first || '').split('\n')[0].trim().slice(0, 100) || null, id, gpt: true }, m?.pid ?? null);
 }
 
 // The key the island presses to split a conversation's tab into its own window before tiling: Windows
@@ -826,7 +879,13 @@ function rename(id, name) {
 // files) is copied into N's first when another account wrote it last.
 function resume(id, n) {
   const reg = load(), s = listSessions(reg).find((x) => x.id === id);
-  if (!s) { console.log(`找不到对话 ${id}。`); process.exit(1); }
+  if (!s) { // a GPT one: on its own account (a GPT one changes none), in its folder
+    const g = listGpt(reg).find((x) => x.id === id);
+    if (!g) { console.log(`找不到对话 ${id}。`); process.exit(1); }
+    if (g.pid) { console.log(g.web ? '这个对话正在网页服务里运行：用 claude-multi attach 接上它。' : `这个对话正在运行（进程 ${g.pid}），直接切到它的窗口即可。`); process.exit(1); }
+    process.chdir(g.cwd);
+    return runGpt(gptAccounts(reg)[g.acct], ['resume', id]);
+  }
   if (s.pid) { console.log(`这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
   const p = reg.profiles[Number(n) - 1] ?? reg.profiles[s.acct];
   if (!p) { console.log('请指定账号编号：claude-multi resume <对话 id> <账号编号>'); process.exit(1); }
@@ -922,7 +981,7 @@ async function attach(id) {
   const size = () => ({ cols: process.stdout.columns || 100, rows: process.stdout.rows || 30 });
   let key;
   try {
-    const r = await post('/api/open', { id, ...size() });
+    const r = await post('/api/open', { id, gpt: listGpt().some((x) => x.id === id), ...size() });
     if (r.kind !== 'pty') throw new Error('它在电脑的终端窗口里运行，直接切过去就行');
     key = r.key;
   } catch (e) { console.log(`接不上这个对话：${e.message}`); process.exit(1); }
@@ -1029,6 +1088,13 @@ async function screenRows(key, { max = 5000, still = 800 } = {}) {
   term.dispose();
   return rows;
 }
+// A Codex screen on a question of its own (hooks to trust, a folder, an update…) instead of its input box: its first line,
+// for the 管家 to pass on. null at its input box, or with nothing to tell (still starting: typed to as before)
+function codexBlocked(rows) {
+  const s = (rows ?? []).join('\n');
+  if (!rows || /for shortcuts|Ask Codex to do anything/.test(s) || !/\benter\b/i.test(s)) return null;
+  return rows.map((r) => r.trim()).find(Boolean)?.slice(0, 80) ?? '';
+}
 // "15:40" (the next one), or a date and time: when to wake
 function parseUntil(s, now = Date.now()) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(s ?? '');
@@ -1075,7 +1141,7 @@ async function chatLook(ref) {
     let run = null;
     try { run = await webPost(`/api/gpt?id=${encodeURIComponent(s.id)}`, null, 'GET'); } catch {}
     const ans = gptLast(s.home, s.id, 'agentMessage') || '（还没有回答）';
-    return console.log(`「${s.title}」 ${s.id}\nGPT 账号 G${s.acct + 1} · ${s.cwd} · ${!run?.pid ? '没在运行' : run.busy ? '网页上 · 正在回复' : '网页上 · 空闲'}\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}`
+    return console.log(`「${s.title}」 ${s.id}\nGPT 账号 G${s.acct + 1} · ${s.cwd} · ${!run?.pid ? '没在运行' : `${run.web ? '网页上' : '电脑的终端窗口里'} · ${run.busy ? '正在回复' : '空闲'}`}\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}`
       + (run?.pid ? '\n\n（GPT 对话问的选择题、要的权限确认这里还认不出来：它一直停着不动时，让用户在网页上打开看看）' : ''));
   }
   const live = s.pid ? await waitLive((j) => j.pid === s.pid) : null;
@@ -1106,7 +1172,8 @@ async function chatSay(ref, text, before) {
   const s = findChat(ref), t0 = Date.now();
   if (s.gpt) { // a GPT one: its Codex in the web service (continued there if it isn't), up, and done with its turn first
     const { key } = await webPost('/api/open', { id: s.id, gpt: true, cols: 120, rows: 40 });
-    await screenRows(key, { max: 20000, still: 1500 });
+    const stuck = codexBlocked(await screenRows(key, { max: 20000, still: 1500 }));
+    if (stuck != null) throw new Error(`「${s.title}」的 GPT 停在它自己的一个问题上（${stuck}），没有发。请用户在网页上打开它，切到「终端」回答一次`);
     await gptUntilReady(s);
     await before?.(s.id);
     await pasteEnter(key, text);
@@ -1157,7 +1224,11 @@ async function chatNew(dir, text, n, before, gpt = false) {
     n = n || 1;
     if (!gptAccounts()[n - 1]) throw new Error(`没有 GPT 账号 G${n}（用户要先运行 claude-multi new gpt 加一个）`);
     const { key } = await webPost('/api/open', { dir, acct: n, gpt: true, cols: 120, rows: 40 });
-    await screenRows(key, { max: 20000, still: 1500 });
+    const stuck = codexBlocked(await screenRows(key, { max: 20000, still: 1500 }));
+    if (stuck != null) { // no conversation yet, so not in any list: ended, not left waiting where nobody finds it
+      for (let k = 0; k < 2; k++) { await webPost('/api/input', { key, by: 'butler', data: '\x03' }); await sleep(600); }
+      throw new Error(`GPT 账号 G${n} 的 Codex 一启动就停在它自己的一个问题上（${stuck}），没有开成对话。请用户在网页上新开一个 GPT 对话（这个账号），切到「终端」回答一次，以后就不会再问`);
+    }
     await pasteEnter(key, text);
     // Codex makes its thread with the first message: its id (which a ticket is bound to: before) once it's typed, a second
     // or two into its turn, before that turn can end
@@ -1260,7 +1331,16 @@ function copyTo(s, p) {
 // counting a record once it's gone.
 function del(id) {
   const reg = load(), s = listSessions(reg).find((x) => x.id === id);
-  if (!s) { console.log(`找不到对话 ${id}。`); process.exit(1); }
+  if (!s) { // a GPT one: archived, Codex's own way (codex unarchive brings it back)
+    const g = listGpt(reg).find((x) => x.id === id), codex = g && codexCmd();
+    if (!g) { console.log(`找不到对话 ${id}。`); process.exit(1); }
+    if (g.pid) { console.log('这个对话正在运行，先结束它再删。'); process.exit(1); }
+    if (!codex) { console.log('没找到 codex'); process.exit(1); }
+    const r = spawnSync(codex.file, [...codex.pre, 'archive', id], { env: codexEnv(codex, g.home), encoding: 'utf8', windowsHide: true });
+    if (r.status !== 0) { console.log(`没归档成：${String(r.stderr || r.stdout || r.error?.message || '').trim().split('\n').pop()}`); process.exit(1); }
+    log('gpt_archived', { session_id: id });
+    return console.log(`已归档「${g.title}」，在 Codex 里用 codex unarchive 能找回。`);
+  }
   if (s.pid) { console.log('这个对话正在运行，先关掉它的窗口再删。'); process.exit(1); }
   tokenStats();
   const paths = reg.profiles.flatMap((p) => ls(path.join(p.configDir, 'projects')).flatMap((folder) =>
@@ -1523,7 +1603,8 @@ async function usage(args) {
     return c(pct >= 80 ? 31 : pct >= 50 ? 33 : 32, '█'.repeat(n)) + c(2, '░'.repeat(10 - n));
   };
   const { res, ok, open, rec, cols, json } = await usageState(reg);
-  if (args.includes('--json')) return console.log(JSON.stringify(json)); // same numbers as the table below
+  // same numbers as the table below; and each GPT account's usage, as its records last said it (the island's GPT cards)
+  if (args.includes('--json')) return console.log(JSON.stringify({ ...json, gpt: gptAccounts(reg).map((g) => ({ label: g.label, plan: g.plan, ...(gptUsage(g.home) ?? { windows: null }) })) }));
   const lw = Math.max(...reg.profiles.map((p) => width(p.label)));
   const pw = Math.max(...reg.profiles.map((p) => width(p.subscriptionType ?? '')));
   const cell = (w) => (w ? `${bar(w.utilization)} ${String(Math.round(w.utilization)).padStart(3)}%  `
@@ -2097,15 +2178,22 @@ async function web() {
   // and which of them run here. A Codex started here is bound to its thread once Codex has one (in that account, in that
   // folder, made since it started: there before its first message); a resumed one knows its own. One running here is
   // busy while its last turn is going (its record says), idle otherwise, whatever an ended one left there.
+  // Its marker (gpt-live) as any Codex's, for the CLI and the island: written once its pid is known, its thread added when
+  // bound (here, or by a notify or a listing first: taken from it then), gone when it ends.
   const gptLive = () => [...terms.values()].filter((t) => t.gpt && !t.gone);
+  const markWeb = (t) => gptMark({ pid: t.pid, home: t.gpt.home, cwd: t.cwd, since: t.gpt.since, id: t.gpt.id, web: true });
   function bindGpt() {
-    const live = gptLive();
+    const live = gptLive(), marks = gptMarks();
     for (const t of live.filter((x) => !x.gpt.id)) try {
-      const d = codexDb(t.gpt.home, 'state_5.sqlite'), taken = new Set(live.map((x) => x.gpt.id));
-      try {
-        t.gpt.id = d.prepare("select id, cwd from threads where created_at_ms >= ? and source not like '%subagent%' order by created_at_ms").all(t.gpt.since - 5000)
-          .find((r) => !taken.has(r.id) && sameDir(longPath(r.cwd), t.cwd))?.id ?? null;
-      } finally { d.close(); }
+      t.gpt.id = marks.find((m) => m.pid === t.pid)?.id ?? null;
+      if (!t.gpt.id) {
+        const d = codexDb(t.gpt.home, 'state_5.sqlite'), taken = new Set([...live.map((x) => x.gpt.id), ...marks.map((m) => m.id)].filter(Boolean));
+        try {
+          t.gpt.id = d.prepare("select id, cwd from threads where created_at_ms >= ? and source not like '%subagent%' order by created_at_ms").all(t.gpt.since - 5000)
+            .find((r) => !taken.has(r.id) && sameDir(longPath(r.cwd), t.cwd))?.id ?? null;
+        } finally { d.close(); }
+        if (t.gpt.id && t.marked) markWeb(t);
+      }
       if (t.gpt.id) gptCache = null;
     } catch {}
   }
@@ -2116,12 +2204,12 @@ async function web() {
     const list = listGpt(load()), live = gptLive();
     for (const s of list) {
       const t = live.find((x) => x.gpt.id === s.id);
-      if (!t) continue;
-      s.pid = t.pid;
+      if (t) { s.pid = t.pid; s.web = true; s.since = t.gpt.since; }
+      if (!s.pid) continue; // running here, or in a terminal window (its marker)
       // its last turn going, and begun since this Codex started: one that died mid-turn left its turn marked going for good
-      // ponytail: its records opened afresh each look (3 s) for each one running here; cache on the database's change, as listGpt does, if many run
+      // ponytail: its records opened afresh each look (3 s) for each one running; cache on the database's change, as listGpt does, if many run
       const last = gptTurn(s.home, s.id);
-      s.busy = last?.status === 'inProgress' && last.started >= t.gpt.since - 5000;
+      s.busy = last?.status === 'inProgress' && last.started >= (s.since ?? 0) - 5000;
     }
     gptCache = list; gptAt = Date.now();
     return list;
@@ -2152,7 +2240,7 @@ async function web() {
   function archiveGpt(id) {
     const s = gptSessions().find((x) => x.id === id);
     if (!s) throw new Error('找不到这个对话，可能已经删了');
-    if (gptLive().some((t) => t.gpt.id === id)) throw new Error('这个对话正在运行，先结束它');
+    if (s.pid || gptLive().some((t) => t.gpt.id === id)) throw new Error('这个对话正在运行，先结束它');
     if (!codex) throw new Error('没找到 codex');
     const free = hold(id, 'change');
     return new Promise((ok, no) => require('child_process').execFile(codex.file, [...codex.pre, 'archive', id], { env: codexEnv(codex, s.home), windowsHide: true },
@@ -2192,13 +2280,14 @@ async function web() {
     if (!codex) throw new Error('没找到 codex，先装好 Codex：npm i -g @openai/codex');
     gptTrust(g.home, cwd);
     const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`;
-    // its turns' ends and its questions told as Claude's hooks tell them (claude-multi notify gpt <its CODEX_HOME>): for the ones started here
-    // in place of the notify the account's config may name (a copy of ~/.codex's, for Codex's own app)
-    const told = ['-c', `notify=${JSON.stringify([process.execPath, __filename, 'notify', 'gpt', g.home].map((p) => p.split(path.sep).join('/')))}`];
-    const proc = pty.spawn(codex.file, [...codex.pre, ...told, ...(resume ? ['resume', resume] : [])], { name: 'xterm-256color', cols, rows, cwd, env: { ...codexEnv(codex, g.home), TERM: 'xterm-256color' } });
+    const proc = pty.spawn(codex.file, [...codex.pre, ...gptNotifyArgs(g.home), ...(resume ? ['resume', resume] : [])], { name: 'xterm-256color', cols, rows, cwd, env: { ...codexEnv(codex, g.home), TERM: 'xterm-256color' } });
     const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, gpt: { acct: acct - 1, home: g.home, id: resume ?? null, since: Date.now() } };
-    proc.onData((d) => { t.buf = (t.buf + d).slice(-262144); send(t, 'data', d); });
-    proc.onExit(() => { t.gone = true; gptCache = null; send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
+    // its pid once the pseudo-terminal is ready (0 before): its marker, and the web-terms list the island reads
+    proc.onData((d) => {
+      if (!t.marked && proc.pid) { t.marked = proc.pid; markWeb(t); saveTerms(); }
+      t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
+    });
+    proc.onExit(() => { t.gone = true; gptCache = null; if (t.marked) gptUnmark(t.marked); saveTerms(); send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t); gptCache = null;
     log('web_session', { profile_id: g.id, cwd, args: resume ? `resume ${resume}` : '' });
     return t;
@@ -2261,7 +2350,7 @@ async function web() {
   }
   // for the island and `claude-multi attach`: which running conversations are ours
   function saveTerms() {
-    const up = [...terms.values()].filter((t) => t.kind === 'pty' && !t.gpt && !t.gone && t.pid);
+    const up = [...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid); // a GPT one's too: the island opens it here
     try { fs.writeFileSync(WEB_TERMS, JSON.stringify(up.map((t) => t.pid))); } catch {}
   }
   // and which conversations run here, by id (one just started has it once listed: looked at every 10 s too). A service
@@ -2420,7 +2509,7 @@ async function web() {
       // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
       // and the GPT ones among them, by when they were last written (a GPT one runs here or not at all)
-      for (const { home, ...s } of gptSessions()) list.push({ ...s, where: s.pid ? 'web' : null, line: s.pid ? { model: s.model, effort: s.effort } : null });
+      for (const { home, ...s } of gptSessions()) list.push({ ...s, where: !s.pid ? null : s.web ? 'web' : 'pc', line: s.pid ? { model: s.model, effort: s.effort } : null });
       list.sort((a, b) => b.at - a.at);
       return { usage: usageCache, gpt: gptState(), sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow() };
@@ -2455,7 +2544,7 @@ async function web() {
     // started here has a record once Claude wrote the first message (its session file, named by its pid, says
     // which conversation it is), until then none.
     // a GPT conversation as the 管家's chat look asks: running here (its Codex is nowhere else), and at work
-    'GET /api/gpt': (q) => { const s = gptSessions().find((x) => x.id === q.get('id')); return { pid: s?.pid ?? null, busy: !!s?.busy }; },
+    'GET /api/gpt': (q) => { const s = gptSessions().find((x) => x.id === q.get('id')); return { pid: s?.pid ?? null, web: !!s?.web, busy: !!s?.busy }; },
     'GET /api/history': (q) => {
       const g = terms.get(q.get('key') ?? '')?.gpt;
       if (g || q.has('gpt')) { // a GPT one's: its thread's items. Started here and no thread yet: nothing
@@ -2463,7 +2552,7 @@ async function web() {
         const id = g ? g.id : q.get('id'), home = g ? g.home : gptSessions().find((x) => x.id === id)?.home;
         if (g && !id) return { items: [], start: 0, end: 0 };
         if (!home) throw new Error('找不到这个对话');
-        const live = !!g || gptLive().some((x) => x.gpt.id === id); // running here: a reply mid-stream waits
+        const live = !!g || gptLive().some((x) => x.gpt.id === id) || !!gptSessions().find((x) => x.id === id)?.pid; // running (here, or in a terminal): a reply mid-stream waits
         return { ...gptHistory(home, id, { from: q.get('from') || undefined, end: q.get('end') || undefined, live }), id };
       }
       const { t, file } = recordOf(q);
@@ -2507,6 +2596,7 @@ async function web() {
         if (t) return { key: t.key, kind: 'pty' };
         const s = gptSessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
+        if (s.pid && !s.web) throw new Error('它在电脑的终端窗口里运行，直接切过去就行'); // not a second Codex on it
         if (b.live) throw new Error('这个对话已经不在运行了');
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         return { key: startGpt(s.acct + 1, s.cwd, s.id, cols, rows).key, kind: 'pty' };
@@ -2956,7 +3046,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { codexBlocked, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -2996,7 +3086,9 @@ if (require.main === module) {
     if (process.argv.includes('--json')) console.log(JSON.stringify(all));
     else for (const s of all) console.log(`${s.pid ? '●' : ' '} ${new Date(s.at).toLocaleString('zh-CN', { hour12: false })}  ${pad(s.who, 16)} ${s.id}  ${path.basename(s.cwd)} · ${s.title}`);
   }
-  else if (cmd === 'start') { // start N [claude args]: no menu, used by the island
+  else if (cmd === 'start') { // start N [claude args]: no menu, used by the island; start Gn: Codex on GPT account n
+    const g = gptByName(process.argv[3]);
+    if (/^g/i.test(process.argv[3] ?? '')) { if (!g) { console.log('没有这个 GPT 账号：用 claude-multi list 看编号（G1、G2…）'); process.exit(1); } return runGpt(g, process.argv.slice(4)); }
     const p = load().profiles[Number(process.argv[3]) - 1];
     if (!p) { console.log('没有这个账号编号。'); process.exit(1); }
     start(p, process.argv.slice(4), 'island');
