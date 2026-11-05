@@ -561,6 +561,15 @@ console.log('tokens ok');
     { env: env2, encoding: 'utf8' });
   assert.deepEqual(JSON.parse(listed.stdout), [['t1', keep.pid, false]], listed.stderr);
   assert.deepEqual([fs.readdirSync(marks), JSON.parse(fs.readFileSync(mark, 'utf8')).id], [[`${keep.pid}.json`], 't1']);
+  // one started after its thread was made, which opened it from Codex's own resume list: bound by the thread's lock file,
+  // made when a Codex takes it (none: not bound)
+  const later = () => fs.writeFileSync(mark, j({ pid: keep.pid, home, cwd: work, since: Date.now(), id: null, web: false }));
+  const listing = () => JSON.parse(require('child_process').spawnSync(process.execPath, ['-e', `console.log(JSON.stringify(require(${j(cli)}).listGpt({ gpt: [{ home: ${j(home)} }] }).map((s) => [s.id, s.pid])))`], { env: env2, encoding: 'utf8' }).stdout);
+  later();
+  assert.deepEqual(listing(), [['t1', null]]);
+  fs.mkdirSync(path.join(home, 'thread-writer-locks')); fs.writeFileSync(path.join(home, 'thread-writer-locks', 't1.lock'), '');
+  assert.deepEqual([listing(), JSON.parse(fs.readFileSync(mark, 'utf8')).id], [[['t1', keep.pid]], 't1']);
+  fs.rmSync(path.join(home, 'thread-writer-locks'), { recursive: true });
   unbound();
   require('child_process').spawnSync(process.execPath, [cli, 'notify', 'gpt', j({ type: 'agent-turn-complete', 'thread-id': 't1' })], { env: env2 });
   const card = JSON.parse(fs.readFileSync(path.join(cm2, 'inbox', fs.readdirSync(path.join(cm2, 'inbox'))[0]), 'utf8'));

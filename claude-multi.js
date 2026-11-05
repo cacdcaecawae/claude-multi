@@ -703,10 +703,16 @@ function listGpt(reg = load()) {
       } finally { d.close(); }
       gptHeads.set(f, r);
     } catch {}
-    // its running ones: a marker not bound yet takes the first thread made here, in its folder, since it started
+    // its running ones: a marker not bound yet takes the first thread, in its folder, made since it started, or opened since
+    // (Codex's own resume list): Codex holds a thread through thread-writer-locks/<id>.lock, made when it takes it and
+    // gone when it lets go
+    // ponytail: bound once; a Codex that opens another conversation from its resume list later keeps the first one's
     const mine = marks.filter((m) => sameDir(m.home, g.home)), taken = new Set(mine.map((m) => m.id).filter(Boolean));
+    const lockAt = (id) => { try { return fs.statSync(path.join(g.home, 'thread-writer-locks', `${id}.lock`)).mtimeMs; } catch { return 0; } };
     for (const m of mine.filter((x) => !x.id)) {
-      const t = [...(r?.rows ?? [])].sort((a, b) => a.made - b.made).find((x) => x.made >= m.since - 5000 && !taken.has(x.id) && sameDir(longPath(x.cwd), m.cwd));
+      const since = (at) => (at >= m.since - 5000 ? at : 0);
+      const t = (r?.rows ?? []).filter((x) => !taken.has(x.id) && sameDir(longPath(x.cwd), m.cwd))
+        .map((x) => ({ x, at: since(x.made) || since(lockAt(x.id)) })).filter((c) => c.at).sort((a, b) => a.at - b.at)[0]?.x;
       if (t) { m.id = t.id; taken.add(t.id); gptMark(m); }
     }
     for (const t of r?.rows ?? []) {
