@@ -408,13 +408,22 @@ console.log('tokens ok');
 {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
   const part = (re) => src.match(re)[0];
-  const md = new Function(`${part(/^const esc = .*$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)();
+  const md = new Function('katex', `${part(/^const esc = .*$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
   assert.ok(t.includes('<tr><td>c | d</td><td>&lt;e&gt;</td></tr>'), t);              // escaped as everything else
   assert.ok(t.startsWith('看这个\n<div class="tbl">') && t.endsWith('</table></div>后面'), t);
   assert.equal(md('| grep x\n'), '<div class="mono">| grep x\n</div>');               // not a table
+  // math, drawn by KaTeX: in the line and set apart; its | and * left to it, not the table and bold rules
+  const m = md(String.raw`估计 $\hat{X}_0=X_t-\sigma(t)\hat{R}_t$，**设 $X_{t_N}=X_p$**` + '\n' + String.raw`$$X_{t'}=\frac{\sigma_{t'}^2}{\sigma_t^2}X_t+\sqrt{|a|*b}$$`);
+  assert.ok(m.startsWith('估计 <span class="katex">') && m.includes('<b>设 <span class="katex">') && m.includes('class="katex-display"'), m);
+  assert.ok(!m.includes('$') && !m.includes('<td>') && !m.includes('&lt;b'), m);
+  assert.equal(md('花了 $5 和 $6，$1.50和$2.00'), '花了 $5 和 $6，$1.50和$2.00');           // money stays money
+  assert.equal(md('用 `echo $HOME` 看 $x'), '用 <code>echo $HOME</code> 看 $x');              // code stepped over; a lone $ stays
+  assert.ok(md('```\n$a$\n```').includes('<pre>$a$</pre>'));                                     // never in a code block
+  assert.ok(md(String.raw`坏的 $\frac{a$ 公式`).includes('katex-error'));                          // shown in red as written
+  assert.ok(md(String.raw`行内 \(a<b\) 和 \[c>d\]`).includes('katex-display') && !md(String.raw`\(a<b\)`).includes('&lt;b\\)'));
   console.log('md ok');
 }
 
