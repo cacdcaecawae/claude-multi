@@ -1018,7 +1018,7 @@ function remove(x) {
 // Helpers started before this Claude process (since) died with the previous one, when the conversation was
 // closed and resumed. ponytail: ones over 6 h old count as gone too, in case their end fell outside the tail
 function helpersBusy(tail, since = 0) {
-  const busy = new Map(), spawns = new Map(), team = new Set();
+  const busy = new Map(), spawns = new Map(), team = new Set(), tasks = new Map(); // tasks: a background task's id → its launch
   for (const line of tail.split('\n')) {
     if (line.length > 262144) continue; // an image or long output, never a marker: skipping keeps this fast
     let j;
@@ -1039,7 +1039,13 @@ function helpersBusy(tail, since = 0) {
           team.add(spawns.get(p.tool_use_id));
           busy.set(`@${spawns.get(p.tool_use_id)}`, at);
         }
-        else if (/^(Async agent launched|Command running in background)/.test(r)) busy.set(p.tool_use_id, at);
+        else if (/^(Async agent launched|Command running in background)/.test(r)) {
+          busy.set(p.tool_use_id, at);
+          const id = /\b(?:ID|agentId)\s*[:=]\s*([\w-]+)/i.exec(r)?.[1]; // what TaskStop names it by
+          if (id) tasks.set(id, p.tool_use_id);
+        }
+        // stopped by Claude itself (TaskStop): no task-notification ever comes for it, so it's done here
+        else if (/(?:stopped task|killed shell):?\s*([\w-]+)/i.test(r)) busy.delete(tasks.get(/(?:stopped task|killed shell):?\s*([\w-]+)/i.exec(r)[1]));
       }
     }
     for (const m of text.matchAll(/<teammate-message teammate_id="([^"]+)"[^>]*>(\s*\{"type":"(idle_notification|shutdown_approved)")?/g)) {
@@ -1327,18 +1333,33 @@ const notesUnseen = (notes, seenTo, now = Date.now()) => notes.filter((n) => n.a
 // and what they do to the open tickets: a turn ended (done) is kept with its last words (what it stopped on), one stopped
 // on a question as held; each is news for the 管家. Taken twice (the tickets saved, the place not, when the service
 // ended), a note changes nothing: each is kept once, by its time, and only those after the ticket was given to this
-// conversation count. The ids of the tickets with news.
-function notesInto(all, notes, words) {
+// conversation count. The ids of the tickets with news; a turn you set going yourself (quiet) is kept, not news: you're
+// there, the 管家 stays out of it. Unless the worker reported in it (做完, a question): that still goes to the 管家, to
+// check the result against what you asked and close the ticket.
+function notesInto(all, notes, words, quiet = () => false) {
   const news = new Set();
   for (const n of notes) for (const t of all) {
     if (!n.id || t.end || t.conv !== n.id) continue;
     const ev = t.ev ?? [], given = ev.findLast((e) => e.k === 'give')?.at ?? 0;
     if (n.at <= given || ev.some((e) => (e.k === 'stop' || e.k === 'held') && e.at === n.at)) continue;
+    const from = ev.findLast((e) => e.k === 'stop')?.at ?? given, said = ev.some((e) => (e.k === 'ask' || REPORT_WORDS.includes(e.k)) && e.at > from && e.at <= n.at);
     (t.ev ??= []).push(n.kind === 'done' ? { at: n.at, k: 'stop', text: words(n.id) } : { at: n.at, k: 'held', text: '' });
     t.ev.splice(0, Math.max(0, t.ev.length - 60));
-    news.add(t.id);
+    if (!quiet(n) || said) news.add(t.id);
   }
   return [...news];
+}
+// Who set a conversation's turn going: its last prompt (Claude Code's last-prompt line: the words typed, unwrapped, the
+// first 200 or so; a background task finishing doesn't change it) against what the 管家 typed there (its log, the first
+// 40): 'butler' (those words, sent in the 6 hours before the turn ended), 'you' (anything else typed), null (none read).
+// Whoever set it going gets its end: the 管家 a notice, you a push.
+function turnBy(prompt, sent, at) {
+  const flat = (t) => String(t ?? '').replace(/\s+/g, ' ').trim(), p = flat(prompt);
+  if (!p) return null;
+  // the log keeps a message whole up to 40 characters, else its first 40: a short one (「继续」) must be the very words,
+  // or the user's own 「继续做第三部分」 would pass for it
+  const same = (s) => { const w = flat(s.text); return s.text.length >= 40 ? p.startsWith(w) : p === w; };
+  return sent.some((s) => s.at <= at + 60000 && at - s.at < 6 * 3600e3 && same(s)) ? 'butler' : 'you';
 }
 // of the tickets queued for the 管家: those to tell now, each as it stands, and those kept (back at work, or so a list read
 // a moment ago says: told once they stop)
@@ -1353,10 +1374,14 @@ function tellSplit(ids, tickets, list) {
 // of those a notice didn't get through for, the ones told again: twice at most each, counted for each ticket apart (a
 // batch that kept missing doesn't use up the next one's)
 const tellAgain = (tries, ids) => ids.filter((i) => { const c = (tries.get(i) ?? 0) + 1; if (c > 2) { tries.delete(i); return false; } tries.set(i, c); return true; });
-// the one notice the 管家 gets for the tickets that moved, each as it stands now (the panel's 你 is the user here)
-function butlerNotice(items) {
-  const say = ({ t, st: [stage, , text] }) => `#${t.id}「${t.name}」${stage.replace('你', '用户')}${text ? '：' + (text.length > 300 ? text.slice(0, 300) + '…' : text) : ''}`;
-  return `[系统通知] 工单有动静：${items.map(say).join('；')}。按规矩处理：停下了的推它继续或告诉用户；等用户回答、验收的，攒起来告诉用户；等确认的先 chat look 看它在问什么。`;
+// the one notice the 管家 gets: the tickets that moved, each as it stands now (the panel's 你 is the user here), and the
+// conversations it asked something outside a ticket that answered (or stopped on a question)
+function butlerNotice(items, replies = []) {
+  const clip = (t) => (t.length > 300 ? t.slice(0, 300) + '…' : t);
+  const say = ({ t, st: [stage, , text] }) => `#${t.id}「${t.name}」${stage.replace('你', '用户')}${text ? '：' + clip(text) : ''}`;
+  const back = (r) => (r.kind === 'ask' ? `「${r.title}」在你发消息后停在一个确认上（chat look 看它在问什么）` : `「${r.title}」回复了你发的消息${r.text ? '：' + clip(r.text) : ''}`);
+  return '[系统通知] ' + [items.length && `工单有动静：${items.map(say).join('；')}。按规矩处理：停下了的推它继续或告诉用户；等用户回答、验收的，攒起来告诉用户；等确认的先 chat look 看它在问什么。`,
+    replies.length && `${replies.map(back).join('；')}。你答应过回头告诉用户的，现在告诉用户。`].filter(Boolean).join(' ');
 }
 // The 管家's waits in the background (chat wait), a file each while it runs; one whose process is gone (a restart
 // ended it) is dropped. The soonest first.
@@ -1867,13 +1892,22 @@ async function web() {
     fs.closeSync(fd);
     return gist(tail, max);
   };
+  // who set a conversation's latest turn going (turnBy), by its record
+  const ownerOf = (n) => {
+    const f = sessions().find((x) => x.id === n.id)?.file;
+    if (!f) return null;
+    const fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size, tail = slice(fd, Math.max(0, size - 4194304), 4194304);
+    fs.closeSync(fd);
+    return turnBy(field(tail, 'lastPrompt', true), blogSent(n.id), n.at);
+  };
   setInterval(() => {
     const fresh = readNotes(20).filter((n) => n.at > pushedTo && Date.now() - n.at > 1500).reverse();
     if (!fresh.length) return;
     pushedTo = fresh.at(-1).at;
-    // the 管家 running: only it tells you (chat tell), but for its own question (stuck on that, it can't)
+    // the 管家 running: a turn it set going is its to tell you (chat tell), not pushed; its own reply neither, but its own
+    // question is (stuck on that, it can't tell you); the rest, the ones you set going, as ever
     const me = sessions().find((x) => x.pid && sameDir(x.cwd, BUTLER));
-    for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000) && (!me || (n.id === me.id && n.kind === 'ask')))
+    for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000) && (!me || (n.id === me.id ? n.kind === 'ask' : ownerOf(n) !== 'butler')))
       try {
         const s = n.id && sessions().find((x) => x.id === n.id), name = n.title || n.project || 'Claude', folder = s ? (sameDir(s.cwd, BUTLER) ? '' : path.basename(s.cwd)) : n.project;
         const m = { ...pushText({ ...n, gist: lastWords(s?.file) }), id: n.id, group: name, ask: n.kind === 'ask',
@@ -1890,9 +1924,16 @@ async function web() {
     const fresh = notesUnseen(allNotes(), seenTo);
     if (!fresh.length) return;
     try {
-      const words = (id) => lastWords(sessions().find((x) => x.id === id)?.file, 300);
-      if (fresh.some((n) => n.id && readTickets().some((t) => !t.end && t.conv === n.id))) // the tickets first, then the place
-        for (const i of editTickets((all) => notesInto(all, fresh, words))) { toTell.add(i); tries.delete(i); } // news: its tries start again
+      const words = (id) => lastWords(sessions().find((x) => x.id === id)?.file, 300), owner = new Map();
+      const by = (n) => (owner.has(n) ? owner.get(n) : owner.set(n, ownerOf(n)).get(n)), open = readTickets().filter((t) => !t.end);
+      if (fresh.some((n) => n.id && open.some((t) => t.conv === n.id))) // the tickets first, then the place
+        for (const i of editTickets((all) => notesInto(all, fresh, words, (n) => by(n) === 'you'))) { toTell.add(i); tries.delete(i); } // news: its tries start again
+      // a conversation the 管家 asked something outside a ticket (chat say, chat new): its answer goes back to it (a recent
+      // one: the notes from the start, read after no place was saved, aren't news)
+      for (const n of fresh) if (n.id && Date.now() - n.at < 600000 && !open.some((t) => t.conv === n.id) && by(n) === 'butler') {
+        replies.set(n.id, { title: n.title || n.project || n.id, kind: n.kind, text: n.kind === 'done' ? words(n.id) : '' });
+        tries.delete(`c:${n.id}`);
+      }
       seenTo = fresh.at(-1).at;
       fs.writeFileSync(TICKETS_SEEN, JSON.stringify(seenTo));
     } catch (e) { log('ticket_note_fail', { err: e.message }); }
@@ -2125,11 +2166,12 @@ async function web() {
       if (!keyMatch(keyCookie(req.headers.cookie), webKey())) return out(403, '要用链接打开：在电脑上运行 claude-multi web-link。', text);
       if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
       if (req.method === 'GET' && url.pathname === '/screen.js') return out(200, fs.readFileSync(path.join(ROOT, 'screen.js'), 'utf8'), 'text/javascript; charset=utf-8');
-      // the terminal's files, from our node_modules: from the CDN abroad they took 7-8 s, and the page waits for
-      // them. Kept a year: the page asks with the version, ?6.0.0, so a new one is a new address.
-      const lib = /^\/lib\/(@xterm\/[\w-]+\/(?:lib|css)\/[\w.-]+\.(js|css))$/.exec(url.pathname);
+      // the terminal's files, and KaTeX's (the math in messages, its fonts too), from our node_modules: from the CDN
+      // abroad they took 7-8 s, and the page waits for them. Kept a year: the page asks with the version, ?6.0.0, so a
+      // new one is a new address.
+      const lib = /^\/lib\/((?:@xterm\/[\w-]+\/(?:lib|css)|katex\/dist(?:\/fonts)?)\/[\w.-]+\.(js|css|woff2))$/.exec(url.pathname);
       if (req.method === 'GET' && lib) {
-        const type = lib[2] === 'css' ? 'text/css' : 'text/javascript';
+        const type = { css: 'text/css', js: 'text/javascript', woff2: 'font/woff2' }[lib[2]];
         return reply(200, { 'content-type': type, 'cache-control': 'max-age=31536000, immutable' }, fs.readFileSync(path.join(ROOT, 'node_modules', lib[1])));
       }
       if (req.method === 'GET' && url.pathname === '/api/term') { // the terminal's output, as server-sent events
@@ -2206,23 +2248,25 @@ async function web() {
   // what's waiting to be told: the tickets that moved, given once it's idle (and you aren't typing there), each as it
   // stands then (one back at work by then left out). Taken only if it got to work within 20 s; else (a menu was up, it
   // was starting) told again the next round, twice at most.
-  const toTell = new Set(), tries = new Map(); // ticket id → notices of it that didn't get through
+  // replies: conversation id → the answer to what it asked outside a ticket {title, kind, text}
+  const toTell = new Set(), replies = new Map(), tries = new Map(); // tries: ticket id, or c:<conversation id> → notices that didn't get through
   let telling = false;
   setInterval(async () => {
-    const t = toTell.size && !telling && [...terms.values()].find((x) => x.kind === 'pty' && !x.gone && x.pid && sameDir(x.cwd, BUTLER));
+    const t = (toTell.size || replies.size) && !telling && [...terms.values()].find((x) => x.kind === 'pty' && !x.gone && x.pid && sameDir(x.cwd, BUTLER));
     if (!t || Date.now() - (t.typed ?? 0) < 10000 || ptyStatus(t) !== 'idle') return; // not running: kept till it is
-    const ids = [...toTell], list = sessions();
-    toTell.clear();
+    const ids = [...toTell], list = sessions(), rs = [...replies];
+    toTell.clear(); replies.clear();
     const { items, keep } = tellSplit(ids, readTickets(), list);
     keep.forEach((i) => toTell.add(i));
-    if (!items.length) return;
+    if (!items.length && !rs.length) return;
+    const keys = [...items.map((o) => o.t.id), ...rs.map(([id]) => `c:${id}`)];
     telling = true;
     try {
-      await tellIn(t, butlerNotice(items));
-      for (let k = 0; k < 10; k++) { await sleep(2000); if (['busy', 'shell'].includes(ptyStatus(t))) { items.forEach((o) => tries.delete(o.t.id)); return log('butler_told', { n: items.length }); } }
-      const again = tellAgain(tries, items.map((o) => o.t.id));
-      again.forEach((i) => toTell.add(i));
-      log('butler_tell_missed', { n: items.length, again: again.length });
+      await tellIn(t, butlerNotice(items, rs.map(([, r]) => r)));
+      for (let k = 0; k < 10; k++) { await sleep(2000); if (['busy', 'shell'].includes(ptyStatus(t))) { keys.forEach((i) => tries.delete(i)); return log('butler_told', { n: keys.length }); } }
+      const again = tellAgain(tries, keys);
+      for (const i of again) if (typeof i === 'number') toTell.add(i); else replies.set(i.slice(2), rs.find(([id]) => `c:${id}` === i)[1]);
+      log('butler_tell_missed', { n: keys.length, again: again.length });
     } finally { telling = false; }
   }, 3000);
   // After a restart each one that ran here is continued on its account, back idle (one cut mid-answer isn't told to go
@@ -2464,7 +2508,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
