@@ -14,6 +14,7 @@
 <link rel="manifest" href="/manifest.json">
 <meta name="apple-mobile-web-app-title" content="Claude 多账号">
 <link rel="stylesheet" href="/lib/@xterm/xterm/css/xterm.css?6.0.0">
+<link rel="stylesheet" href="/lib/katex/dist/katex.min.css?0.19.1">
 <script>
 // the look, 跟随系统 (the default) / 亮色 / 暗色, kept in this browser; set before anything is drawn (no dark flash)
 const LOOK = matchMedia('(prefers-color-scheme: light)');
@@ -443,6 +444,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .col { max-width: 1600px; margin: 0 auto; /* wide: your messages out to the right, Claude's to the left; capped for a huge screen */ display: flex; flex-direction: column; gap: 10px; }
   .hOld, .hNew, .live { display: contents; } /* their messages sit in the column's flow */
   .hm { white-space: pre-wrap; word-break: break-word; font-size: 15px; line-height: 1.65; color: var(--msg); } /* the conversation a size up from the frame (13px), for reading */
+  .hm .katex { font-size: 1.05em; white-space: normal; } /* a formula's own spacing, not the message's pre-wrap */
+  .hm .katex-display { margin: 4px 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; } /* a wide one scrolls, on a phone too */
   .hm.user { align-self: flex-end; max-width: 85%; margin-top: 14px; background: var(--accentBg); color: var(--fgHi); border-radius: 8px 8px 2px 8px; padding: 7px 12px; }
   /* on your side but not your words: the service waking the 管家, a command, what the 管家 typed, a thing handed to it */
   .hm.user .lab { display: block; font-size: 11px; font-weight: 600; margin-bottom: 2px; color: var(--fg2); }
@@ -720,6 +723,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 <script src="/lib/@xterm/addon-unicode11/lib/addon-unicode11.js?0.9.0"></script>
 <script src="/lib/@xterm/addon-webgl/lib/addon-webgl.js?0.19.0"></script>
 <script src="/lib/@xterm/addon-web-links/lib/addon-web-links.js?0.12.0"></script>
+<script src="/lib/katex/dist/katex.min.js?0.19.1"></script>
 <script src="/screen.js"></script>
 <script>
 /* global parseScreen */ // screen.js
@@ -2439,8 +2443,9 @@ const table = (rows) => {
 // Links, opened in a new tab: [words](address), or an address as it is, on the escaped text (an &amp; in it stays: the
 // attribute reads it as &), up to a space, a tag, a quote, a backtick or Chinese text right after it; its sentence's end
 // not in it, nor a ")" with no "(" for it in the address (a [words](address) one may hold one pair: a wiki page's).
-// Last: an address in a `code` or **bold** is a link in it, and neither is cut across a link's markup
-const LINK = /\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()<`]|\([^\s()<`]*\))+)\)|https?:\/\/(?:[^\s<&`\u3000-\u9fff\uff00-\uffef]|&amp;)+/g;
+// Last: an address in a `code` or **bold** is a link in it, and neither is cut across a link's markup. A formula's
+// \0 mark ends an address (math is put back after links: KaTeX's own markup holds an http:// address)
+const LINK = /\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()<`\0]|\([^\s()<`\0]*\))+)\)|https?:\/\/(?:[^\s<&`\0\u3000-\u9fff\uff00-\uffef]|&amp;)+/g;
 const anchor = (u, words) => `<a href="${u}" target="_blank" rel="noopener">${words}</a>`;
 const link = (m, words, u) => {
   if (u) return anchor(u, words);
@@ -2448,10 +2453,21 @@ const link = (m, words, u) => {
   while (bare.endsWith(')') && bare.split(')').length > bare.split('(').length) { bare = bare.slice(0, -1); end = ')' + end; } // "(see https://…)"
   return anchor(bare, bare) + end;
 };
+// Math as Claude writes it, drawn by KaTeX: $$…$$ and \[…\] set apart, $…$ and \(…\) in the line (a $ before a digit or
+// after a space doesn't end one: 「$5 和 $6」 stays money). Taken out before the markdown rules (its | and * aren't
+// theirs) and put back drawn; inline code is stepped over, a code block never looked in. One KaTeX can't read shows in
+// red as written (throwOnError: false); without KaTeX loaded, as written.
+const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]*?[^$\s])\$(?!\d)/g; // no lookbehind: an older Safari fails to read the whole script on one
+const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
 function md(t) {
-  return esc(t).split(/```[^\n]*\n?/).map((p, i) => i % 2 ? `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${p.replace(/\n$/, '')}</pre></div>`
-    : p.replace(/((?:^\|.*\n?)+)/gm, table).replace(/`([^`\n]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)).join('');
+  return t.split(/```[^\n]*\n?/).map((p, i) => {
+    if (i % 2) return `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${esc(p.replace(/\n$/, ''))}</pre></div>`;
+    const math = [];
+    p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
+    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)
+      .replace(/\u0000(\d+)\u0000/g, (_, k) => tex(...math[k]));
+  }).join('');
 }
 // 复制: a code block's code, or an answer as Claude wrote it (its Markdown). 展开全部 / 收起 a long message of yours
 // (folded again, kept in sight)

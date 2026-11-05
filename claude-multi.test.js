@@ -51,6 +51,13 @@ const bg = [use('b1', 'Bash', { run_in_background: true }), res('b1', 'Command r
 assert.equal(helpersBusy(bg.join('\n')), true);
 assert.equal(helpersBusy([...bg, says('<task-notification>\n<tool-use-id>b1</tool-use-id>\n<status>completed</status>')].join('\n')), false);
 assert.equal(helpersBusy([use('a1', 'Agent', { description: 'x' }), res('a1', 'the subagent finished: here is its report')].join('\n')), false); // foreground agent
+// stopped by Claude itself: no task-notification ever comes, its TaskStop result says so (as a ticket's worker did,
+// stopping its preview server: no "done" note, and the ticket never saw its turn end)
+const stop = (id, task) => [use(id, 'TaskStop', { task_id: task }), res(id, `{"message":"Successfully stopped task: ${task} (node \\"x.js\\")","task_id":"${task}"}`)];
+const bg2 = [use('b2', 'Bash', { run_in_background: true }), res('b2', 'Command running in background with ID: boy8woozg. Output is being written to: x')];
+assert.equal(helpersBusy([...bg, ...bg2, ...stop('s1', 'q1')].join('\n')), true); // one of two stopped
+assert.equal(helpersBusy([...bg, ...bg2, ...stop('s1', 'q1'), ...stop('s2', 'boy8woozg')].join('\n')), false); // both
+assert.equal(helpersBusy([...bg, ...stop('s3', 'other')].join('\n')), true); // another task's stop
 console.log('helpers ok');
 assert.equal(helpersBusy(spawn.join('\n'), Date.now() + 1000), false); // spawned before this Claude started: gone
 console.log('resume ok');
@@ -401,8 +408,8 @@ console.log('tokens ok');
 {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
   const part = (re) => src.match(re)[0];
-  const md = new Function(`${part(/^const esc = .*$/m)}\n${part(/^const svg = .*$/m)}\n${part(/^const I = [\s\S]*?\};$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}
-    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)();
+  const md = new Function('katex', `${part(/^const esc = .*$/m)}\n${part(/^const svg = .*$/m)}\n${part(/^const I = [\s\S]*?\};$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}
+    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
@@ -420,6 +427,19 @@ console.log('tokens ok');
   assert.equal(md('q https://a.com/x?a=1&b=2. "https://q.com"'), `q ${a('https://a.com/x?a=1&amp;b=2')}. &quot;${a('https://q.com')}&quot;`);
   assert.equal(md('[文档](https://d.com/p) `https://c.x` **https://b.x**'), `${a('https://d.com/p', '文档')} <code>${a('https://c.x')}</code> <b>${a('https://b.x')}</b>`);
   assert.ok(md('```\nhttps://in.code/x\n```').endsWith('<pre>https://in.code/x</pre></div>'));
+  // math, drawn by KaTeX: in the line and set apart; its | and * left to it, not the table and bold rules
+  const m = md(String.raw`估计 $\hat{X}_0=X_t-\sigma(t)\hat{R}_t$，**设 $X_{t_N}=X_p$**` + '\n' + String.raw`$$X_{t'}=\frac{\sigma_{t'}^2}{\sigma_t^2}X_t+\sqrt{|a|*b}$$`);
+  assert.ok(m.startsWith('估计 <span class="katex">') && m.includes('<b>设 <span class="katex">') && m.includes('class="katex-display"'), m);
+  assert.ok(!m.includes('$') && !m.includes('<td>') && !m.includes('&lt;b'), m);
+  assert.equal(md('花了 $5 和 $6，$1.50和$2.00'), '花了 $5 和 $6，$1.50和$2.00');           // money stays money
+  assert.equal(md('用 `echo $HOME` 看 $x'), '用 <code>echo $HOME</code> 看 $x');              // code stepped over; a lone $ stays
+  assert.ok(md('```\n$a$\n```').includes('<pre>$a$</pre>'));                                     // never in a code block
+  assert.ok(md(String.raw`坏的 $\frac{a$ 公式`).includes('katex-error'));                          // shown in red as written
+  assert.ok(md(String.raw`行内 \(a<b\) 和 \[c>d\]`).includes('katex-display') && !md(String.raw`\(a<b\)`).includes('&lt;b\\)'));
+  // links and math together: KaTeX's own http:// address isn't made a link; a formula right after an address isn't in it
+  assert.ok(!m.includes('<a '), m);
+  const lm = md('见 https://x.com/a$b$');
+  assert.ok(lm.startsWith(`见 ${a('https://x.com/a')}<span class="katex">`), lm);
   console.log('md ok');
   // a message's time, by the day it's on: today's the time alone, yesterday's 昨天, this year's without the year
   const stamp = new Function(`${part(/^function stamp\(ms[\s\S]*?^\}$/m)}\nreturn stamp;`)();
@@ -725,6 +745,39 @@ console.log('tokens ok');
   assert.ok(inLive(link) && inLive(path.join(link, 'butler')));
   fs.unlinkSync(link); fs.rmSync(f); fs.rmdirSync(dir); // the link alone (a junction too), never through it
   console.log('ticket review 2 ok');
+}
+
+// Whoever set a turn going gets its end: one the 管家 set going (its words, as its log has their first 40) tells the 管家,
+// even outside a ticket (it asked rag something and promised to tell you); one you set going yourself doesn't wake it
+{
+  const { turnBy, notesInto, butlerNotice } = require('./claude-multi');
+  const sent = [{ at: 1000, text: '你知道这个项目有没有一个上传/提交的截止日期吗？之前聊过的话帮我确认一下具体是哪' }];
+  assert.equal(turnBy('你知道这个项目有没有一个上传/提交的截止日期吗？之前聊过的话帮我确认一下具体是哪天，有的话告诉我', sent, 5000), 'butler');
+  assert.equal(turnBy('先看一下：\r\n截止日期是哪天', [{ at: 1000, text: '先看一下：\n截止日期是哪天' }], 5000), 'butler'); // line breaks however kept
+  assert.equal(turnBy('就按这个来，帮我部署', sent, 5000), 'you');
+  assert.equal(turnBy(null, sent, 5000), null); // nothing read
+  assert.equal(turnBy(sent[0].text, sent, 1000 + 7 * 3600e3), 'you'); // its words from long before: typed again since
+  assert.equal(turnBy(sent[0].text, sent, 500 - 120000), 'you'); // sent after that turn ended
+  const go = [{ at: 1000, text: '继续' }]; // a short one is kept whole: only the very words are its
+  assert.equal(turnBy('继续', go, 5000), 'butler');
+  assert.equal(turnBy('继续做第三部分', go, 5000), 'you');
+  // a ticket's conversation: your own turn is kept (the panel shows it), not news for the 管家; the 管家's is
+  const tk = [{ id: 1, conv: 'w', ev: [{ at: 10, k: 'give' }] }], you = { at: 20, id: 'w', kind: 'done' }, its = { at: 30, id: 'w', kind: 'done' };
+  assert.deepEqual(notesInto(tk, [you], () => '我跟用户聊完了', (n) => n === you), []);
+  assert.equal(tk[0].ev.at(-1).at, 20);
+  assert.deepEqual(notesInto(tk, [its], () => '', (n) => n === you), [1]);
+  // your own turn in which the worker reported 做完: news all the same (the 管家 checks it and closes the ticket)
+  tk[0].ev.push({ at: 35, k: '做完', text: '好了' });
+  const you2 = { at: 40, id: 'w', kind: 'done' };
+  assert.deepEqual(notesInto(tk, [you2], () => '', () => true), [1]);
+  const you3 = { at: 50, id: 'w', kind: 'done' }; // the next of yours, nothing reported in it: not news
+  assert.deepEqual(notesInto(tk, [you3], () => '', () => true), []);
+  // a reply outside a ticket, alone and beside a ticket's news
+  const r = butlerNotice([], [{ title: 'rag检索', kind: 'done', text: '初赛材料的上传截止时间是 11 月 5 日 24:00' }]);
+  assert.ok(r.startsWith('[系统通知] 「rag检索」回复了你发的消息：初赛材料的上传截止时间是 11 月 5 日 24:00') && r.includes('告诉用户') && !r.includes('工单有动静'), r);
+  const both = butlerNotice([{ t: { id: 2, name: '层析' }, st: ['停下了', 'idle', ''] }], [{ title: 'rag检索', kind: 'ask' }]);
+  assert.ok(both.includes('#2「层析」停下了') && both.includes('「rag检索」在你发消息后停在一个确认上'), both);
+  console.log('turn owner ok');
 }
 
 // What the 管家 costs, by what set it going: you, a [系统通知], a background task (a tool's result in between keeps
