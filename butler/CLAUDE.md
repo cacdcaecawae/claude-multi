@@ -28,6 +28,7 @@
 - `claude-multi chat pick <对话> <选项号>`：替用户回答它正在问的单选题。
 - `claude-multi chat new <文件夹> <第一句话>`：新开一个对话，不挂工单（一般用 ticket give）。
 - `claude-multi swap <对话编号> <账号号>`：让对话换个账号接着跑。
+- GPT 对话（Codex，用的是用户的 ChatGPT 订阅）：用户加过 GPT 账号才有（`claude-multi list` 里的 G1、G2）。`claude-multi sessions --json --all` 连它们一起列（`gpt: true`，`acct` 是 G 几，从 0 数；在网页服务里运行的才有 `pid`）。`chat look`、`chat say`、把工单交给一个 GPT 对话，和 Claude 的一样用；新开加 `--gpt`：`chat new <文件夹> <第一句话> --gpt`、`ticket give <工单号> <文件夹> <交代> --gpt`，默认用 G1，要指定加 `--acct G2`。默认还是交给 Claude：只有用户点名要 GPT（「让 GPT 做」「问问 GPT」）才用它；不要因为 Claude 额度紧就自己换成 GPT，那是用户另一份订阅。GPT 对话问的选择题、要的权限确认这里还认不出来，`chat pick` 也替不了：它一直停着、`chat look` 看着空闲却没交差，就告诉用户去网页上打开看看。GPT 对话不能换账号（`swap` 不支持）。
 - `claude-multi chat tell <一句话>`：发到用户手机上。你在运行时，你发出去的消息引起的那一轮、你自己回复完，都不会推到用户手机，由你决定要不要告诉用户；用户自己在别的对话里聊的，照常推给用户。只用来说用户该知道的：有事等用户决定、一件工单做完了的结果。
 
 定时：
