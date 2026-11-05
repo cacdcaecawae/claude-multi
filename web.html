@@ -33,7 +33,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* VS Code's Dark Modern colors; the account colors are the island's */
   :root { --bg: #1f1f1f; --bar: #181818; --border: #2b2b2b; --hover: #2a2d2e; --sel: #37373d; --input: #313131; --inputB: #3c3c3c;
     --fg: #cccccc; --fg2: #9d9d9d; --fg3: #6e7681; --accent: #0078d4; --link: #4daafc; --green: #3fb950; --orange: #e5a03a; --red: #f85149;
-    --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; color-scheme: dark;
+    --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; --gpt: #19c37d; color-scheme: dark;
     --fgHi: #ffffff; --msg: #d4d4d4; --tint: rgba(255,255,255,.08); --btn: #313131; --btnH: #3c3c3c; --badge: #616161; --badgeFg: #f8f8f8;
     --pop: #252526; --popB: #454545; --accentH: #026ec1; --accentBg: rgba(0,120,212,.22); --errFg: #ffa198; --cellB: #3c3c3c;
     --split: #4a4a4a; --term: #1f1f1f; --act: #131313; --purple: #b180d7; --shadow: rgba(0,0,0,.5); --lift: rgba(0,0,0,.25); --frame: #111111; --cardB: #2b2b2b; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
@@ -44,7 +44,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     --inputB: #cecece; --fg: #3b3b3b; --fg2: #616161; --fg3: #8b8b8b; --fgHi: #1f1f1f; --msg: #2b2b2b; --accent: #005fb8; --accentH: #0258a8;
     --accentBg: rgba(0,95,184,.1); --link: #005fb8; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.06);
     --btn: #e8e8e8; --btnH: #dadada; --badge: #cccccc; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #d4d4d4; --cellB: #d9d9d9;
-    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
+    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --gpt: #0b8a5c; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 13px/1.4 var(--ui); }
   /* opened from the home screen, iOS 26 makes the page shorter than the screen by the status bar (WebKit bug 301108):
@@ -157,6 +157,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     background: conic-gradient(var(--c) calc(var(--p) * 1%), color-mix(in srgb, var(--c) 22%, transparent) 0);
     -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
     mask: radial-gradient(closest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); }
+  .ac.g { font-size: 8.5px; letter-spacing: -.2px; } /* a GPT account's G1: two characters in the ring */
   .ac.nq::before { background: none; border: 1.5px dashed color-mix(in srgb, var(--c) 60%, transparent); -webkit-mask: none; mask: none; } /* quota unread */
   .spin { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid var(--orange); border-right-color: transparent; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -183,6 +184,11 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #cmenu [data-m=del]:not(:disabled), .mlist [data-m=del]:not(:disabled) { color: var(--red); }
   @media (hover: hover) { #cmenu button:not(:disabled):hover { background: var(--hover); } }
   @media (pointer: coarse) { #view .row { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } } /* held for its menu: no text picked */
+  /* 全部 / Claude / GPT over the list, with a GPT account */
+  .kinds { display: flex; gap: 2px; margin: 2px 14px 6px; padding: 2px; border-radius: 7px; background: var(--tint); }
+  .kinds button { flex: 1; padding: 2px 0; border-radius: 5px; font-size: 12px; color: var(--fg2); }
+  .kinds button.on { background: var(--bg); color: var(--fgHi); box-shadow: 0 1px 2px var(--shadow); }
+  .sheet .seg.kind { display: inline-flex; margin-top: 12px; } .sheet .seg.kind button { padding: 3px 16px; font-size: 13px; } /* 新对话: Claude or GPT */
   /* 搜索对话: the box, the conversations found under it, the one Enter opens marked */
   #findList { max-height: min(55dvh, 480px); overflow-y: auto; margin: 8px -8px 0; }
   .empty { color: var(--fg3); text-align: center; padding: 20px 12px; }
@@ -484,6 +490,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .who { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--fg2); margin-top: 2px; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
   .who .took { font-weight: 400; color: var(--green); margin-left: 6px; }
   .who .spark { width: 16px; height: 16px; color: #d97757; }
+  .who .gm { width: 12px; height: 12px; margin: 0 2px; border-radius: 50%; background: var(--gpt); } /* a GPT one's replies */
   /* a turn: Claude's tool calls in a row folded into one line (tap to see each); the end of the answer marked */
   details.tools summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: var(--fg2);
     padding: 3px 10px 3px 4px; border-radius: 6px; background: var(--tint); }
@@ -772,9 +779,17 @@ const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   folder: '<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H19a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
   folderOpen: '<path d="M3.5 18V7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H18a1.5 1.5 0 0 1 1.5 1.5v1.5"/><path d="M3.5 18l2.6-6.4a1 1 0 0 1 .9-.6h14l-2.7 6.4a1 1 0 0 1-.9.6z"/>' };
-// an account's mark, n from 1: its number in a ring, the ring as full as its 5-hour window has left, dashed while unread
-const ac = (n, cls = '') => {
+// an account's mark, n from 1: its number in a ring, the ring as full as its 5-hour window has left, dashed while unread.
+// A GPT account's (gpt): G1, G2… in GPT's color, the ring as full as its most used window has left (a plan may have only
+// a weekly one), dashed till a reply on it has said
+const winName = (k) => ({ five_hour: '5 小时', seven_day: '7 天' })[k] ?? k;
+const ac = (n, cls = '', gpt = false) => {
   if (!n) return '';
+  if (gpt) {
+    const ws = state?.gpt?.[n - 1]?.windows ?? [], w = ws.length ? ws.reduce((x, y) => (y.pct > x.pct ? y : x)) : null, left = w ? Math.max(0, 100 - w.pct) : null;
+    const tip = left == null ? `GPT 账号 G${n} · 额度还没读到（在它上面回复过一次后才有）` : `GPT 账号 G${n} · ${winName(w.k)}额度还剩 ${left}%${w.reset ? `（${w.reset}后重置）` : ''}`;
+    return `<i class="ac g${cls}${left == null ? ' nq' : ''}" style="--c:var(--gpt);--p:${left ?? 0}" title="${esc(tip)}">G${n}</i>`;
+  }
   const a = state?.usage?.accounts?.[n - 1], w = !a?.err && a?.windows?.find((x) => x.k === 'five_hour');
   const left = w ? Math.max(0, 100 - w.pct) : null;
   const tip = left == null ? `账号 ${n} · 额度没读到` : `账号 ${n} · 5 小时额度还剩 ${left}%${w.reset ? `（${w.reset}后重置）` : ''}`;
@@ -798,11 +813,12 @@ const secs = saved.secs ?? {}; // its 操作台's sections opened or closed by y
 let state = null, tokens = null, tokensNow = null, tokensAt = 0, groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
 let listMode = saved.listMode === 'run' ? 'run' : 'dirs'; // 对话: by folder, or (the bell) 提示 and the running ones
+let listKind = ['claude', 'gpt'].includes(saved.listKind) ? saved.listKind : 'all'; // which kind of conversation it lists, with GPT accounts
 let butler = !!saved.butler, bConv = null, peek = null; // 管家 mode (the spark), and its conversation once there is one
 $('#app').classList.toggle('butler', butler);
 $('#act .logo .label').textContent = butler ? '退出管家' : '管家'; // reloaded in it: says what the spark does
 function save() { // not before the tabs are back: a first load that failed would forget them
-  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, deskW, deskRW, secs, folded: [...folded], listMode, butler, focus: groups.indexOf(focusG),
+  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, deskW, deskRW, secs, folded: [...folded], listMode, listKind, butler, focus: groups.indexOf(focusG),
     groups: groups.map((g) => ({ size: g.size, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
 }
 const allConvs = () => groups.flatMap((g) => g.tabs), convOf = (id) => id && allConvs().find((c) => c.id === id);
@@ -812,6 +828,7 @@ const shownConvs = () => (butler ? [peek ?? bConv] : groups.map((g) => g.active)
 // under an hour left and the recommended one has more, a sheet asks first (accounts don't share their prompt
 // cache). Resolves to the account number, or 0 when cancelled.
 function pickAcct(s) {
+  if (s.gpt) return Promise.resolve(s.acct + 1); // a GPT one: its own account (it can't change)
   const u = state?.usage, a = u?.accounts?.[s.acct], b = u?.accounts?.[u?.rec];
   if (!u || u.rec == null || u.rec === s.acct || !a || a.err || a.runway >= 1 || !b || b.runway <= a.runway) return Promise.resolve(s.acct + 1);
   const own = s.acct + 1, other = u.rec + 1;
@@ -915,11 +932,13 @@ function drawHere() {
   const c = butler ? bConv : focusG?.active, s = c?.id ? state?.sessions.find((x) => x.id === c.id) : null, el = $('#here');
   if (!c || !state) return void (el.innerHTML = '');
   const tone = (p) => (p >= 80 ? 'bad' : p >= 50 ? 'warn' : 'ok'), w = c.where(), line = s?.line;
-  const a = state.usage.accounts?.[c.acct - 1], five = a?.windows?.find((x) => x.k === 'five_hour')?.pct;
+  const a = c.gpt ? null : state.usage.accounts?.[c.acct - 1], five = a?.windows?.find((x) => x.k === 'five_hour')?.pct;
+  const g = c.gpt ? state.gpt?.[c.acct - 1] : null, gw = g?.windows?.length ? g.windows.reduce((x, y) => (y.pct > x.pct ? y : x)) : null; // a GPT one's: its most used window
   const left = s?.req ? s.req + HOUR - Date.now() : null, min = Math.ceil(left / 60000);
   el.innerHTML = [
-    w && `<span class="where ${w}" title="这个对话的 Claude 在哪里运行">${w === 'pc' ? '电脑窗口' : '网页服务'}</span>`,
-    c.acct && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % 4]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
+    w && `<span class="where ${w}" title="这个对话的 ${c.gpt ? 'Codex' : 'Claude'} 在哪里运行">${w === 'pc' ? '电脑窗口' : '网页服务'}</span>`,
+    c.acct && c.gpt && `<span title="${esc(g?.label ?? '')}"><i style="background:var(--gpt)"></i>GPT 账号 G${c.acct}${gw ? ` · ${winName(gw.k)} <b class="${tone(gw.pct)}">${gw.pct}%</b>` : ''}</span>`,
+    c.acct && !c.gpt && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % 4]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
     line?.model && `<span title="模型 · 思考强度">${esc([line.model, line.effort].filter(Boolean).join(' · '))}</span>`,
     line?.ctx != null && `<span title="上下文已用">上下文 <b class="${tone(line.ctx)}">${Math.round(line.ctx)}%</b></span>`,
     left != null && (left > 0 || w) && `<span title="提示缓存在最后一次请求后留 1 小时；过期后，下一条消息要把整段对话重新写进缓存，多用额度">${left > 0
@@ -952,18 +971,20 @@ const chatMark = (x) => {
 const nd = (k) => (k ? `<i class="nd ${k}" title="${k === 'ask' ? '在等你' : '答完了，还没看'}"></i>` : '');
 const chatEnd = (x) => `${nd(chatMark(x))}${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}${x.pid ? `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(x.at)}</span>`}
     <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
-const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1)}
+const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1, '', x.gpt)}
     <div class="main"><div class="t">${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
 function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
-  const S = state.sessions.filter((x) => !isButler(x)), run = S.filter((x) => x.pid), bell = listMode === 'run';
-  const line = (x) => `<div class="row one" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1)}
+  const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run';
+  // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
+  const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', 'Claude'], ['gpt', 'GPT']].map(([k, l]) => `<button data-kind="${k}"${k === listKind ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : '';
+  const line = (x) => `<div class="row one" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1, '', x.gpt)}
     <div class="main t">${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').html = `<button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   if (bell) {
-    $('#view').html = (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
+    $('#view').html = kindBar + (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
         notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
           <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
           <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
@@ -971,10 +992,10 @@ function renderChats() {
   } else {
     const dirs = new Map();
     for (const x of S) dirs.set(x.cwd, [...(dirs.get(x.cwd) ?? []), x]);
-    $('#view').html = dirs.size ? [...dirs].map(([cwd, list]) => sec('d:' + cwd,
+    $('#view').html = kindBar + (dirs.size ? [...dirs].map(([cwd, list]) => sec('d:' + cwd,
       `<i class="fc">${svg(I.folder)}</i><i class="fo">${svg(I.folderOpen)}</i><span class="t" title="${esc(cwd)}">${esc(base(cwd) || cwd)}</span>${nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : '')}
         <button class="ico fnew" data-newin="${esc(cwd)}" title="在这里开新对话（用推荐的账号）">${svg(I.plus)}</button>`,
-      list.map(line).join(''), 'dir')).join('') : '<div class="empty">还没有对话</div>';
+      list.map(line).join(''), 'dir')).join('') : '<div class="empty">还没有对话</div>');
   }
   markRows();
 }
@@ -985,8 +1006,10 @@ function rowMenu(id, x, y) {
   const s = state?.sessions.find((v) => v.id === id);
   if (!s || (NARROW.matches && Date.now() - menuAt < 1000)) return; // held on Android: its own contextmenu and the hold both
   menuFor = s; menuAt = Date.now();
-  const items = [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
-    ['swap', '换账号继续…'], ['del', '删除…', s.pid && '正在运行：先结束对话再删']].filter(Boolean)
+  // a GPT one: not renamed nor moved to another account here; deleted is archived (Codex's own, undone with codex unarchive)
+  const items = (s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
+    ['del', '归档…', s.pid && '正在运行：先结束对话再归档']] : [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
+    ['swap', '换账号继续…'], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean)
     .map(([k, l, off]) => `<button data-m="${k}"${off ? ' disabled' : ''}>${l}${off ? `<small>${esc(off)}</small>` : ''}</button>`).join('');
   if (NARROW.matches) { $('#sheetIn').innerHTML = `<div class="stitle">${esc(s.title)}</div><div class="mlist">${items}</div>`; $('#sheetIn').onclick = menuPick; return $('#sheet').classList.add('on'); }
   const m = $('#cmenu');
@@ -1005,9 +1028,9 @@ async function menuPick(e) {
     if (!name || name === s.title) return;
     try { toast((await post('/api/rename', { id: s.id, name })).said); } catch (er) { toast(er.message, 4000); }
   } else if (k === 'del') {
-    if (!confirm(`删除「${s.title}」？\n对话记录会移到电脑的回收站，可以找回。`)) return;
+    if (!confirm(s.gpt ? `归档「${s.title}」？\n归档后不在列表里显示，在 Codex 里用 codex unarchive 能找回。` : `删除「${s.title}」？\n对话记录会移到电脑的回收站，可以找回。`)) return;
     try {
-      toast((await post('/api/delete', { id: s.id })).said);
+      toast((await post('/api/delete', { id: s.id, gpt: s.gpt })).said);
       const c = convOf(s.id); if (c) closeConv(c);
       try { localStorage.removeItem('cm-draft:' + s.id); } catch {}
     } catch (er) { toast(er.message, 4000); }
@@ -1018,6 +1041,7 @@ async function menuPick(e) {
 // not running isn't started first: the account picked on the card starts it). Its tab closed meanwhile, or another one
 // looked at (or 管家 mode gone into): no card, it would come up over that
 async function swapFrom(s) {
+  if (s.gpt) return toast('GPT 对话不能换账号');
   let c = convOf(s.id);
   if (c) activate(c.g, c);
   else if (s.pid) { await openSession(s.id); c = convOf(s.id); }
@@ -1046,6 +1070,7 @@ $('#side').onclick = (e) => {
   if (!b || Date.now() - menuAt < 700) return; // the release of a hold that opened the menu: not a tap on the row
   if (b.matches('[data-new]')) return newSheet();
   if (b.matches('[data-find]')) return findSheet();
+  if (b.matches('[data-kind]')) { listKind = b.dataset.kind; save(); return renderChats(); }
   if (b.matches('[data-newin]')) { // a folder's ＋ (not its fold): started there at once, on the recommended account
     e.preventDefault();
     return addConv(focusG, makeConv({ dir: b.dataset.newin, acct: (state.usage.rec ?? 0) + 1 }, base(b.dataset.newin) || '新对话'));
@@ -1137,7 +1162,7 @@ $('#deskAdd').onsubmit = (e) => {
 function peekAt(s, acct) {
   if (peek?.id === s.id) return;
   if (peek) peek.close(); else bConv?.sleep();
-  peek = makeConv({ id: s.id, acct }, s.title);
+  peek = makeConv({ id: s.id, acct, gpt: s.gpt }, s.title);
   $('#butler').classList.add('peeking'); $('#peekBar .t').textContent = s.title;
   $('#butler').append(peek.el); peek.wake(); if (FINE) peek.focus();
 }
@@ -1270,7 +1295,7 @@ function drawDesk() {
   const tag = (x) => (x.wait ? '<span class="pill o">等你</span>' : x.busy ? '<span class="pill g">在回复</span>' : '<span class="pill">空闲</span>');
   head('deskRun', '对话', `${run.length} 个在运行${wait.length ? ` · ${wait.length} 个等你` : ''}`);
   $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
-    ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" title="${esc(x.cwd)}"><i class="ad" style="background:${ACCT[x.acct % 4]}"></i><span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
+    ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" title="${esc(x.cwd)}"><i class="ad" style="background:${x.gpt ? 'var(--gpt)' : ACCT[x.acct % 4]}"></i><span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
   if (!tokensNow && Date.now() - tokensAt > 120000) {
     tokensAt = Date.now();
     tokensNow = fetch('/api/tokens').then((r) => r.json()).then((t) => { tokens = t; setTimeout(drawDesk); return t; }).finally(() => { tokensNow = null; });
@@ -1383,20 +1408,24 @@ const renew = (s) => {
   return `<span class="renew${s.canceled ? ' end' : ''}" title="${how ? how + '，' : ''}${s.canceled ? '已取消续订，' : ''}按月推算">`
     + `${d ? `<svg viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="${d}"/></svg>` : ''}${+s.renew.slice(5, 7)}月${+s.renew.slice(8)}日${s.canceled ? '到期' : '续费'}</span>`;
 };
+const winRow = (w) => `<div class="win"><span>${esc(winName(w.k))}</span>
+  <div class="meter"><i style="width:${Math.min(100, w.pct)}%;background:${w.pct >= 80 ? 'var(--red)' : w.pct >= 50 ? 'var(--orange)' : 'var(--green)'}"></i></div>
+  <b>${w.pct}%</b><span>${esc(w.reset)}后</span></div>`;
 function renderUsage() {
-  const u = state.usage;
+  const u = state.usage, gp = state.gpt ?? [];
   $('#sideActs').html = `<button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   $('#view').html = `<div class="panel"><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : '都到上限了，最早 ' + esc(u.ready) + ' 后恢复'}</div>
     ${u.accounts.map((a, i) => `<div class="card"><div class="cardHead">${ac(i + 1)}<b>账号 ${i + 1}</b>
       <span class="m grow">${esc(a.label)}</span>${renew(a.sub)}${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
       ${a.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(a.err)}</div>` : `
       <div class="m" style="margin-top:4px">可连续用 ${a.runway} 小时</div>
-      ${a.windows.map((w) => `<div class="win"><span>${w.k === 'five_hour' ? '5 小时' : w.k === 'seven_day' ? '7 天' : esc(w.k)}</span>
-        <div class="meter"><i style="width:${Math.min(100, w.pct)}%;background:${w.pct >= 80 ? 'var(--red)' : w.pct >= 50 ? 'var(--orange)' : 'var(--green)'}"></i></div>
-        <b>${w.pct}%</b><span>${esc(w.reset)}后</span></div>`).join('')}`}</div>`).join('')}
+      ${a.windows.map(winRow).join('')}`}</div>`).join('')}
     <div class="btns"><button class="btn" data-refresh${usageBusy ? ' disabled' : ''}>${usageBusy === 'refresh' ? '刷新中…' : '刷新'}</button>
       <button class="btn" data-warm${usageBusy ? ' disabled' : ''}>${usageBusy === 'warm' ? '预热中…' : '预热'}</button></div>
-    <div class="m" style="margin-top:8px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div></div>`;
+    <div class="m" style="margin-top:8px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div>
+    <h3>GPT 账号</h3>${gp.length ? gp.map((g, i) => `<div class="card"><div class="cardHead">${ac(i + 1, '', true)}<b>G${i + 1}</b><span class="m grow">${esc(g.label)}</span>${g.plan ? `<span class="m">${esc(g.plan)}</span>` : ''}</div>
+      ${g.windows?.length ? g.windows.map(winRow).join('') : '<div class="m" style="margin-top:4px;white-space:normal">额度还没读到：在它上面回复过一次后才有</div>'}</div>`).join('')
+      : '<div class="m" style="white-space:normal">还没有。在电脑上运行 claude-multi new gpt，用 ChatGPT 登录后，就能在这里新开 GPT 对话。</div>'}</div>`;
 }
 // 刷新 and 预热 under 额度: the button says it's at work while it is (the panel is drawn again every 5 s meanwhile),
 // a bubble says how it went
@@ -1451,20 +1480,24 @@ async function renderTokens() {
 
 function newSheet() {
   if (!state) return toast('还在加载，稍等');
-  const u = state.usage, dirs = u.projects ?? [];
-  let acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? '';
+  const u = state.usage, dirs = u.projects ?? [], gp = state.gpt ?? [];
+  let gpt = false, acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? ''; // with a GPT account: Claude or GPT, its accounts then
   const draw = () => {
+    const accts = gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
+      : u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
+        账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`);
     $('#sheetIn').innerHTML = `<div class="stitle">新对话</div>
-      <div class="m" style="margin-top:12px">账号</div><div class="opts">${u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
-        账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`).join('')}</div>
+      ${gp.length ? `<div class="seg kind">${[['', 'Claude'], ['1', 'GPT']].map(([v, l]) => `<button data-g="${v}"${!!v === gpt ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : ''}
+      <div class="m" style="margin-top:12px">账号</div><div class="opts">${accts.join('')}</div>
       <div class="m">文件夹</div><div class="opts">${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
       <input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径">
       <div class="btns" style="margin-top:14px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="start" style="flex:2">开始</button></div>`;
+    document.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { gpt = !!b.dataset.g; acct = gpt ? 1 : (u.rec ?? 0) + 1; draw(); }));
     document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
     document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { dir = b.dataset.d; draw(); }));
     $('#dirIn').oninput = (e) => (dir = e.target.value.trim());
     $('#cancel').onclick = sheetOff;
-    $('#start').onclick = () => { sheetOff(); addConv(focusG, makeConv({ dir, acct }, base(dir) || '新对话')); };
+    $('#start').onclick = () => { sheetOff(); addConv(focusG, makeConv({ dir, acct, gpt }, base(dir) || '新对话')); };
   };
   draw(); $('#sheet').classList.add('on');
 }
@@ -1568,7 +1601,7 @@ function drawTabs(g) {
     const turning = c.ended ? false : c === g.active && c.started ? c.live === 'busy' : busy.has(c.id);
     const dot = c.live === 'ask' || note.get(c.id) === 'ask' ? ' ask' : note.has(c.id) ? ' done' : '';
     return `<div class="tab${c === g.active ? ' on' : ''}${c.ended ? ' gone' : ''}" data-i="${i}" draggable="${FINE}" title="${esc(c.title)}">
-      ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct)}<span class="tt">${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
+      ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct, '', c.gpt)}<span class="tt">${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
   }).join('') || '<span class="brand">Claude 多账号</span>';
   g.el.classList.toggle('blank', !g.tabs.length);
 }
@@ -1670,7 +1703,7 @@ async function openSession(id, where) {
   const acct = s.pid ? s.acct + 1 : await pickAcct(s); // a running one stays where it runs
   if (!acct || convOf(id)) return;
   const g = where === 'aside' ? sideGroup() : where ?? focusG;
-  if (groups.includes(g)) addConv(g, makeConv({ id, acct }, s.title));
+  if (groups.includes(g)) addConv(g, makeConv({ id, acct, gpt: s.gpt }, s.title));
 }
 // the tabs open before a reload, once the list is in: each group's shown one wakes (a running one reconnects; one
 // that isn't running shows its record and waits for 接着聊, nothing is started)
@@ -1682,7 +1715,7 @@ function restore() {
     if (!ids.length) continue;
     g = g ? makeGroup(g) : groups[0];
     g.size = sg.size || 1;
-    for (const id of ids) { const c = makeConv({ id }, state.sessions.find((s) => s.id === id).title); c.g = g; g.tabs.push(c); g.body.append(c.el); }
+    for (const id of ids) { const s = state.sessions.find((x) => x.id === id), c = makeConv({ id, gpt: s.gpt }, s.title); c.g = g; g.tabs.push(c); g.body.append(c.el); }
     activate(g, g.tabs.find((c) => c.id === sg.active) ?? g.tabs[0], true);
   }
   relayout(); focusGroup(groups[Math.min(Math.max(0, saved.focus | 0), groups.length - 1)]); narrow();
@@ -1707,7 +1740,7 @@ const KEYS = [['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z'], ['↑', '\x1
 // body: {id, acct?} continues one, {dir, acct} starts one, {id} alone (a tab back after a reload) only attaches to it
 // if it runs. started: /api/open asked; ended: its Claude is gone (or couldn't start).
 function makeConv(body, title) {
-  const c = { id: body.id ?? null, title, acct: body.acct ?? null, g: null, started: false, ended: false, closed: false, live: '' };
+  const c = { id: body.id ?? null, title, acct: body.acct ?? null, gpt: !!body.gpt, g: null, started: false, ended: false, closed: false, live: '' }; // gpt: a GPT one (Codex)
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
@@ -1776,9 +1809,11 @@ function makeConv(body, title) {
   const attsEl = $p('.atts'), pick = $p('input[type=file]');
   c.attach = (files) => {
     for (const f of files) {
-      // a picture goes in as one (Claude attaches it); any other file, or a picture this browser can't open, by its path
-      if (!/^image\//.test(f.type) && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
-      const a = /^image\//.test(f.type) ? { url: URL.createObjectURL(f) } : { file: true, name: f.name };
+      // a picture goes in as one (Claude attaches it); any other file, or a picture this browser can't open, by its path (a
+      // GPT one's pictures too: Codex is given the path)
+      const pic = /^image\//.test(f.type) && !c.gpt;
+      if (!pic && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
+      const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name };
       a.up = a.file ? sendFile(f) : shrink(f).then(upload, () => { a.file = true; a.name = f.name; drawAtts(); return sendFile(f); });
       a.up.catch((e) => { a.failed = true; toast(`${a.file ? '文件' : '图片'}没传上去：${e.message}`, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
       atts.push(a);
@@ -1940,7 +1975,7 @@ function makeConv(body, title) {
     drawTxt();
   }
   async function histGet(qs) { // by the terminal's key once it's open (a new conversation has no id), else the id
-    const r = await (await fetch(`/api/history?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}${qs}`)).json();
+    const r = await (await fetch(`/api/history?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}${c.gpt ? '&gpt=1' : ''}${qs}`)).json();
     if (r.err) throw new Error(r.err);
     // a long paste is recorded as Claude Code hands it to the model, in <pasted_content id="N"> … </pasted_content id="N">:
     // shown without them, and so your message sent here is found in the record (not shown twice)
@@ -1961,7 +1996,7 @@ function makeConv(body, title) {
       histEnd = r.end;
       if (r.items.length) {
         const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
-        addItems($p('.hNew'), r.items);
+        addItems($p('.hNew'), r.items, c.gpt);
         const flat = (s) => s.replace(/\s+/g, ' '); // a paste's new lines may come back as \r\n
         // the record's message, or one with it inside (typed on after text left in Claude's input box): no longer waiting
         const took = (s, m) => flat(s.text) === flat(m.text) || (s.text && flat(m.text).includes(flat(s.text)));
@@ -1987,7 +2022,7 @@ function makeConv(body, title) {
       const r = await histGet(`&end=${histOldest}`);
       if (g !== histGen || !$p('.hOld')) return;
       const h = hist.scrollHeight, tmp = document.createElement('div');
-      addItems(tmp, r.items); $p('.hOld').prepend(...tmp.childNodes);
+      addItems(tmp, r.items, c.gpt); $p('.hOld').prepend(...tmp.childNodes);
       histOldest = r.start; topNote();
       hist.scrollTop += hist.scrollHeight - h; // what you were reading stays where it was
     } catch { olderAfter = Date.now() + 5000; } finally { histBusy = false; }
@@ -2016,7 +2051,8 @@ function makeConv(body, title) {
     const live = $p('.live');
     if (!live) return;
     sent = sent.filter((s) => Date.now() - s.at < 600000); // ponytail: one the record never shows (some slash commands) goes after 10 min
-    const { busy, menu } = term && !c.ended ? screen() : {}, here = menu?.opts.find((o) => o.n === menu.cur);
+    const { busy, menu } = c.gpt ? { busy: !c.ended && state?.sessions.find((x) => x.id === c.id)?.busy ? [] : null, menu: null } : term && !c.ended ? screen() : {};
+    const here = menu?.opts.find((o) => o.n === menu.cur);
     // 「Type something」: which option it is, per question, kept from when it still said so (written in, it shows the words)
     const blank = menu?.opts.find((o) => /^Type something/i.test(o.label));
     if (blank) typeOpt.set(menu.ask, blank.n);
@@ -2028,7 +2064,7 @@ function makeConv(body, title) {
       ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${askHead(menu)}${askOpts(menu, (o) => `data-pick="${o.n}"`, (o) => typeNow && o.n === menu.cur)}
         ${typeNow ? '<div class="hint2">在下面的输入框里写你的回答，发送后填进这一项</div>' : ''}
         <div class="row2">${menu.tabs ? '<button data-key="prev">← 上一题</button><button data-key="next" class="push">下一题 →</button>' : ''}<button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
-      : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : 'Claude 正在回复'}${took ? ' · ' + took : ''}</div>` : '');
+      : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : `${c.gpt ? 'GPT' : 'Claude'} 正在回复`}${took ? ' · ' + took : ''}</div>` : '');
     if (!menu) typing = null;
     busyNow = !!busy && !menu; menuNow = !!menu; goMode();
     const st = menuNow ? 'ask' : busyNow ? 'busy' : ''; // the tab shows it too
@@ -2107,6 +2143,7 @@ function makeConv(body, title) {
   // the service comes back as event switched, one in a window on the computer as a new Claude in the same window, found
   // by asking for the conversation until it runs under another key. One not running is simply started on that account.
   function swap(to) { // to: the account already picked (the 管家's card)
+    if (c.gpt) return toast('GPT 对话不能换账号');
     const accts = state?.usage?.accounts ?? [], rec = state?.usage?.rec, cur = (c.acct ?? 1) - 1;
     if (!c.id || !state?.sessions.some((x) => x.id === c.id)) return toast('这个对话还没有消息，不用换账号');
     if (accts.length < 2) return toast('只有一个账号');
@@ -2142,7 +2179,7 @@ function makeConv(body, title) {
       await new Promise((ok) => setTimeout(ok, 2000));
       if (!switching || !term) return;
       try {
-        const r = await post('/api/open', { id: c.id, live: true, cols: term.cols, rows: term.rows });
+        const r = await post('/api/open', { id: c.id, live: true, gpt: c.gpt, cols: term.cols, rows: term.rows });
         if (r.key !== was) { ({ key, kind } = r); switched(); return connect(); }
       } catch {} // between the two Claudes: none runs it for a moment
     }
@@ -2248,7 +2285,7 @@ function makeConv(body, title) {
     if (!s) return toast('这个对话已经不在列表里了');
     const acct = s.pid ? s.acct + 1 : await pickAcct(s);
     if (!acct || c.closed) return;
-    body = { id: s.id, acct }; c.acct = acct; start();
+    body = { id: s.id, acct, gpt: c.gpt }; c.acct = acct; start();
   }
   // The live stream, while the tab is shown. It is opened again when it goes quiet (a computer waking up, a phone back
   // from the background, a network change: a browser never notices a dead connection itself; the server pings every
@@ -2262,7 +2299,7 @@ function makeConv(body, title) {
     if (!term || c.ended || !shown) return;
     if (again && c.id) {
       let r;
-      try { r = await post('/api/open', { id: c.id, live: true, cols: term.cols, rows: term.rows }); }
+      try { r = await post('/api/open', { id: c.id, live: true, gpt: c.gpt, cols: term.cols, rows: term.rows }); }
       catch (e) { // the service saying it no longer runs ends it; no network, or the PC away (a phone just woken): again soon
         if (me !== gen) return;
         if (e instanceof TypeError || e.away) setTimeout(() => { if (me === gen) connect(true); }, 5000); else end();
@@ -2305,14 +2342,14 @@ function makeConv(body, title) {
     const cwd = s?.cwd ?? body.dir ?? '', parts = cwd.split(/[\\/]/).filter(Boolean);
     const dir = isButler({ cwd }) ? ['管家'] : parts.length > 3 ? ['…', ...parts.slice(-2)] : parts;
     const where = c.ended ? '已结束' : key ? (kind === 'pc' ? '在电脑窗口里运行' : '在网页上运行') : c.started ? '连接中…' : '没有在运行';
-    $p('.path').innerHTML = dir.map((p, i) => i === dir.length - 1 ? `<b>${esc(p)}</b>` : esc(p)).join(' › ') + ` <span class="dim">· 账号 ${c.acct ?? '?'} · ${where}</span>`;
+    $p('.path').innerHTML = dir.map((p, i) => i === dir.length - 1 ? `<b>${esc(p)}</b>` : esc(p)).join(' › ') + ` <span class="dim">· ${c.gpt ? 'GPT 账号 G' : '账号 '}${c.acct ?? '?'} · ${where}</span>`;
     $p('.path').title = cwd;
   };
   c.wake = () => { // shown: started if it should be, its stream and record going again
     shown = true; el.classList.add('on'); readNote(c.id);
     if (!c.started) {
       const s = c.id && state?.sessions.find((x) => x.id === c.id);
-      if (body.acct || s?.pid) { if (!body.acct) body = { id: c.id, acct: s.acct + 1 }; return start(); }
+      if (body.acct || s?.pid) { if (!body.acct) body = { id: c.id, acct: s.acct + 1, gpt: c.gpt }; return start(); }
       notice('idle', '这个对话没有在运行'); c.sync();
     } else if (!c.ended && !es && key) connect();
     setView(view);
@@ -2359,11 +2396,11 @@ function userHtml(m, mark) {
   return `<div class="hm user${cls ? ' ' + cls : ''}${long ? ' long' : ''}"${mark}>${lab ? `<span class="lab">${lab}</span>` : ''}${long
     ? `<div class="clip">${md(words)}</div><button class="more" data-more></button>` : md(words)}</div>`;
 }
-function addItems(box, items) {
+function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies headed GPT
   for (const m of items) {
     // Claude's answer begins (its words or its first tool call right after your message): marked as Claude's
     if ((m.role === 'claude' || m.role === 'tool') && box.lastElementChild?.matches('.hm.user, .hm.img'))
-      box.insertAdjacentHTML('beforeend', `<div class="who">${SPARK}Claude</div>`);
+      box.insertAdjacentHTML('beforeend', gpt ? '<div class="who"><i class="gm"></i>GPT</div>' : `<div class="who">${SPARK}Claude</div>`);
     // a message of yours on the line an earlier one hung on, nothing answering that one: it was stopped and taken back
     // (the record keeps it, Claude doesn't), so it goes (the service leaves such out of what it reads at once)
     const mark = m.u ? ` data-p="${esc(m.p)}" data-u="${esc(m.u)}"` : '';

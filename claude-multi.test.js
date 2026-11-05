@@ -469,6 +469,68 @@ console.log('tokens ok');
   console.log('hold ok');
 }
 
+// GPT (Codex) conversations, from an account's SQLite as Codex 0.166 keeps it: its list (said something in, not archived,
+// not a helper agent's; Codex's \\?\ paths plain); a conversation's record (yours, its replies, tool lines named as
+// Claude's, thinking left out, each turn's end at its place; read up to a reply still being written, then on from there;
+// start 0 at its beginning, else where the shown ones begin; one not running shows an unfinished reply as it is); its usage from its record file; its folders trusted once
+{
+  const fs = require('fs'), path = require('path'), os = require('os'), { DatabaseSync } = require('node:sqlite');
+  const { listGpt, gptHistory, gptUsage, gptTrust } = require('./claude-multi');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-gpt-')), work = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-work-'));
+  const B = String.fromCharCode(92), long = (p) => `${B}${B}?${B}${p}`, j = JSON.stringify, rollout = path.join(home, 'rollout.jsonl');
+  const st = new DatabaseSync(path.join(home, 'state_5.sqlite'));
+  st.exec(`create table threads (id text, rollout_path text, cwd text, title text, name text, preview text, first_user_message text,
+    updated_at_ms integer, created_at_ms integer, model text, reasoning_effort text, archived integer, has_user_event integer, source text)`); // has_user_event: 0 as Codex leaves it
+  const thread = st.prepare('insert into threads values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  thread.run('t1', long(rollout), long(work), '修复登录', null, '再加个测试', '帮我修登录', 3000, 1000, 'gpt-x', 'high', 0, 0, 'cli');
+  thread.run('t2', null, work, '归档了的', null, null, '说过', 2000, 900, null, null, 1, 0, 'cli');
+  thread.run('t3', null, work, '帮手', null, null, '说过', 2500, 950, null, null, 0, 0, j({ subagent: {} }));
+  thread.run('t4', null, work, '还没说话', null, null, null, 2600, 960, null, null, 0, 0, 'cli');                  // no first message yet
+  st.close();
+  const h = new DatabaseSync(path.join(home, 'thread_history_1.sqlite'));
+  h.exec('create table thread_items (thread_id text, turn_id text, rollout_ordinal integer, item_type text, item_json text, created_at_ms integer, completed_at_ms integer)');
+  h.exec('create table thread_turns (thread_id text, turn_id text, rollout_ordinal integer, rollout_end_ordinal integer, status text, duration_ms integer)');
+  const item = (o, k, x, at, done = at) => h.prepare('insert into thread_items values (?, ?, ?, ?, ?, ?, ?)').run('t1', o < 8 ? 'u1' : 'u2', o, k, j({ type: k, ...x }), at, done);
+  item(1, 'userMessage', { content: [{ type: 'text', text: '帮我修登录' }, { type: 'localImage', path: 'x.png' }] }, 1000);
+  item(2, 'reasoning', { summary: [] }, 1001);
+  item(3, 'agentMessage', { text: '我先看看', phase: 'commentary' }, 1002);
+  item(4, 'commandExecution', { command: 'npm test\nmore' }, 1003);
+  item(5, 'fileChange', { changes: [{ path: 'a.js', diff: '+1' }, { path: 'b.js' }] }, 1004);
+  item(6, 'agentMessage', { text: '修好了', phase: 'final_answer' }, 1005);
+  h.prepare('insert into thread_turns values (?, ?, ?, ?, ?, ?)').run('t1', 'u1', 1, 7, 'completed', 61000);
+  item(8, 'userMessage', { content: [{ type: 'text', text: '再加个测试' }] }, 2000);
+  item(9, 'agentMessage', { text: '写好了', phase: 'final_answer' }, 2001, null); // still being written
+  h.prepare('insert into thread_turns values (?, ?, ?, ?, ?, ?)').run('t1', 'u2', 8, null, 'inProgress', null);
+  const list = listGpt({ gpt: [{ home }] });
+  assert.deepEqual(list.map((s) => [s.id, s.cwd, s.title, s.prompt, s.gpt, s.acct]), [['t1', work, '修复登录', '再加个测试', true, 0]]);
+  const roles = (r) => r.items.map((m) => `${m.role}:${m.text}`);
+  assert.equal(roles(gptHistory(home, 't1')).at(-1), 'claude:写好了');           // not running: an unfinished one as it is
+  let r = gptHistory(home, 't1', { live: true });
+  assert.deepEqual(roles(r), ['user:帮我修登录\n🖼 1 张图片', 'claude:我先看看', 'tool:Bash  npm test', 'tool:Edit  a.js, b.js', 'claude:修好了', 'done:61000', 'user:再加个测试']);
+  assert.deepEqual([r.start, r.end], [0, 9]);                                     // its beginning; on from the reply still written
+  assert.deepEqual(gptHistory(home, 't1', { from: 9, live: true }).items, []);                // still being written: nothing yet
+  h.prepare('update thread_items set completed_at_ms = 2002 where rollout_ordinal = 9').run();
+  h.prepare("update thread_turns set status = 'completed', rollout_end_ordinal = 10, duration_ms = 3000 where rollout_ordinal = 8").run();
+  r = gptHistory(home, 't1', { from: 9, live: true });
+  assert.deepEqual([roles(r), r.end], [['claude:写好了', 'done:3000'], 11]);
+  r = gptHistory(home, 't1', { keep: 3 });                                        // the newest, back to a message of yours
+  assert.deepEqual([roles(r), r.start], [['user:再加个测试', 'claude:写好了', 'done:3000'], 8]);
+  r = gptHistory(home, 't1', { end: 8 });                                         // and what's before it, to its beginning
+  assert.deepEqual([r.items.length, r.items.at(-1).role, r.start], [6, 'done', 0]);
+  h.close();
+  const now = Math.floor(Date.now() / 1000);
+  fs.writeFileSync(rollout, [j({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { plan_type: 'pro', primary: { used_percent: 8.4, window_minutes: 10080, resets_at: now + 3 * 86400 },
+    secondary: { used_percent: 40, window_minutes: 300, resets_at: now + 3600 } } } }), j({ type: 'event_msg', payload: { type: 'token_count', rate_limits: null } })].join('\n') + '\n');
+  const u = gptUsage(home);
+  assert.deepEqual([u.plan, u.windows.map((w) => [w.k, w.pct])], ['pro', [['seven_day', 8], ['five_hour', 40]]]);
+  fs.writeFileSync(path.join(home, 'config.toml'), 'model = "x"');
+  gptTrust(home, work); gptTrust(home, work); gptTrust(home, path.join(work, "it's"));
+  const cfg = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
+  assert.equal(cfg, `model = "x"\n\n[projects.'${path.resolve(work)}']\ntrust_level = "trusted"\n`); // once; none for a path with '
+  fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(work, { recursive: true, force: true });
+  console.log('gpt ok');
+}
+
 // A picture in a record: history() names it by its line's place in bytes and which picture it is, recordImage() gives
 // it back. A picture from the page is saved under a new name; ones older than a week go.
 {

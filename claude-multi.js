@@ -314,12 +314,13 @@ function switchDefault() {
 }
 
 function list() {
-  const reg = load();
-  if (!reg.profiles.length) return console.log('没有已保存账号，请先运行 claude-multi new。');
-  const w = Math.max(7, ...reg.profiles.map((p) => p.label.length)) + 4;
+  const reg = load(), gpt = gptAccounts(reg);
+  if (!reg.profiles.length && !gpt.length) return console.log('没有已保存账号，请先运行 claude-multi new（GPT：claude-multi new gpt）。');
+  const w = Math.max(7, ...reg.profiles.map((p) => p.label.length), ...gpt.map((g) => g.label.length)) + 4;
   const row = (a, b, c, d) => `  ${a.padEnd(23)}${b.padEnd(w)}${c.padEnd(7)}${d}`;
   console.log(row('ID', 'ACCOUNT', 'PLAN', 'ACTIVE'));
   for (const p of reg.profiles) console.log(row(p.id, p.label, p.subscriptionType, p.id === reg.active ? '*' : ''));
+  gpt.forEach((g, i) => console.log(row(g.id, g.label, g.plan ?? '', `G${i + 1}`))); // GPT accounts: G1, G2…
 }
 
 // Same endpoint /usage uses (found in claude.exe, internal, may change). Token stays in memory,
@@ -540,6 +541,207 @@ function listSessions(reg) {
       who: reg.profiles[s.acct].label.split('@')[0] });
   }
   return out.sort((a, b) => b.at - a.at);
+}
+
+// --- GPT: Codex (OpenAI's coding agent, signed in with a ChatGPT plan) as a second kind of conversation. Its accounts are
+// the registry's gpt list, apart from the Claude ones (profiles): nothing written for Claude meets them. Each has its own
+// CODEX_HOME under accounts\ (gpt-YYYYMMDD-NNN), as a Claude account its own config dir; ~/.codex is left as it is (its
+// settings copied into a new account once, its own conversations stay there).
+const CODEX_SHARED = path.join(HOME, '.codex');
+const gptAccounts = (reg = load()) => reg.gpt ?? [];
+const longPath = (p) => String(p ?? '').replace(/^\\\\\?\\/, ''); // Codex keeps paths as \\?\C:\…
+// codex.exe as npm put it, with the two variables its launcher (bin/codex.js) sets: on Windows the launcher starts it as a
+// child, which under a pseudo-terminal left Codex a grandchild, running on when its terminal was ended. The launcher
+// itself once that layout changes.
+function codexCmd() {
+  const shim = spawnSync('where', ['codex'], { encoding: 'utf8', windowsHide: true }).stdout?.split(/\r?\n/).find(Boolean)?.trim();
+  if (!shim) return null;
+  const pkg = path.join(path.dirname(shim), 'node_modules', '@openai', 'codex');
+  const exe = path.join(pkg, 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe');
+  if (fs.existsSync(exe)) return { file: exe, pre: [], env: { CODEX_MANAGED_BY_NPM: '1', CODEX_MANAGED_PACKAGE_ROOT: pkg } };
+  const js = path.join(pkg, 'bin', 'codex.js');
+  return fs.existsSync(js) ? { file: process.execPath, pre: [js], env: {} } : null;
+}
+// what Codex runs with in a GPT account: its CODEX_HOME, and no API key of yours in the way of its ChatGPT login
+function codexEnv(codex, home) {
+  const env = { ...process.env, ...codex.env, CODEX_HOME: home };
+  delete env.OPENAI_API_KEY;
+  return env;
+}
+// who a GPT account is, from its login (the ChatGPT id token's email and plan): read, never kept
+function gptWho(home) {
+  try {
+    const t = JSON.parse(fs.readFileSync(path.join(home, 'auth.json'), 'utf8')).tokens.id_token, p = JSON.parse(Buffer.from(t.split('.')[1], 'base64url'));
+    return { email: p.email ?? null, plan: p['https://api.openai.com/auth']?.chatgpt_plan_type ?? null };
+  } catch { return { email: null, plan: null }; }
+}
+// new gpt: a GPT account, signed in with ChatGPT in the browser (codex login in its CODEX_HOME). Your settings now (model,
+// MCP servers, trusted folders: config.toml; AGENTS.md) copied in, not linked: Codex writes its config itself (a folder
+// trusted); skills, rules and prompts linked, as a Claude account's are.
+function newGpt() {
+  const codex = codexCmd();
+  if (!codex) { console.log('没找到 codex，先装好 Codex：npm i -g @openai/codex'); return null; }
+  fs.mkdirSync(ACCOUNTS, { recursive: true });
+  const day = new Date().toLocaleDateString('sv').replace(/-/g, '');
+  let id, home;
+  for (let n = 1; ; n++) { // mkdir without recursive is the uniqueness check, as newProfile's
+    id = `gpt-${day}-${String(n).padStart(3, '0')}`; home = path.join(ACCOUNTS, id);
+    try { fs.mkdirSync(home); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
+  }
+  for (const f of ['config.toml', 'AGENTS.md']) try { fs.copyFileSync(path.join(CODEX_SHARED, f), path.join(home, f)); } catch {}
+  for (const d of ['skills', 'rules', 'prompts']) if (fs.existsSync(path.join(CODEX_SHARED, d))) try { fs.symlinkSync(path.join(CODEX_SHARED, d), path.join(home, d), 'junction'); } catch {}
+  log('gpt_created', { profile_id: id });
+  console.log(`GPT 账号目录：${id}\n正在用 ChatGPT 登录（会打开浏览器，登录完回到这里）……`);
+  const env = codexEnv(codex, home);
+  spawnSync(codex.file, [...codex.pre, 'login'], { stdio: 'inherit', env });
+  if (spawnSync(codex.file, [...codex.pre, 'login', 'status'], { env, encoding: 'utf8', windowsHide: true }).status !== 0) {
+    log('gpt_login_failed', { profile_id: id });
+    console.log(`还没检测到登录成功，目录先留着：${id}（没有加进账号列表）`);
+    return null;
+  }
+  const who = gptWho(home), dup = who.email && gptAccounts().find((g) => g.email === who.email);
+  if (dup) {
+    log('gpt_duplicate', { profile_id: id, existing_profile_id: dup.id });
+    console.log(`这个 ChatGPT 账号已经登记过了（${dup.id}），没有重复登记。目录留着：${id}`);
+    return null;
+  }
+  const reg = update((r) => { (r.gpt ??= []).push({ id, label: who.email || 'ChatGPT', email: who.email, plan: who.plan, home, createdAt: now() }); });
+  log('gpt_registered', { profile_id: id, account: who.email, plan: who.plan });
+  console.log(`已保存 GPT 账号 G${reg.gpt.length}：${who.email || 'ChatGPT'}${who.plan ? `（${who.plan}）` : ''}`);
+  return true;
+}
+// remove Gn: GPT account n leaves the list, its folder (its login, its conversations) to the Recycle Bin
+function removeGpt(n) {
+  const g = gptAccounts()[n - 1];
+  if (!g) { console.log('没有这个 GPT 账号：用 claude-multi list 看编号（G1、G2…）'); process.exit(1); }
+  update((r) => { r.gpt = (r.gpt ?? []).filter((x) => x.id !== g.id); });
+  log('gpt_removed', { profile_id: g.id });
+  try { unlinkAll(g.home); } catch {}
+  const r = recycle([g.home]);
+  if (fs.existsSync(g.home)) console.log(`已移除 GPT 账号 ${g.label}，但文件夹没能放进回收站（${(r.stderr || '').trim().split('\n')[0] || '可能有 Codex 开着里面的文件'}），可以之后手动删：${g.home}`);
+  else console.log(`已移除 GPT 账号 ${g.label}，文件夹在回收站里。`);
+}
+// Codex asks before working in a folder it doesn't trust yet: a GPT account trusts the ones it's started in from here, in
+// its own config.toml (a copy: yours in ~/.codex isn't touched). A path with ' in it can't be such a key: asked then.
+function gptTrust(home, dir) {
+  const f = path.join(home, 'config.toml'), p = path.resolve(dir);
+  if (p.includes("'")) return;
+  let s = '';
+  try { s = fs.readFileSync(f, 'utf8'); } catch {}
+  const lower = s.toLowerCase();
+  if (lower.includes(`[projects.'${p.toLowerCase()}']`) || lower.includes(`[projects."${p.replace(/\\/g, '\\\\').toLowerCase()}"]`)) return;
+  fs.appendFileSync(f, `${s && !s.endsWith('\n') ? '\n' : ''}\n[projects.'${p}']\ntrust_level = "trusted"\n`);
+}
+// Codex's SQLite (its conversation list, state_5.sqlite; their records, thread_history_1.sqlite), read only: node:sqlite,
+// Node 22.13 and later (its "experimental" warning kept off the 管家's command output)
+let sqlite = null;
+function codexDb(home, name) {
+  if (!sqlite) {
+    const warn = process.emitWarning;
+    process.emitWarning = () => {};
+    try { sqlite = require('node:sqlite'); } catch { throw new Error('读 GPT 对话要 Node 22.13 或更新的版本'); } finally { process.emitWarning = warn; }
+  }
+  return new sqlite.DatabaseSync(path.join(home, name), { readOnly: true });
+}
+// The GPT conversations: each account's threads (Codex's list), the ones something was said in (a first message: its
+// has_user_event column is left 0), not archived, not a helper agent's, their folder still there; newest first. An account's read again only once its list changed (the database or
+// its write-ahead log written); a read that fails (a write in flight) keeps the last one.
+const gptHeads = new Map();
+function listGpt(reg = load()) {
+  const out = [];
+  gptAccounts(reg).forEach((g, acct) => {
+    const f = path.join(g.home, 'state_5.sqlite'), at = Math.max(0, ...['', '-wal'].map((x) => { try { return fs.statSync(f + x).mtimeMs; } catch { return 0; } }));
+    let r = gptHeads.get(f);
+    if (at && r?.at !== at) try {
+      const d = codexDb(g.home, 'state_5.sqlite');
+      try {
+        r = { at, rows: d.prepare(`select id, cwd, title, name, preview, first_user_message first, updated_at_ms up, model, reasoning_effort effort from threads
+          where archived = 0 and first_user_message != '' and source not like '%subagent%' order by updated_at_ms desc`).all() };
+      } finally { d.close(); }
+      gptHeads.set(f, r);
+    } catch {}
+    for (const t of r?.rows ?? []) {
+      const cwd = longPath(t.cwd), title = String(t.name || t.title || t.first || t.preview || '').split('\n')[0].trim().slice(0, 100);
+      if (!cwd || !title || !fs.existsSync(cwd)) continue;
+      const prompt = String(t.preview ?? '').split('\n')[0].trim().slice(0, 200);
+      out.push({ id: t.id, gpt: true, acct, home: g.home, cwd, title, prompt: prompt && prompt !== title ? prompt : null, at: t.up,
+        model: t.model, effort: t.effort, pid: null, busy: false, wait: false });
+    }
+  });
+  return out.sort((a, b) => b.at - a.at);
+}
+// A GPT conversation's record as the page's messages (as history() makes Claude's): Codex's items in the order it wrote
+// them, by their place in its rollout (rollout_ordinal, as history's byte offsets): what you said, its replies (the ones on
+// the way too: the page folds those into 过程), a line per tool call named as Claude's are (the page counts them by
+// name); thinking and helper agents' doings left out. A turn's end, with how long it took, at its own place. In pieces as
+// history's: {from} the newest, {end} what's before; the last `keep` messages first. One running (live): read up to an item
+// of its turn in progress still being written (a reply mid-stream), which waits for the next read; one that died mid-turn
+// left items unfinished for good, shown as they are. start 0: nothing before it.
+const GPT_TOOL = { commandExecution: 'Bash', fileChange: 'Edit', webSearch: 'WebSearch', imageView: 'Read', mcpToolCall: 'MCP', dynamicToolCall: 'Tool', collabAgentToolCall: 'Agent' };
+function gptHistory(home, id, { from, end, keep = 120, live = false } = {}) {
+  const d = codexDb(home, 'thread_history_1.sqlite');
+  let rows, turns, first, going;
+  try {
+    const shown = `item_type in ('userMessage', 'agentMessage', 'contextCompaction', ${Object.keys(GPT_TOOL).map((k) => `'${k}'`).join(', ')})`;
+    const pick = `select rollout_ordinal o, turn_id tu, item_type k, created_at_ms at, completed_at_ms done, case item_type
+      when 'userMessage' then json_extract(item_json, '$.content') when 'agentMessage' then json_extract(item_json, '$.text')
+      when 'commandExecution' then json_extract(item_json, '$.command') when 'webSearch' then json_extract(item_json, '$.query')
+      when 'fileChange' then (select group_concat(json_extract(value, '$.path'), ', ') from json_each(item_json, '$.changes'))
+      when 'imageView' then json_extract(item_json, '$.path') when 'mcpToolCall' then json_extract(item_json, '$.server') || '.' || json_extract(item_json, '$.tool')
+      when 'dynamicToolCall' then json_extract(item_json, '$.tool') when 'collabAgentToolCall' then json_extract(item_json, '$.tool') end v
+      from thread_items where thread_id = ? and ${shown}`;
+    rows = from != null ? d.prepare(`${pick} and rollout_ordinal >= ? order by rollout_ordinal`).all(id, Number(from))
+      : end != null ? d.prepare(`${pick} and rollout_ordinal < ? order by rollout_ordinal desc limit 1000`).all(id, Number(end)).reverse()
+      : d.prepare(`${pick} order by rollout_ordinal desc limit 1000`).all(id).reverse();
+    first = d.prepare(`select min(rollout_ordinal) o from thread_items where thread_id = ? and ${shown}`).get(id)?.o ?? 0;
+    turns = d.prepare("select rollout_end_ordinal e, duration_ms ms from thread_turns where thread_id = ? and status != 'inProgress' and rollout_end_ordinal is not null and duration_ms > 0").all(id);
+    const last = live ? d.prepare('select turn_id, status from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1').get(id) : null;
+    going = last?.status === 'inProgress' ? last.turn_id : null;
+  } finally { d.close(); }
+  const stop = going ? rows.findIndex((r) => r.done == null && r.tu === going) : -1, got = stop < 0 ? rows : rows.slice(0, stop);
+  const hi = stop < 0 ? Infinity : rows[stop].o, lo = got[0]?.o ?? (from != null ? Number(from) : 0);
+  const items = [];
+  for (const r of got) {
+    if (r.k === 'userMessage') {
+      let parts = [];
+      try { parts = JSON.parse(r.v ?? '[]'); } catch {}
+      const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n').trim(), pics = parts.filter((p) => /image/i.test(p.type)).length;
+      if (text || pics) items.push({ role: 'user', text: [text, pics ? `🖼 ${pics} 张图片` : ''].filter(Boolean).join('\n'), at: r.at, o: r.o });
+    } else if (r.k === 'agentMessage') { if (String(r.v ?? '').trim()) items.push({ role: 'claude', text: String(r.v).trim(), at: r.at, o: r.o }); }
+    else if (r.k === 'contextCompaction') items.push({ role: 'note', text: '更早的内容已压缩', at: r.at, o: r.o });
+    else items.push({ role: 'tool', text: `${GPT_TOOL[r.k]}  ${String(r.v ?? '').split('\n')[0].slice(0, 160)}`, at: r.at, o: r.o });
+  }
+  for (const t of turns) if (t.e >= lo && t.e < hi && (from == null || t.e >= Number(from)) && (end == null || t.e < Number(end))) items.push({ role: 'done', text: String(t.ms), o: t.e });
+  items.sort((a, b) => a.o - b.o);
+  let start = 0;
+  if (from == null) { // the newest messages, back to one of yours; more before them: where they begin
+    let cut = 0;
+    if (items.length > keep) { cut = items.length - keep; while (cut > 0 && items[cut].role !== 'user') cut--; }
+    items.splice(0, cut);
+    start = !items.length || (!cut && got[0]?.o === first) ? 0 : items[0].o;
+  }
+  const last = Math.max(-1, ...items.map((m) => m.o), from != null ? Number(from) - 1 : -1);
+  return { items: items.map(({ o, ...m }) => m), start, end: hi === Infinity ? last + 1 : hi };
+}
+// A GPT account's usage, as Codex last heard it: each reply brings the plan's windows (how much of each is used, when it
+// resets) into its record file; the newest conversation's file still there, the last of them in it. None yet: not read.
+function gptUsage(home) {
+  let paths = [];
+  try {
+    const d = codexDb(home, 'state_5.sqlite');
+    try { paths = d.prepare('select rollout_path p from threads order by updated_at_ms desc limit 10').all().map((r) => longPath(r.p)); } finally { d.close(); }
+  } catch {}
+  const name = (w) => (w.window_minutes === 300 ? 'five_hour' : w.window_minutes === 10080 ? 'seven_day' : `${Math.round(w.window_minutes / 60)} 小时`);
+  for (const f of paths) {
+    let tail = '';
+    try { const fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size; tail = slice(fd, Math.max(0, size - 1048576), 1048576); fs.closeSync(fd); } catch { continue; }
+    const line = tail.split('\n').reverse().find((l) => l.includes('"rate_limits":{'));
+    if (line) try {
+      const r = JSON.parse(line).payload.rate_limits;
+      return { plan: r.plan_type ?? null, windows: [r.primary, r.secondary].filter(Boolean).map((w) => ({ k: name(w), pct: Math.round(w.used_percent), reset: w.resets_at ? until(w.resets_at * 1000) : '' })) };
+    } catch {}
+  }
+  return null;
 }
 
 // The key the island presses to split a conversation's tab into its own window before tiling: Windows
@@ -994,6 +1196,7 @@ function unlinkAll(d) {
 // keeps it under removed for that alone.
 // By its id too (the island's way): a number names whichever account is there now, and the island's list can be older.
 function remove(x) {
+  if (/^g[0-9]+$/i.test(x ?? '')) return removeGpt(Number(x.slice(1))); // a GPT account: G1, G2…
   const reg = load(), i = /^\d+$/.test(x ?? '') ? Number(x) - 1 : reg.profiles.findIndex((q) => q.id === x), p = reg.profiles[i];
   if (!p) { console.log('用法：claude-multi remove <账号编号或 id，如 acct-20261010-002>'); process.exit(1); }
   if (runsOn(p.configDir)) { console.log('这个账号上有 Claude 正在运行，先关掉再移除。'); process.exit(1); }
@@ -1777,6 +1980,7 @@ function hold(id, what) {
 async function web() {
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
+  const codex = codexCmd(); // GPT conversations: none started without it
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
   // the quota as the page last got it, kept on disk: after a restart the page shows it at once (read again behind it)
   let usageCache = (() => { try { return JSON.parse(fs.readFileSync(WEB_USAGE, 'utf8')); } catch { return null; } })();
@@ -1786,6 +1990,42 @@ async function web() {
   const sessions = () => {
     if (!sessCache || Date.now() - sessAt > 3000) { sessCache = listSessions(load()); sessAt = Date.now(); }
     return sessCache;
+  };
+  // The GPT conversations, kept apart from the Claude ones (sessions(): what's written for those reads their records),
+  // and which of them run here. A Codex started here is bound to its thread once Codex has one (in that account, in that
+  // folder, made since it started: there before its first message); a resumed one knows its own. One running here is
+  // busy while its last turn is going (its record says), idle otherwise, whatever an ended one left there.
+  const gptLive = () => [...terms.values()].filter((t) => t.gpt && !t.gone);
+  function bindGpt() {
+    const live = gptLive();
+    for (const t of live.filter((x) => !x.gpt.id)) try {
+      const d = codexDb(t.gpt.home, 'state_5.sqlite'), taken = new Set(live.map((x) => x.gpt.id));
+      try {
+        t.gpt.id = d.prepare("select id, cwd from threads where created_at_ms >= ? and source not like '%subagent%' order by created_at_ms").all(t.gpt.since - 5000)
+          .find((r) => !taken.has(r.id) && sameDir(longPath(r.cwd), t.cwd))?.id ?? null;
+      } finally { d.close(); }
+      if (t.gpt.id) gptCache = null;
+    } catch {}
+  }
+  let gptCache = null, gptAt = 0;
+  const gptSessions = () => {
+    bindGpt();
+    if (gptCache && Date.now() - gptAt < 3000) return gptCache;
+    const list = listGpt(load()), live = gptLive();
+    for (const s of list) {
+      const t = live.find((x) => x.gpt.id === s.id);
+      if (!t) continue;
+      s.pid = t.pid;
+      try { const d = codexDb(s.home, 'thread_history_1.sqlite'); try { s.busy = d.prepare('select status from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1').get(s.id)?.status === 'inProgress'; } finally { d.close(); } } catch {}
+    }
+    gptCache = list; gptAt = Date.now();
+    return list;
+  };
+  // each GPT account and its usage as its records last said it (read again after 30 s)
+  let gptUse = null, gptUseAt = 0;
+  const gptState = () => {
+    if (!gptUse || Date.now() - gptUseAt > 30000) { gptUse = gptAccounts().map((g) => ({ label: g.label, plan: g.plan, ...(gptUsage(g.home) ?? { windows: null }) })); gptUseAt = Date.now(); }
+    return gptUse;
   };
   // a conversation already being continued here: until its Claude has written its session file the list says it
   // isn't running, so a second open (a double tap, a second device) would start a second Claude on the same record
@@ -1803,6 +2043,20 @@ async function web() {
     return new Promise((ok, no) => require('child_process').execFile(process.execPath, [__filename, what, id, ...more], { windowsHide: true },
       (e, stdout) => { sessCache = null; const said = String(stdout ?? '').trim(); if (e) no(new Error(said || e.message)); else ok({ said }); })).finally(free);
   };
+  // 删除 for a GPT one: archived, Codex's own way (codex archive; codex unarchive brings it back), not while it runs here
+  function archiveGpt(id) {
+    const s = gptSessions().find((x) => x.id === id);
+    if (!s) throw new Error('找不到这个对话，可能已经删了');
+    if (gptLive().some((t) => t.gpt.id === id)) throw new Error('这个对话正在运行，先结束它');
+    if (!codex) throw new Error('没找到 codex');
+    const free = hold(id, 'change');
+    return new Promise((ok, no) => require('child_process').execFile(codex.file, [...codex.pre, 'archive', id], { env: codexEnv(codex, s.home), windowsHide: true },
+      (e, stdout, stderr) => {
+        gptCache = null;
+        if (e) no(new Error(`没归档成：${String(stderr || stdout || e.message).trim().split('\n').pop()}`));
+        else ok({ said: `已归档「${s.title}」，在 Codex 里用 codex unarchive 能找回。` });
+      })).finally(free);
+  }
   // a conversation started or continued here: claude in a pseudo-terminal, its output kept (last 256 KB) for
   // whoever opens it later
   function startPty(p, cwd, args, cols = 100, rows = 30) {
@@ -1823,6 +2077,22 @@ async function web() {
     proc.onExit(() => { t.gone = true; saveTerms(); saveRun(); if (!t.switching) send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t);
     log('web_session', { profile_id: p.id, cwd, args: args.join(' ') });
+    return t;
+  }
+  // a GPT conversation started or continued here: codex in a pseudo-terminal, in its account's CODEX_HOME (acct from 1),
+  // the folder trusted there first (Codex asks of a new one, and the page has no card for its question yet)
+  function startGpt(acct, cwd, resume, cols = 100, rows = 30) {
+    const g = gptAccounts()[acct - 1];
+    if (!g) throw new Error('没有这个 GPT 账号');
+    if (!codex) throw new Error('没找到 codex，先装好 Codex：npm i -g @openai/codex');
+    gptTrust(g.home, cwd);
+    const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`;
+    const proc = pty.spawn(codex.file, [...codex.pre, ...(resume ? ['resume', resume] : [])], { name: 'xterm-256color', cols, rows, cwd, env: { ...codexEnv(codex, g.home), TERM: 'xterm-256color' } });
+    const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, gpt: { acct: acct - 1, home: g.home, id: resume ?? null, since: Date.now() } };
+    proc.onData((d) => { t.buf = (t.buf + d).slice(-262144); send(t, 'data', d); });
+    proc.onExit(() => { t.gone = true; gptCache = null; send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
+    terms.set(key, t); gptCache = null;
+    log('web_session', { profile_id: g.id, cwd, args: resume ? `resume ${resume}` : '' });
     return t;
   }
   // a conversation open in a terminal window here: its screen through the console bridge, while anyone watches
@@ -1883,7 +2153,7 @@ async function web() {
   }
   // for the island and `claude-multi attach`: which running conversations are ours
   function saveTerms() {
-    const up = [...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid);
+    const up = [...terms.values()].filter((t) => t.kind === 'pty' && !t.gpt && !t.gone && t.pid);
     try { fs.writeFileSync(WEB_TERMS, JSON.stringify(up.map((t) => t.pid))); } catch {}
   }
   // and which conversations run here, by id (one just started has it once listed: looked at every 10 s too). A service
@@ -2038,7 +2308,10 @@ async function web() {
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
-      return { usage: usageCache, sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      // and the GPT ones among them, by when they were last written (a GPT one runs here or not at all)
+      for (const { home, ...s } of gptSessions()) list.push({ ...s, where: s.pid ? 'web' : null, line: s.pid ? { model: s.model, effort: s.effort } : null });
+      list.sort((a, b) => b.at - a.at);
+      return { usage: usageCache, gpt: gptState(), sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow(all), timeline: timeline(), waits: waitsNow() };
     },
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
@@ -2071,6 +2344,15 @@ async function web() {
     // started here has a record once Claude wrote the first message (its session file, named by its pid, says
     // which conversation it is), until then none.
     'GET /api/history': (q) => {
+      const g = terms.get(q.get('key') ?? '')?.gpt;
+      if (g || q.has('gpt')) { // a GPT one's: its thread's items. Started here and no thread yet: nothing
+        if (g && !g.id) bindGpt();
+        const id = g ? g.id : q.get('id'), home = g ? g.home : gptSessions().find((x) => x.id === id)?.home;
+        if (g && !id) return { items: [], start: 0, end: 0 };
+        if (!home) throw new Error('找不到这个对话');
+        const live = !!g || gptLive().some((x) => x.gpt.id === id); // running here: a reply mid-stream waits
+        return { ...gptHistory(home, id, { from: q.get('from') || undefined, end: q.get('end') || undefined, live }), id };
+      }
       const { t, file } = recordOf(q);
       if (!file) { if (t) return { items: [], start: 0, end: 0 }; throw new Error('找不到这个对话'); }
       return { ...history(file, { from: q.get('from') || undefined, end: q.get('end') || undefined }), id: path.basename(file, '.jsonl') };
@@ -2093,15 +2375,29 @@ async function web() {
     // refused), run apart as warmup is: a deletion's PowerShell would hold up every terminal's stream meanwhile. One just
     // continued here isn't listed as running yet: refused here first. The list read afresh after.
     'POST /api/rename': (q, b) => {
+      if (b.gpt) throw new Error('GPT 对话暂时不能在这里改名');
       const id = String(b.id ?? ''), name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
       if (!name) throw new Error('名字不能是空的');
       return command('rename', id, name);
     },
-    'POST /api/delete': (q, b) => command('delete', String(b.id ?? '')),
+    'POST /api/delete': (q, b) => (b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''))),
     // open a conversation's terminal: {id, acct?} continues one (its window here if it runs in one),
     // {dir, acct} starts one. acct is 1-based; the page proposes it like the island does.
     'POST /api/open': (q, b) => {
       const reg = load(), cols = Math.max(40, Math.min(300, b.cols | 0 || 100)), rows = Math.max(10, Math.min(200, b.rows | 0 || 30));
+      if (b.gpt) { // a GPT one: {id} its Codex here, or continued here on its own account (a GPT one changes none); {dir, acct}
+        if (!b.id) {
+          if (!b.dir || !fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
+          return { key: startGpt(Number(b.acct) || 1, b.dir, null, cols, rows).key, kind: 'pty' };
+        }
+        const t = gptLive().find((x) => x.gpt.id === b.id);
+        if (t) return { key: t.key, kind: 'pty' };
+        const s = gptSessions().find((x) => x.id === b.id);
+        if (!s) throw new Error('找不到这个对话');
+        if (b.live) throw new Error('这个对话已经不在运行了');
+        if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
+        return { key: startGpt(s.acct + 1, s.cwd, s.id, cols, rows).key, kind: 'pty' };
+      }
       if (b.id) {
         sessCache = null;
         const s = sessions().find((x) => x.id === b.id);
@@ -2547,11 +2843,11 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { listGpt, gptHistory, gptUsage, gptTrust, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
-  if (cmd === 'new') process.exitCode = newProfile() ? 0 : 1;
+  if (cmd === 'new') process.exitCode = (process.argv[3] === 'gpt' ? newGpt() : newProfile()) ? 0 : 1;
   else if (cmd === 'switch') switchDefault();
   else if (cmd === 'list') list();
   else if (cmd === 'usage') usage(process.argv.slice(3));
