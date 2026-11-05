@@ -36,6 +36,7 @@
 | 手机 | 同一个网页，手机上是单栏布局，可以添加到主屏幕当 App 用。 |
 | 远程 | 通过你自己的服务器（SSH 反向隧道 + nginx HTTPS）在外面访问，用钥匙登录。 |
 | 用量统计 | 所有账号的 token 用量，按天、按账号统计，并按 API 价格折算成金额。 |
+| GPT | 用 ChatGPT 订阅登录 OpenAI 的 [Codex](https://github.com/openai/codex)，在网页上和 Claude 的对话放在一起用（账号 G1、G2…）。 |
 
 ## 截图
 
@@ -63,9 +64,10 @@
 需要：
 
 - Windows 10 / 11，自带 PowerShell 5.1（灵动岛用到）
-- [Node.js](https://nodejs.org/) 20 或更新版本
+- [Node.js](https://nodejs.org/) 20 或更新版本（用 GPT 要 22.13 或更新：读 Codex 的对话记录要用 Node 自带的 SQLite）
 - [Claude Code](https://docs.claude.com/en/docs/claude-code)，命令行里能直接运行 `claude`
 - 可选：Windows Terminal（灵动岛的「整理窗口」功能要用）
+- 可选：[Codex](https://github.com/openai/codex)（`npm i -g @openai/codex`），用 GPT 时要装
 
 **1. 放到固定位置。**程序固定从 `%USERPROFILE%\.claude-multi` 读写数据，所以仓库必须克隆到这个位置：
 
@@ -122,6 +124,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 |---|---|
 | `claude-multi [claude 的参数]` | 选择账号后启动 Claude Code |
 | `new` | 登录并添加一个账号 |
+| `new gpt` | 用 ChatGPT 登录并添加一个 GPT 账号（Codex），编号 G1、G2… |
 | `list` | 列出所有账号 |
 | `switch` | 改默认账号（不启动 Claude） |
 | `usage [--json]` | 各账号额度和推荐账号 |
@@ -134,7 +137,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 | `chat look\|wait\|say\|pick\|new …` | 管家用的：看一个对话（含它正在问的选择题）、等它答完或等到某个时间、给它发消息、替你选一项、在后台新开对话。不带参数运行 `chat` 看用法 |
 | `rename ID 名字` | 给没在运行的对话改名 |
 | `delete ID` | 把没在运行的对话移到回收站 |
-| `remove N` | 移除账号 N。它的文件夹移到回收站，有对话正在用它时不让移除 |
+| `remove N` | 移除账号 N。它的文件夹移到回收站，有对话正在用它时不让移除。`remove G1` 移除 GPT 账号 G1 |
 | `tokens [--json]` | token 用量和按 API 价格折算的金额 |
 | `renew N 月-日` / `renew N auto` | 手动记下账号 N 的续费日，或改回自动推算 |
 | `island` | 打开灵动岛（已经开着就不会再开一个） |
@@ -167,6 +170,16 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 - **搜索对话**：按 Ctrl+K，或者点列表上方的放大镜。标题、最后一句话、文件夹都能搜，空格隔开几个词就是都要有。方向键选，回车打开，Ctrl+回车在右侧打开。在终端视图里 Ctrl+K 还是给 Claude 的。
 - 鼠标移到列表里的文件夹上，右边会出现 ＋，点了直接用推荐的账号在这个文件夹开一个新对话（手机上 ＋ 一直显示）。
 - 在列表里的对话上点右键（手机上按住半秒）：在右侧打开、重命名、换账号继续、删除。删除是移到电脑的回收站，可以找回。正在运行的对话不能在这里重命名或删除：重命名在对话里发 `/rename 新名字`，删除要先结束它。
+
+**GPT 对话**（Codex）
+
+- 先在电脑上运行 `claude-multi new gpt`：会打开浏览器用 ChatGPT 登录，用的是你的订阅额度，不用 API key。每个 GPT 账号有自己的目录（`accounts\gpt-…`），你现在 `~/.codex` 里的设置（模型、MCP、信任过的文件夹、AGENTS.md）会复制一份进去；`~/.codex` 本身和里面原来的对话不动，也不显示在这里。
+- 有了 GPT 账号后，「新对话」上面多一个「Claude / GPT」切换。列表里两种对话按文件夹放在一起，GPT 账号的圆环写着 G1、G2，列表顶部可以只看 Claude 或只看 GPT。
+- 「对话」视图和「终端」视图都能用：「对话」显示你的消息、它的回答和折叠起来的「过程」；「终端」就是 Codex 的界面本身。在新文件夹里开 GPT 对话时，这个账号会自动信任那个文件夹（写在它自己的 config.toml 里）。
+- 「额度」里有 GPT 账号的用量（各窗口用了多少、多久后重置），在它上面回复过一次后才读得到。
+- 右键菜单里 GPT 对话的「删除」是**归档**（Codex 自己的功能，用 `codex unarchive` 能找回）；GPT 对话暂时不能在这里改名，也不能换账号。
+- 发图片时，GPT 对话收到的是图片的路径。
+- 现在还没有：GPT 回复完成的通知、GPT 的选择题和权限确认卡片（要在「终端」里操作）、管家调用 GPT 对话。网页服务重启后，在里面运行的 GPT 对话会结束，之后可以在列表里点开接着聊。
 
 **对话里**
 
