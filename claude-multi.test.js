@@ -583,6 +583,14 @@ console.log('tokens ok');
   assert.equal(codexBlocked(['>_ OpenAI Codex (v0.166.0)', '› Ask Codex to do anything', '  GPT-6-Astra max · ~\\Desktop\\x', '  ? for shortcuts']), null);
   assert.equal(codexBlocked(['>_ OpenAI Codex (v0.166.0) loading']), null);
   assert.equal(codexBlocked(null), null);
+  // what the page sends a Codex: the paste marks gone, a new line inside the words as Shift+Enter; keys alone untouched
+  const { codexKeys } = require('./claude-multi');
+  const SE = '\x1b[13;28;13;1;16;1_\x1b[13;28;13;0;16;1_';
+  assert.deepEqual(codexKeys('\x1b[200~第一行\r第二行\x1b[201~'), { data: `第一行${SE}第二行`, words: true });
+  assert.deepEqual(codexKeys('a\r\nb\nc'), { data: `a${SE}b${SE}c`, words: true });
+  assert.deepEqual(codexKeys('\r'), { data: '\r', words: false });
+  assert.deepEqual(codexKeys('\x1b[B'), { data: '\x1b[B', words: false });
+  assert.deepEqual(codexKeys('\x03'), { data: '\x03', words: false });
   fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(work, { recursive: true, force: true });
   console.log('gpt ok');
 }
