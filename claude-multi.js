@@ -2602,7 +2602,7 @@ async function web() {
         if (t) return { key: t.key, kind: 'pty' };
         const s = gptSessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
-        if (s.pid && !s.web) throw new Error('它在电脑的终端窗口里运行，直接切过去就行'); // not a second Codex on it
+        if (s.pid && !s.web) { const t = mirror(s.pid); return { key: t.key, kind: t.kind }; } // in a terminal window: shown from there, as a Claude is (not a second Codex on it)
         if (b.live) throw new Error('这个对话已经不在运行了');
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         return { key: startGpt(s.acct + 1, s.cwd, s.id, cols, rows).key, kind: 'pty' };
