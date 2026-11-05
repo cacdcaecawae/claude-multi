@@ -408,13 +408,25 @@ console.log('tokens ok');
 {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
   const part = (re) => src.match(re)[0];
-  const md = new Function('katex', `${part(/^const esc = .*$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
+  const md = new Function('katex', `${part(/^const esc = .*$/m)}\n${part(/^const svg = .*$/m)}\n${part(/^const I = [\s\S]*?\};$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}
+    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
   assert.ok(t.includes('<tr><td>c | d</td><td>&lt;e&gt;</td></tr>'), t);              // escaped as everything else
   assert.ok(t.startsWith('看这个\n<div class="tbl">') && t.endsWith('</table></div>后面'), t);
   assert.equal(md('| grep x\n'), '<div class="mono">| grep x\n</div>');               // not a table
+  // links: the address to a space, a quote or Chinese text; a sentence's end and an unopened ")" left out; in a code
+  // span or bold it's a link inside it (neither cut across its markup); none in a code block
+  const a = (u, w = u) => `<a href="${u}" target="_blank" rel="noopener">${w}</a>`;
+  assert.equal(md('PR：https://github.com/a/b/pull/7，看看'), `PR：${a('https://github.com/a/b/pull/7')}，看看`);
+  assert.equal(md('(见 https://x.com/a)。'), `(见 ${a('https://x.com/a')})。`);
+  assert.equal(md('https://w.org/Foo_(bar). x'), `${a('https://w.org/Foo_(bar)')}. x`);
+  assert.equal(md('(https://w.org/Foo_(bar))'), `(${a('https://w.org/Foo_(bar)')})`);             // its own pair kept, the outer ")" not
+  assert.equal(md('[维基](https://w.org/Foo_(bar))。'), `${a('https://w.org/Foo_(bar)', '维基')}。`); // a pair inside [words](address)
+  assert.equal(md('q https://a.com/x?a=1&b=2. "https://q.com"'), `q ${a('https://a.com/x?a=1&amp;b=2')}. &quot;${a('https://q.com')}&quot;`);
+  assert.equal(md('[文档](https://d.com/p) `https://c.x` **https://b.x**'), `${a('https://d.com/p', '文档')} <code>${a('https://c.x')}</code> <b>${a('https://b.x')}</b>`);
+  assert.ok(md('```\nhttps://in.code/x\n```').endsWith('<pre>https://in.code/x</pre></div>'));
   // math, drawn by KaTeX: in the line and set apart; its | and * left to it, not the table and bold rules
   const m = md(String.raw`估计 $\hat{X}_0=X_t-\sigma(t)\hat{R}_t$，**设 $X_{t_N}=X_p$**` + '\n' + String.raw`$$X_{t'}=\frac{\sigma_{t'}^2}{\sigma_t^2}X_t+\sqrt{|a|*b}$$`);
   assert.ok(m.startsWith('估计 <span class="katex">') && m.includes('<b>设 <span class="katex">') && m.includes('class="katex-display"'), m);
@@ -424,6 +436,10 @@ console.log('tokens ok');
   assert.ok(md('```\n$a$\n```').includes('<pre>$a$</pre>'));                                     // never in a code block
   assert.ok(md(String.raw`坏的 $\frac{a$ 公式`).includes('katex-error'));                          // shown in red as written
   assert.ok(md(String.raw`行内 \(a<b\) 和 \[c>d\]`).includes('katex-display') && !md(String.raw`\(a<b\)`).includes('&lt;b\\)'));
+  // links and math together: KaTeX's own http:// address isn't made a link; a formula right after an address isn't in it
+  assert.ok(!m.includes('<a '), m);
+  const lm = md('见 https://x.com/a$b$');
+  assert.ok(lm.startsWith(`见 ${a('https://x.com/a')}<span class="katex">`), lm);
   console.log('md ok');
 }
 
