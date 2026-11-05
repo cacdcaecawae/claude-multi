@@ -517,6 +517,11 @@ console.log('tokens ok');
   assert.deepEqual([roles(r), r.start], [['user:再加个测试', 'claude:写好了', 'done:3000'], 8]);
   r = gptHistory(home, 't1', { end: 8 });                                         // and what's before it, to its beginning
   assert.deepEqual([r.items.length, r.items.at(-1).role, r.start], [6, 'done', 0]);
+  // what the 管家 and the phones read of it: your last words (who set its turn going), its last reply, its turn's state
+  const { gptLast, gptTurn, gistText } = require('./claude-multi');
+  h.exec('alter table thread_turns add column started_at integer'); // when each began, in seconds (Codex's column)
+  assert.deepEqual([gptLast(home, 't1', 'userMessage'), gptLast(home, 't1', 'agentMessage'), gptTurn(home, 't1')?.status, gptTurn(home, 'none')], ['再加个测试', '写好了', 'completed', null]);
+  assert.equal(gistText('好的。\n\n已经改好了 `a.js`，测试都过了。\n\n```js\nx\n```'), '好的。 已经改好了 a.js，测试都过了。');
   h.close();
   const now = Math.floor(Date.now() / 1000);
   fs.writeFileSync(rollout, [j({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { plan_type: 'pro', primary: { used_percent: 8.4, window_minutes: 10080, resets_at: now + 3 * 86400 },
@@ -527,6 +532,21 @@ console.log('tokens ok');
   gptTrust(home, work); gptTrust(home, work); gptTrust(home, path.join(work, "it's"));
   const cfg = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
   assert.equal(cfg, `model = "x"\n\n[projects.'${path.resolve(work)}']\ntrust_level = "trusted"\n`); // once; none for a path with '
+  // Codex's notify (claude-multi notify gpt <its JSON>), as a command in a ROOT of its own: a note for the pages and the
+  // island named as the account's list names it; a helper agent's turn, or another kind, none
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-home-')), cm = path.join(root, '.claude-multi');
+  fs.mkdirSync(cm); fs.writeFileSync(path.join(cm, 'island.ps1.pid'), String(process.pid)); // the island "running": not started
+  const notifyGpt = (x) => require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), 'notify', 'gpt', j(x)],
+    { env: { ...process.env, USERPROFILE: root, HOME: root, CODEX_HOME: home }, encoding: 'utf8' });
+  notifyGpt({ type: 'agent-turn-complete', 'thread-id': 't1', 'last-assistant-message': '写好了' });
+  require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), 'notify', 'gpt', home, j({ type: 'approval-requested', 'thread-id': 't1' })],
+    { env: { ...process.env, USERPROFILE: root, HOME: root, CODEX_HOME: '' } }); // its home given, as the web service gives it
+  notifyGpt({ type: 'agent-turn-complete', 'thread-id': 't3' });                 // a helper agent's
+  notifyGpt({ type: 'something-else', 'thread-id': 't1' });
+  const notes = fs.readFileSync(path.join(cm, 'notes.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(notes.map((n) => [n.kind, n.id, n.title, n.project, n.gpt]), [['done', 't1', '修复登录', path.basename(work), true], ['ask', 't1', '修复登录', path.basename(work), true]]);
+  assert.equal(fs.readdirSync(path.join(cm, 'inbox')).length, 2);
+  fs.rmSync(root, { recursive: true, force: true });
   fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(work, { recursive: true, force: true });
   console.log('gpt ok');
 }
