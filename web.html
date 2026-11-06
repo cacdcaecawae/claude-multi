@@ -56,7 +56,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   svg { display: block; flex: none; }
   [hidden] { display: none !important; }
   /* where the keyboard is (Tab), ringed as VS Code rings it; a mouse's click shows none */
-  :focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  :focus-visible:not(input, textarea) { outline: 1px solid var(--accent); outline-offset: -1px; } /* a text box shows its caret: no ring */
   .row:focus-visible, .tab:focus-visible { outline-width: 2px; outline-offset: -2px; }
   #app { flex: 1; min-height: 0; display: flex; }
 
@@ -534,7 +534,6 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     color: var(--fgHi); background: var(--pop); border: 1px solid var(--popB); box-shadow: 0 2px 10px var(--shadow); }
   .toEnd.new { color: #fff; background: var(--accent); border-color: var(--accent); }
   .box { display: flex; flex-direction: column; background: var(--input); border: 1px solid var(--inputB); border-radius: 12px; box-shadow: 0 2px 10px var(--lift); }
-  .box:focus-within { border-color: var(--accent); }
   .bar { display: flex; align-items: flex-end; gap: 4px; padding: 5px; }
   .bar .pic { width: 32px; height: 32px; }
   .bar .pic svg { width: 18px; height: 18px; }
