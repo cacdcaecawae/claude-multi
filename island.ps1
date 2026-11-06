@@ -362,17 +362,17 @@ $win = X @"
   <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="3" Direction="270" Opacity="0.5"/></Border.Effect>
   <Border.RenderTransform><ScaleTransform x:Name="Scale"/></Border.RenderTransform>
   <StackPanel>
+   <ScrollViewer x:Name="PillScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
    <DockPanel x:Name="Pill" Background="Transparent" Cursor="Hand" LastChildFill="False">
     <TextBlock x:Name="PillName" Text="Claude · 读取中…" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
     <StackPanel x:Name="PillAccts" Orientation="Horizontal" Visibility="Collapsed"/>
     <Border x:Name="BadgeBox" Visibility="Collapsed" Background="#FF9F0A" CornerRadius="8" Padding="6,0" Margin="10,0,0,0" VerticalAlignment="Center" ToolTip="未读提示，点开查看">
      <TextBlock x:Name="Badge" FontSize="11" FontWeight="SemiBold" Foreground="Black"/>
     </Border>
-   </DockPanel>
-   <StackPanel x:Name="Alerts" Visibility="Collapsed" Background="Transparent" Cursor="Hand"/>
+   </DockPanel></ScrollViewer>
+    <ScrollViewer x:Name="PanelScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"><StackPanel>
+    <StackPanel x:Name="Alerts" Visibility="Collapsed" Background="Transparent" Cursor="Hand"/>
    <StackPanel x:Name="Panel" Visibility="Collapsed" Margin="0,12,0,0" MinWidth="420">
-    <!-- the notes and the cards scroll once they'd run past the screen (many accounts, a small or zoomed one): Expand sets its height -->
-    <ScrollViewer x:Name="PanelScroll" VerticalScrollBarVisibility="Auto"><StackPanel>
     <StackPanel x:Name="HistoryBox" Visibility="Collapsed" Margin="0,0,0,14">
      <DockPanel>
       <Button x:Name="BtnClearHist" Style="{StaticResource Text}" Content="清空" DockPanel.Dock="Right"/>
@@ -388,7 +388,6 @@ $win = X @"
      </DockPanel>
      <StackPanel x:Name="ProjList"/>
     </StackPanel>
-    </StackPanel></ScrollViewer>
     <DockPanel Margin="0,10,-6,-2">
      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
       <Button x:Name="BtnChats" Style="{StaticResource Icon}" Content="&#xE8BD;" ToolTip="对话列表：回到之前的对话"/>
@@ -400,6 +399,7 @@ $win = X @"
      <TextBlock x:Name="Status" FontSize="11" Foreground="#73FFFFFF" VerticalAlignment="Center"/>
     </DockPanel>
    </StackPanel>
+    </StackPanel></ScrollViewer>
   </StackPanel>
  </Border>
  <!-- floats on the island's top-right corner, only while hovered: takes no room in the pill -->
@@ -410,7 +410,7 @@ $win = X @"
  </Grid>
 </Window>
 "@
-foreach ($n in 'Island', 'Scale', 'Pill', 'Pin', 'PinIcon', 'PillName', 'PillAccts', 'HistTitle', 'Alerts', 'Panel', 'PanelScroll',
+foreach ($n in 'Island', 'Scale', 'Pill', 'PillScroll', 'Pin', 'PinIcon', 'PillName', 'PillAccts', 'HistTitle', 'Alerts', 'Panel', 'PanelScroll',
   'Status', 'BtnChats', 'BtnTokens', 'BtnRefresh', 'BtnWarm', 'BtnQuit', 'Rows', 'ProjView', 'BtnBack', 'ProjTitle', 'ProjList',
   'BadgeBox', 'Badge', 'HistoryBox', 'History', 'BtnClearHist') {
   Set-Variable -Name $n -Value $win.FindName($n)
@@ -450,6 +450,7 @@ function Slide([bool]$hide) {
 }
 function Recenter {
   $wa = [Windows.SystemParameters]::WorkArea
+  Fit-Panel $wa
   $win.Left = $wa.Left + ($wa.Width - $win.ActualWidth) / 2
   $win.BeginAnimation([Windows.Window]::TopProperty, $null) # drop a finished slide so Top can be set
   $win.Top = TopFor $script:hidden
@@ -742,10 +743,15 @@ function Focus-Claude([int]$claudePid) {
   } $null
 }
 
+function Fit-Panel($wa) {
+  # Alerts share the scroll area: arriving while expanded must not push the bottom off-screen.
+  $PanelScroll.MaxHeight = [Math]::Max(1, $wa.Height - [Math]::Max(18, $Pill.ActualHeight) - [Windows.SystemParameters]::HorizontalScrollBarHeight - 40)
+  $PanelScroll.MaxWidth = [Math]::Max(1, $wa.Width - 62)
+  $PillScroll.MaxWidth = $PanelScroll.MaxWidth
+  $Panel.MinWidth = [Math]::Min(420, $PanelScroll.MaxWidth)
+}
 function Expand {
-  # the cards no taller than the screen leaves under the pill, the alerts and the buttons (~150 px with the margins): past
-  # that they scroll, the buttons stay in sight
-  $PanelScroll.MaxHeight = [Math]::Max(160, [Windows.SystemParameters]::WorkArea.Height - 150 - $Alerts.ActualHeight)
+  Fit-Panel ([Windows.SystemParameters]::WorkArea)
   Show-Rows; $Panel.Visibility = 'Visible'; Pop
   [void]$win.Activate() # so a click elsewhere deactivates and collapses it
   if (((Get-Date) - $script:fetched).TotalSeconds -gt 60) { Refresh }
@@ -995,16 +1001,18 @@ function Open-Chats {
   <Border Background="#F7000000" CornerRadius="22" BorderBrush="#1FFFFFFF" BorderThickness="1">
    <Grid>
     <Grid.RowDefinitions><RowDefinition Height="52"/><RowDefinition/></Grid.RowDefinitions>
-    <Grid.ColumnDefinitions><ColumnDefinition x:Name="SideCol" Width="240"/><ColumnDefinition/></Grid.ColumnDefinitions>
-    <DockPanel x:Name="Bar" Grid.ColumnSpan="2" Background="Transparent" Margin="22,0,12,0">
+     <DockPanel x:Name="Bar" Background="Transparent" Margin="22,0,12,0">
      <Button x:Name="Close" Style="{StaticResource Icon}" Content="&#xE711;" ToolTip="关闭（Esc）" DockPanel.Dock="Right" VerticalAlignment="Center"/>
      <Ellipse Width="8" Height="8" Fill="#30D158" VerticalAlignment="Center"/>
      <TextBlock Text="Claude 对话" FontSize="13" FontWeight="SemiBold" Foreground="#CCFFFFFF" Margin="10,0,0,0" VerticalAlignment="Center"/>
     </DockPanel>
-    <Border x:Name="Side" Grid.Row="1" BorderBrush="#14FFFFFF" BorderThickness="0,0,1,0" Margin="0,0,0,18">
+     <ScrollViewer x:Name="ChatsScroll" Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+     <Grid MinWidth="520" MinHeight="360" Width="{Binding ViewportWidth, ElementName=ChatsScroll}" Height="{Binding ViewportHeight, ElementName=ChatsScroll}">
+     <Grid.ColumnDefinitions><ColumnDefinition x:Name="SideCol" Width="240"/><ColumnDefinition/></Grid.ColumnDefinitions>
+     <Border x:Name="Side" BorderBrush="#14FFFFFF" BorderThickness="0,0,1,0" Margin="0,0,0,18">
      <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="12,4,10,0"><StackPanel x:Name="Folders"/></ScrollViewer>
     </Border>
-    <DockPanel Grid.Row="1" Grid.Column="1" Margin="28,2,20,16">
+     <DockPanel Grid.Column="1" Margin="28,2,20,16">
      <TextBlock x:Name="Heading" DockPanel.Dock="Top" FontSize="22" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
      <TextBlock x:Name="SubHeading" DockPanel.Dock="Top" FontSize="12" Foreground="#66FFFFFF" Margin="0,3,0,16" TextTrimming="CharacterEllipsis"/>
      <Border x:Name="SearchBox" DockPanel.Dock="Top" Background="#17FFFFFF" CornerRadius="12" Padding="12,8" Margin="0,0,8,10">
@@ -1024,6 +1032,7 @@ function Open-Chats {
      </Border>
      <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="List" Margin="0,0,8,0"/></ScrollViewer>
     </DockPanel>
+     </Grid></ScrollViewer>
    </Grid>
   </Border>
  </Grid>

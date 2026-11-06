@@ -297,6 +297,8 @@ server {
 | `butler\` | 管家的工作文件夹：`CLAUDE.md` 是它的规矩，模型设成 Sonnet |
 | `tickets.json` | 管家的工单（用户的原话、交给了哪个对话、它的汇报和每轮结束的时间），只由网页服务写，不进 git |
 | `claude-multi.test.js` | 测试 |
+| `web.test.js` | 隔离浏览器中的网页交互、键盘和手机布局测试 |
+| `island.test.ps1` | 隔离 WPF 窗口中的小工作区、多账号与通知滚动测试 |
 
 运行测试：
 
@@ -305,5 +307,16 @@ node claude-multi.test.js
 ```
 
 每一项通过会打印一行 `… ok`。测试在临时目录里另建一个用户目录运行，不读也不改你真正的 `.claude-multi`（账号列表、正在用的对话都不受影响）。
+
+主测试还覆盖并发新建的 PID 绑定、快捷交代拒发保留、电脑终端清空记录、跨会话草稿与附件隔离，以及异步管道写入失败。新终端没有返回 PID 时会明确报错，避免工单绑定到附近启动的另一个对话。
+
+Windows 上可以再运行界面测试：
+
+```bat
+node web.test.js
+powershell -NoProfile -STA -File island.test.ps1
+```
+
+浏览器测试使用 Chrome 或 Edge 的独立临时配置及模拟接口，也可用 `BROWSER_EXE` 指定 Chromium 可执行文件。WPF 测试只加载窗口布局和尺寸约束，在不可见窗口里模拟小工作区，不启动灵动岛的后台逻辑。两者都不连接正在使用的网页服务。
 
 改了 `claude-multi.js` 之后要重启网页服务才会生效。重启会关掉在网页服务里运行的对话，对话记录不会丢，之后可以接着聊。

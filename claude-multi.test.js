@@ -988,7 +988,9 @@ console.log('tokens ok');
 // account, none read and all used up apart.
 (async () => {
   const { jsonBody } = require('./claude-multi'), b = Buffer.from(JSON.stringify({ text: '中文😀' }));
-  for (const at of [b.indexOf(Buffer.from('文')) + 1, b.indexOf(Buffer.from('😀')) + 2]) assert.deepEqual(await jsonBody([b.subarray(0, at), b.subarray(at)]), { text: '中文😀' });
+  for (let at = 0; at <= b.length; at++) assert.deepEqual(await jsonBody([b.subarray(0, at), b.subarray(at)]), { text: '中文😀' });
+  assert.deepEqual(await jsonBody([b], b.length), { text: '中文😀' });
+  assert.equal(await jsonBody([b], b.length - 1), undefined);
   assert.equal(await jsonBody([b], 8), undefined);
   const src = fs.readFileSync(require('path').join(__dirname, 'web.html'), 'utf8'), part = (re) => src.match(re)[0];
   const answer = (status, j) => async () => ({ status, json: async () => { if (!j) throw new SyntaxError('not JSON'); return j; } });
@@ -1000,3 +1002,157 @@ console.log('tokens ok');
   assert.deepEqual([shut({ accounts: [] }), shut({ accounts: [{}], rec: null }), shut({ accounts: [{}], rec: 0, ready: '2小时' })], ['还没有 Claude 账号', '额度暂时读不到', '都到上限了，2小时后恢复']);
   console.log('review page ok');
 })();
+
+// PR 21 follow-up: exercise the real handlers with in-memory terminals and pages, without a web server or a CLI login.
+(async () => {
+  const vm = require('vm'), path = require('path'), { Writable } = require('stream');
+  const js = fs.readFileSync(path.join(__dirname, 'claude-multi.js'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, 'web.html'), 'utf8');
+  const part = (s, a, b) => { const start = s.indexOf(a), end = s.indexOf(b, start + a.length); assert.ok(start >= 0 && end > start, a); return s.slice(start, end); };
+  const fn = (s, name, indent = '') => {
+    const re = new RegExp(`^${indent}(?:async )?function ${name}\\(`, 'm'), start = s.search(re);
+    assert.ok(start >= 0, name); const end = s.indexOf(`\n${indent}}`, start);
+    return s.slice(start, end + indent.length + 2);
+  };
+  const api = (name, next) => '(' + part(js, `'POST /api/${name}': `, `    'POST /api/${next}'`).replace(/^.*?: /, '').replace(/\n    },[\s\S]*$/, '\n    }') + ')';
+
+  const opened = vm.runInNewContext(part(js, 'const opened = async', '\n      const reg') + '\nopened;', { sleep: async () => {} });
+  await assert.rejects(opened({ key: 'B', pid: null }), /PID/);
+  await assert.rejects(opened({ key: 'B', pid: 22, gone: true }));
+  assert.equal((await opened({ key: 'B', pid: 22 })).pid, 22);
+  let pid = null, binding = null, written = null, looked = 0;
+  const chatNew = vm.runInNewContext(fn(js, 'chatNew') + ';chatNew;', {
+    path, fs: { existsSync: () => true, statSync: () => ({ isDirectory: () => true }) }, HOME: 'home',
+    sameDir: (a, b) => a === b, inLive: () => false, load: () => ({ profiles: [{ configDir: 'acct' }] }), shareTrust() {},
+    webPost: async () => ({ key: 'B', pid }), untilReady: async () => {}, blog() {}, console: { log() {} },
+    waitLive: async (match) => { looked++; return [{ pid: 11, sessionId: 'A' }, { pid: 22, sessionId: 'B' }].find(match); },
+    typeIn: async (key, live) => { written = [key, live.sessionId]; return true; }
+  });
+  await assert.rejects(chatNew('project', 'task', 1, (id) => { binding = id; }), /PID/);
+  assert.equal(looked, 0); assert.equal(binding, null); assert.equal(written, null);
+  pid = 22; await chatNew('project', 'task', 1, (id) => { binding = id; });
+  assert.equal(binding, 'B'); assert.deepEqual(written, ['B', 'B']);
+
+  // Existing streams lose access on key rotation, and the close handler releases the client and heartbeat.
+  let secret = 'old', beat, close, destroyed = 0, cleared = false, pings = 0;
+  const sse = { write() { pings++; } }, terminal = { kind: 'pty', clients: new Set([sse]) };
+  vm.runInNewContext('let closed = false; const z = null;\n' + part(js, '        const beat = setInterval', '\n        return;'), {
+    req: { headers: { cookie: 'old' }, on: (event, cb) => { assert.equal(event, 'close'); close = cb; } },
+    res: { destroy() { destroyed++; } }, sse, t: terminal,
+    keyCookie: (v) => v, keyMatch: (a, b) => a === b, webKey: () => secret,
+    setInterval: (cb) => { beat = cb; return 42; }, clearInterval: (id) => { assert.equal(id, 42); cleared = true; }
+  });
+  beat(); assert.equal(pings, 1); assert.equal(destroyed, 0);
+  secret = 'new'; beat(); assert.equal(pings, 1); assert.equal(destroyed, 1);
+  close(); assert.equal(terminal.clients.size, 0); assert.equal(cleared, true);
+
+  // A desktop mirror must use the owning account's session marker, including a new session with no transcript yet.
+  let mirrored = null;
+  const open = vm.runInNewContext(api('open', 'switch'), {
+    load: () => ({ profiles: [{ configDir: 'acct' }] }), sessions: () => [{ id: 'A', pid: 11, acct: 0, file: 'A.jsonl' }],
+    where: () => null, mirror: (pid, dir) => (mirrored = { key: 'w11', kind: 'pc', pid, dir })
+  });
+  await open(null, { id: 'A' }); assert.equal(mirrored.dir, 'acct');
+  let marker = 'B', files = [], corrupt = false;
+  const recordOf = vm.runInNewContext(fn(js, 'recordOf', '  ') + ';recordOf;', {
+    terms: new Map([['w11', mirrored]]), path, ls: () => ['project'], sessions: () => [],
+    fs: { readFileSync: () => { if (corrupt) throw Error('partial marker'); return JSON.stringify({ sessionId: marker }); }, existsSync: (f) => files.includes(path.basename(f)) }
+  });
+  const query = new URLSearchParams({ key: 'w11', id: 'A' });
+  assert.equal(recordOf(query).file, null);
+  files = ['B.jsonl']; assert.match(recordOf(query).file, /B\.jsonl$/);
+  corrupt = true; assert.match(recordOf(query).file, /B\.jsonl$/);
+  corrupt = false; marker = 'C'; assert.equal(recordOf(query).file, null);
+
+  // A Writable can fail after write() returns. The API must await its callback, for both GPT and Claude mirrors.
+  const terms = new Map(), inputApi = vm.runInNewContext(api('input', 'resize'), { terms, sleep: async () => {}, codexKeys: require('./claude-multi').codexKeys });
+  for (const codex of [true, false]) {
+    const stdin = new Writable({ write(chunk, encoding, done) { process.nextTick(() => done(Error('EPIPE'))); } });
+    stdin.on('error', () => {});
+    terms.set('pc', { kind: 'pc', codex, proc: { stdin } });
+    await assert.rejects(inputApi(null, { key: 'pc', data: 'hello' }), /EPIPE/);
+  }
+  let fail = true, writes = [];
+  terms.set('pty', { kind: 'pty', gpt: {}, proc: { write(d) { if (fail) throw Error('closed'); writes.push(d); } } });
+  await assert.rejects(inputApi(null, { key: 'pty', data: 'first' }), /closed/);
+  fail = false; await inputApi(null, { key: 'pty', data: 'second' }); assert.deepEqual(writes, ['second']);
+  let complete;
+  const stdin = new Writable({ write(chunk, encoding, done) { complete = done; } }); stdin.on('error', () => {});
+  terms.set('slow', { kind: 'pc', codex: true, proc: { stdin } });
+  let answered = false; const waiting = inputApi(null, { key: 'slow', data: 'hello' }).then(() => { answered = true; });
+  await new Promise(setImmediate); assert.equal(answered, false); complete(); await waiting; assert.equal(answered, true);
+
+  const harness = () => {
+    const store = new Map(), context = vm.createContext({ console, setTimeout, clearTimeout, store });
+    const run = (s) => vm.runInContext(s, context);
+    run(`
+      const c = { id: 'A', started: true, ended: false, gpt: false }, drafts = new Map();
+      let session = { id: c.id }, conversationGen = 0, key = 'terminal', kind = 'pc', ptySize = null, mine = null, q = Promise.resolve();
+      let atts = [], sending = false, stops = 0, lastSent = null, sent = [], liveHtml = '', typing = null, typeOpt = new Map();
+      let menuNow = false, typeNow = false, typeTick = false, busyNow = false, view = 'hist', question = false;
+      let histNow = false, histEnd = null, histOldest = null, histGen = 0, nextId = 'A', unseen = false;
+      const line = { value: '', style: {}, scrollHeight: 0 }, go = { dataset: {} }, messages = [], writes = [];
+      const hist = { innerHTML: '', scrollHeight: 1000, scrollTop: 0, clientHeight: 100 };
+      const localStorage = { setItem: (k,v) => store.set(k,v), getItem: k => store.get(k) ?? null, removeItem: k => store.delete(k) };
+      const noop = () => {}, fitLine = noop, goMode = noop, drawAtts = noop, redraw = noop, markRows = noop, save = noop;
+      const claim = async () => {}, toast = t => messages.push(t), shownText = t => t, addItems = noop, topNote = noop, loadOlder = noop;
+      const histGet = async () => ({ id: nextId, start: 0, end: 0, items: [] });
+      let post = async (url, b) => { writes.push(b.data); };
+      let drawLive = () => { menuNow = question; };
+      const imagesShown = () => 0;
+    `);
+    run(part(page, '  const draftKey =', '\n  if (c.id) try'));
+    run(part(page, '  const input = (data)', '\n  function claim'));
+    run(part(page, '  const cantSend =', '\n  // One message'));
+    run(fn(page, 'send', '  ')); run(fn(page, 'loadHist', '  '));
+    run(part(page, '  c.say =', '\n  c.close'));
+    return { run, store };
+  };
+  let h = harness();
+  h.run("line.value='draft'; atts=[{file:true,name:'keep'}]; busyNow=true;");
+  assert.equal(await h.run("c.say('task')"), true);
+  assert.equal(h.run('line.value'), 'draft'); assert.equal(h.run('atts[0].name'), 'keep');
+  assert.equal(h.run('writes.length'), 2); assert.equal(h.run('writes.includes("\\x1b")'), false);
+  h = harness(); h.run("question=true; line.value='draft';");
+  assert.equal(await h.run("c.say('task')"), false); assert.equal(h.run('line.value'), 'draft'); assert.equal(h.run('writes.length'), 0);
+  h.run('question=false; sending=true;'); assert.equal(await h.run("c.say('task')"), false);
+  h = harness(); h.run("line.value='draft'; let redraws=0; drawLive=()=>{ menuNow=++redraws>1; };");
+  assert.equal(await h.run("c.say('task')"), true);
+  assert.equal(h.run('line.value'), 'task\ndraft'); assert.equal(h.run('writes.length'), 0);
+  h = harness(); h.run("line.value='draft'; post=async()=>{ throw Error('offline'); };");
+  await h.run("c.say('task')"); assert.equal(h.run('line.value'), 'task\ndraft');
+
+  h = harness(); h.store.set('cm-draft:B', 'draft B');
+  h.run("line.value='draft A'; atts=[{file:true,name:'A'}]; sent=[{text:'pending A'}]; lastSent={text:'A'}; nextId='B';");
+  await h.run('loadHist()');
+  assert.equal(h.run('line.value'), 'draft B'); assert.equal(h.store.get('cm-draft:A'), 'draft A');
+  assert.equal(h.run('atts.length + sent.length'), 0); assert.equal(h.run('lastSent'), null);
+  h.run("nextId='A';"); await h.run('loadHist()');
+  assert.equal(h.run('line.value'), 'draft A'); assert.equal(h.run('atts[0].name'), 'A'); assert.equal(h.run('sent[0].text'), 'pending A');
+  h.run("nextId=null;"); await h.run('loadHist()'); assert.equal(h.run('line.value'), '');
+  h.run("nextId='B';"); await h.run('loadHist()'); assert.equal(h.run('line.value'), 'draft B');
+
+  // Switch during an upload: no paste or Enter into B; recover text and attachment in A.
+  h = harness(); h.store.set('cm-draft:B', 'draft B');
+  h.run("line.value='unsent'; let uploadDone; atts=[{file:true,name:'A.txt',up:new Promise(r=>uploadDone=r)}];");
+  const sending = h.run('send()'); h.run("nextId='B';"); await h.run('loadHist()');
+  h.run("uploadDone('A.txt');"); await sending;
+  assert.equal(h.run('writes.length'), 0); assert.equal(h.run('line.value'), 'draft B'); assert.equal(h.run('atts.length'), 0);
+  assert.equal(h.store.get('cm-draft:A'), 'unsent');
+  h.run("nextId='A';"); await h.run('loadHist()'); assert.equal(h.run('line.value'), 'unsent'); assert.equal(h.run('atts[0].name'), 'A.txt');
+
+  // The first message may get its id before Enter; adopting that id must not cancel the message.
+  h = harness(); h.run("c.id=null; session.id=null; nextId='new'; line.value='first'; let uploaded; atts=[{file:true,up:new Promise(r=>uploaded=r)}];");
+  const first = h.run('send()'); await h.run('loadHist()'); h.run("uploaded('file.txt');"); await first;
+  assert.equal(h.run('writes.length'), 2); assert.equal(h.run('line.value'), '');
+  // Even after acquiring its first id, a later switch recovers into that id, never into B.
+  h = harness(); h.run("c.id=null; session.id=null; nextId='new'; line.value='first'; let uploaded; atts=[{file:true,up:new Promise(r=>uploaded=r)}];");
+  const second = h.run('send()'); await h.run('loadHist()'); h.run("nextId='B';"); await h.run('loadHist()');
+  h.run("uploaded('file.txt');"); await second;
+  assert.equal(h.store.get('cm-draft:new'), 'first'); assert.equal(h.run('writes.length'), 0); assert.equal(h.run('line.value'), '');
+  // A queued key is checked again just before writing, after any previous request finishes.
+  h = harness(); h.run('let release; q=new Promise(r=>release=r);');
+  const queued = h.run("input('old message')"); h.run("nextId='B';"); await h.run('loadHist()'); h.run('release();');
+  assert.equal(await queued, false); assert.equal(h.run('writes.length'), 0);
+  console.log('review follow-up ok (binding, desktop history, async writes, quick input, session drafts and queued sends)');
+})().catch((e) => { console.error(e); process.exitCode = 1; });

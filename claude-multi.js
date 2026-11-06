@@ -1271,9 +1271,9 @@ async function chatNew(dir, text, n, before, gpt = false) {
   const p = reg.profiles[n - 1];
   if (!p) throw new Error('没有这个账号');
   shareTrust(p.configDir, undefined, [dir.replace(/\\/g, '/')]); // no trust question to stop at
-  // its Claude by the pid the service started it with (a service from before that told none: by its folder and time)
-  const t0 = Date.now(), { key, pid } = await webPost('/api/open', { dir, acct: n, cols: 120, rows: 40 });
-  const live = await waitLive((j) => (pid ? j.pid === pid : sameDir(j.cwd, dir) && j.startedAt >= t0 - 5000), 60000);
+  const { key, pid } = await webPost('/api/open', { dir, acct: n, cols: 120, rows: 40 });
+  if (!pid) throw new Error('没有取得新终端的 PID，未绑定工单或发送消息；请先在网页确认启动状态');
+  const live = await waitLive((j) => j.pid === pid, 60000);
   if (!live) throw new Error('它没能启动起来');
   await untilReady(live, 60000);
   await before?.(live.sessionId);
@@ -2329,13 +2329,13 @@ async function web() {
     return t;
   }
   // a conversation open in a terminal window here: its screen through the console bridge, while anyone watches
-  function mirror(pid) {
+  function mirror(pid, dir) {
     const key = `w${pid}`;
     if (terms.has(key) && !terms.get(key).gone) return terms.get(key);
     const proc = require('child_process').spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
       path.join(ROOT, 'console-bridge.ps1'), String(pid)], { windowsHide: true });
-    const t = { kind: 'pc', key, pid, proc, clients: new Set(), frame: null, w: 0, h: 0, hist: [], waiting: [] }; // hist: lines scrolled off, colored
-    proc.stdin.on('error', () => {}); // keys written as the bridge exits: lost, not the service down (an unhandled error event)
+    const t = { kind: 'pc', key, pid, dir, proc, clients: new Set(), frame: null, w: 0, h: 0, hist: [], waiting: [] }; // hist: lines scrolled off, colored
+    proc.stdin.on('error', () => {}); // write callbacks report failures to their requests; the event must not crash the service
     let line = '';
     proc.stdout.setEncoding('utf8'); // decoded as one stream: a Chinese character split between two chunks stays whole
     proc.stdout.on('data', (d) => {
@@ -2639,7 +2639,11 @@ async function web() {
     // comes back with its Claude's pid, once the pseudo-terminal knows it (a moment): the 管家's chat new and say find
     // its Claude by that, not by its folder (two started in one folder at once got each other's)
     'POST /api/open': async (q, b) => {
-      const opened = async (t) => { for (let k = 0; k < 50 && !t.pid && !t.gone; k++) await sleep(100); return { key: t.key, kind: 'pty', pid: t.pid || null }; };
+      const opened = async (t) => {
+        for (let k = 0; k < 50 && !t.pid && !t.gone; k++) await sleep(100);
+        if (t.gone || !t.pid) throw new Error('终端尚未就绪或已结束，未取得 PID；请先确认启动状态再重试');
+        return { key: t.key, kind: 'pty', pid: t.pid };
+      };
       const reg = load(), cols = Math.max(40, Math.min(300, b.cols | 0 || 100)), rows = Math.max(10, Math.min(200, b.rows | 0 || 30));
       if (b.gpt) { // a GPT one: {id} its Codex here, or continued here on its own account (a GPT one changes none); {dir, acct}
         if (!b.id) {
@@ -2659,7 +2663,7 @@ async function web() {
         sessCache = null;
         const s = sessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
-        if (s.pid) { const t = where(s) ?? mirror(s.pid); t.file = s.file; return { key: t.key, kind: t.kind }; }
+        if (s.pid) { const t = where(s) ?? mirror(s.pid, reg.profiles[s.acct].configDir); t.file = s.file; return { key: t.key, kind: t.kind }; }
         const r = resuming(s.id);
         if (r) return opened(r);
         if (b.live) throw new Error('这个对话已经不在运行了'); // the page reconnecting: an ended one isn't started anew
@@ -2716,8 +2720,9 @@ async function web() {
       // Keys a page sends by itself (focus reports, arrows, Enter) aren't words.
       if (b.by === 'butler') { if (Date.now() - (t.typed ?? 0) < 120000) throw new Error('用户两分钟内在这个对话里打过字，先别发，过一会儿再试'); }
       else if (/[^\x00-\x1f\x7f]/.test(String(b.data).replace(/\x1b(\[[0-9;?]*[A-Za-z~]|O.)/g, ''))) t.typed = Date.now();
-      const write = (d) => { if (t.kind === 'pty') t.proc.write(d); else t.proc.stdin.write(JSON.stringify({ k: d }) + '\n'); };
-      if (!t.gpt && !t.codex) { write(String(b.data)); return {}; }
+      const write = (d) => t.kind === 'pty' ? t.proc.write(d)
+        : new Promise((resolve, reject) => t.proc.stdin.write(JSON.stringify({ k: d }) + '\n', (e) => e ? reject(e) : resolve()));
+      if (!t.gpt && !t.codex) { await write(String(b.data)); return {}; }
       // a Codex: in turn, an Enter alone waits until 600 ms after the last words (sooner, it's a new line in them). Answered
       // once written: one that didn't get there (its Codex gone meanwhile) says so, for the page to put the message back
       // (one failing doesn't stop the next in the queue)
@@ -2725,7 +2730,7 @@ async function web() {
       await (t.q = (t.q ?? Promise.resolve()).catch(() => {}).then(async () => {
         if (data === '\r') { const w = (t.wordsAt ?? 0) + 600 - Date.now(); if (w > 0) await sleep(w); }
         if (t.gone) throw new Error('这个终端已经结束');
-        write(data);
+        await write(data);
         if (words) t.wordsAt = Date.now();
       }));
       return {};
