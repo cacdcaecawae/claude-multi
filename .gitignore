@@ -4,6 +4,8 @@
 !.gitignore
 !claude-multi.js
 !claude-multi.test.js
+!web.test.js
+!island.test.ps1
 !island.ps1
 !island.ico
 !console-bridge.ps1

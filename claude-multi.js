@@ -512,7 +512,8 @@ function listSessions(reg) {
     for (const folder of ls(path.join(dir, 'projects'))) {
       for (const name of ls(path.join(dir, 'projects', folder))) {
         if (!/^[0-9a-f-]{36}\.jsonl$/.test(name)) continue;
-        const file = path.join(dir, 'projects', folder, name), at = fs.statSync(file).mtimeMs, id = name.slice(0, -6);
+        const file = path.join(dir, 'projects', folder, name), id = name.slice(0, -6);
+        let at; try { at = fs.statSync(file).mtimeMs; } catch { continue; } // deleted (or moved to the Recycle Bin) since the folder was read
         if ((found.get(id)?.at ?? -1) < at) found.set(id, { id, acct, file, at });
       }
     }
@@ -524,9 +525,13 @@ function listSessions(reg) {
   for (const s of found.values()) {
     let r = readHeads.get(s.file); // a record unchanged since the last look isn't read again (the web service asks every few seconds)
     if (r?.at !== s.at) {
-      const fd = fs.openSync(s.file, 'r'), size = fs.fstatSync(fd).size;
-      const head = slice(fd, 0, 65536), tail = slice(fd, Math.max(0, size - 524288), 524288);
-      fs.closeSync(fd);
+      // one that can't be read now (gone a moment after its stat, held open): left out of this look, never the whole list
+      // thrown away (the web service's timers list them: one throw there ended the service, its conversations with it)
+      let head, tail;
+      try {
+        const fd = fs.openSync(s.file, 'r');
+        try { const size = fs.fstatSync(fd).size; head = slice(fd, 0, 65536); tail = slice(fd, Math.max(0, size - 524288), 524288); } finally { fs.closeSync(fd); }
+      } catch { continue; }
       // the last thing you said, not a teammate's or a background task's message delivered as a prompt
       const prompt = [...tail.matchAll(/"lastPrompt":"((?:[^"\\]|\\.)*)"/g)]
         .map((m) => { try { return JSON.parse(`"${m[1]}"`); } catch { return ''; } })
@@ -664,10 +669,12 @@ function newGpt() {
   console.log(`已保存 GPT 账号 G${reg.gpt.length}：${who.email || 'ChatGPT'}${who.plan ? `（${who.plan}）` : ''}`);
   return true;
 }
-// remove Gn: GPT account n leaves the list, its folder (its login, its conversations) to the Recycle Bin
+// remove Gn: GPT account n leaves the list (not while a Codex runs on it: its marker, there from its start, before it has a
+// conversation), its folder (its login, its conversations) to the Recycle Bin
 function removeGpt(n) {
   const g = gptAccounts()[n - 1];
   if (!g) { console.log('没有这个 GPT 账号：用 claude-multi list 看编号（G1、G2…）'); process.exit(1); }
+  if (gptMarks().some((m) => sameDir(m.home, g.home))) { console.log('这个 GPT 账号上有 Codex 正在运行，先关掉再移除。'); process.exit(1); }
   update((r) => { r.gpt = (r.gpt ?? []).filter((x) => x.id !== g.id); });
   log('gpt_removed', { profile_id: g.id });
   try { unlinkAll(g.home); } catch {}
@@ -1199,8 +1206,9 @@ async function chatSay(ref, text, before) {
     console.log(went ? `已发给「${s.title}」，它开始干活了。` : `已发给「${s.title}」，但还没看到它收下，稍后用 chat look 看看。`);
     return { id: s.id, title: s.title };
   }
-  const { key } = await webPost('/api/open', { id: s.id, acct: s.acct + 1, cols: 120, rows: 40 }); // not running: continued in the web service
-  const live = await waitLive((j) => j.sessionId === s.id || j.pid === s.pid || (!s.pid && sameDir(j.cwd, s.cwd) && j.startedAt >= t0 - 5000), 60000);
+  const { key, pid } = await webPost('/api/open', { id: s.id, acct: s.acct + 1, cols: 120, rows: 40 }); // not running: continued in the web service
+  const run = s.pid ?? pid; // its Claude: the one it runs in, or the one the service just started for it
+  const live = await waitLive((j) => j.sessionId === s.id || j.pid === run || (!run && sameDir(j.cwd, s.cwd) && j.startedAt >= t0 - 5000), 60000);
   if (!live) throw new Error('它没能启动起来');
   await untilReady(live);
   await before?.(s.id); // ticket give: bound first, so its first turn ending is seen
@@ -1258,12 +1266,14 @@ async function chatNew(dir, text, n, before, gpt = false) {
     return { id, title: '' };
   }
   const reg = load();
-  if (!n) { const u = (await usageState(reg)).json; if (!u.open) throw new Error(`账号都到上限了，${u.ready} 后恢复`); n = u.rec + 1; }
+  // none open: all at their limits, or (no recommendation) none read, which isn't the same
+  if (!n) { const u = (await usageState(reg)).json; if (!u.open) throw new Error(u.rec == null ? '读不到任何账号的额度，用 --acct N 指定一个账号' : `账号都到上限了，${u.ready} 后恢复`); n = u.rec + 1; }
   const p = reg.profiles[n - 1];
   if (!p) throw new Error('没有这个账号');
   shareTrust(p.configDir, undefined, [dir.replace(/\\/g, '/')]); // no trust question to stop at
-  const t0 = Date.now(), { key } = await webPost('/api/open', { dir, acct: n, cols: 120, rows: 40 });
-  const live = await waitLive((j) => sameDir(j.cwd, dir) && j.startedAt >= t0 - 5000, 60000);
+  const { key, pid } = await webPost('/api/open', { dir, acct: n, cols: 120, rows: 40 });
+  if (!pid) throw new Error('没有取得新终端的 PID，未绑定工单或发送消息；请先在网页确认启动状态');
+  const live = await waitLive((j) => j.pid === pid, 60000);
   if (!live) throw new Error('它没能启动起来');
   await untilReady(live, 60000);
   await before?.(live.sessionId);
@@ -1614,7 +1624,8 @@ function nextRenewal(since, now = new Date(), onIt = false) {
 
 async function usage(args) {
   const reg = load();
-  if (!reg.profiles.length) return console.log('没有已保存账号，请先运行 claude-multi new。');
+  // --json is the island's: JSON whatever there is (no Claude account, the GPT ones still in it)
+  if (!reg.profiles.length && !args.includes('--json')) return console.log('没有已保存账号，请先运行 claude-multi new。');
   const bar = (pct) => {
     const n = Math.round(Math.min(100, pct) / 10);
     return c(pct >= 80 ? 31 : pct >= 50 ? 33 : 32, '█'.repeat(n)) + c(2, '░'.repeat(10 - n));
@@ -1859,6 +1870,14 @@ function keyMatch(given, key) {
   return a.length === b.length && require('crypto').timingSafeEqual(a, b);
 }
 const keyCookie = (cookie) => /(?:^|;\s*)cm=([^;]+)/.exec(cookie ?? '')?.[1];
+// A request's JSON body (its chunks: req, or any list of Buffers), read whole as bytes and decoded once: a chunk decoded
+// on its own broke a Chinese character or an emoji cut between two (the JSON still parsed, the words were wrong).
+// undefined (which no JSON is) past max bytes.
+async function jsonBody(chunks, max = 1 << 20) {
+  const parts = []; let size = 0;
+  for await (const ch of chunks) { if ((size += ch.length) > max) return undefined; parts.push(ch); }
+  return JSON.parse(Buffer.concat(parts).toString('utf8') || '{}');
+}
 function readNotes(n = 30) {
   try {
     const fd = fs.openSync(NOTES, 'r'), size = fs.fstatSync(fd).size, t = slice(fd, Math.max(0, size - 65536), 65536);
@@ -1940,9 +1959,9 @@ function history(file, { from, end, keep = 120 } = {}) {
   const last = buf.lastIndexOf(10); // a line still being written waits for the next read (from: end)
   const lines = last < skip ? [] : buf.toString('utf8', skip, last + 1).split('\n');
   const out = [];
-  const add = (role, text, at) => {
+  const add = (role, text, at) => { // whole, however long: the page folds a long one, and its 复制 copies all of it
     text = String(text ?? '').trim();
-    if (text) out.push({ role, text: text.length > 20000 ? text.slice(0, 20000) + '…' : text, at, pos: here });
+    if (text) out.push({ role, text, at, pos: here });
   };
   let next = a + skip, here = 0; // where each line starts in the file: a picture in it is fetched from there (recordImage)
   const byParent = new Map(); // a line your message hangs on → that message's items
@@ -2310,12 +2329,13 @@ async function web() {
     return t;
   }
   // a conversation open in a terminal window here: its screen through the console bridge, while anyone watches
-  function mirror(pid) {
+  function mirror(pid, dir) {
     const key = `w${pid}`;
     if (terms.has(key) && !terms.get(key).gone) return terms.get(key);
     const proc = require('child_process').spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
       path.join(ROOT, 'console-bridge.ps1'), String(pid)], { windowsHide: true });
-    const t = { kind: 'pc', key, pid, proc, clients: new Set(), frame: null, w: 0, h: 0, hist: [], waiting: [] }; // hist: lines scrolled off, colored
+    const t = { kind: 'pc', key, pid, dir, proc, clients: new Set(), frame: null, w: 0, h: 0, hist: [], waiting: [] }; // hist: lines scrolled off, colored
+    proc.stdin.on('error', () => {}); // write callbacks report failures to their requests; the event must not crash the service
     let line = '';
     proc.stdout.setEncoding('utf8'); // decoded as one stream: a Chinese character split between two chunks stays whole
     proc.stdout.on('data', (d) => {
@@ -2372,21 +2392,33 @@ async function web() {
   }
   // and which conversations run here, by id (one just started has it once listed: looked at every 10 s too). A service
   // killed never writes again, so after a restart this says what ran, and each is continued.
+  // Run from a timer and from a terminal's exit: whatever goes wrong here (the list unreadable a moment) waits for the next
+  // time, never ends the service.
   let ranHere = null;
   function saveRun() {
-    const pids = new Set([...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid).map((t) => t.pid));
-    const now = JSON.stringify(sessions().filter((s) => s.pid && pids.has(s.pid)).map((s) => s.id));
-    if (now !== ranHere) try { fs.writeFileSync(WEB_RUN, now); ranHere = now; } catch {}
+    try {
+      const pids = new Set([...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid).map((t) => t.pid));
+      const now = JSON.stringify(sessions().filter((s) => s.pid && pids.has(s.pid)).map((s) => s.id));
+      if (now !== ranHere) { fs.writeFileSync(WEB_RUN, now); ranHere = now; }
+    } catch {}
   }
 
-  // the record of the conversation asked for (?key, ?id): by the open terminal's key, else by its id
+  // the record of the conversation asked for (?key, ?id): by the open terminal's key, else by its id. By the key, the
+  // conversation its Claude runs now, asked each time: a /clear or /resume typed there moves it to another one (its
+  // session file says which; a window's, the list), and the page went on showing the first while you typed into the
+  // other. One with nothing said yet has no record: none (file null) till it has; not read yet (its session file not
+  // written yet, file undefined): by the id asked for, as before.
   function recordOf(q) {
     const t = terms.get(q.get('key') ?? '');
-    if (t?.dir && !t.file && t.pid) try {
+    if (t?.dir && t.pid) try {
       const id = JSON.parse(fs.readFileSync(path.join(t.dir, 'sessions', `${t.pid}.json`), 'utf8')).sessionId;
-      for (const d of fs.readdirSync(path.join(t.dir, 'projects'))) if (fs.existsSync(path.join(t.dir, 'projects', d, `${id}.jsonl`))) t.file = path.join(t.dir, 'projects', d, `${id}.jsonl`);
-    } catch {}
-    return { t, file: t?.file ?? sessions().find((x) => x.id === q.get('id'))?.file };
+      if (path.basename(t.file ?? '', '.jsonl') !== id) {
+        t.file = null;
+        for (const d of ls(path.join(t.dir, 'projects'))) if (fs.existsSync(path.join(t.dir, 'projects', d, `${id}.jsonl`))) t.file = path.join(t.dir, 'projects', d, `${id}.jsonl`);
+      }
+    } catch {} // caught mid-write: as it was
+    else if (t?.kind === 'pc' && t.pid) { const s = sessions().find((x) => x.pid === t.pid); if (s) t.file = s.file; }
+    return { t, file: t?.file === undefined ? sessions().find((x) => x.id === q.get('id'))?.file : t.file };
   }
 
   // A new notification to the phones, but none for a conversation a page shows you right now: each page in front says
@@ -2405,11 +2437,12 @@ async function web() {
   const anyChat = (id) => sessions().find((x) => x.id === id) ?? gptSessions().find((x) => x.id === id);
   const wordsOf = (s, max) => (s?.gpt ? gistText(gptLast(s.home, s.id, 'agentMessage'), max) : lastWords(s?.file, max));
   // who set a conversation's latest turn going (turnBy), by its record (a GPT one's: its last message of yours)
+  // (null when its record can't be read now, deleted since the list was read: the push timer asks outside its try)
   const ownerOf = (n) => {
     const f = sessions().find((x) => x.id === n.id)?.file;
     if (!f) { const g = gptSessions().find((x) => x.id === n.id); return g ? turnBy(gptLast(g.home, g.id, 'userMessage'), blogSent(n.id), n.at) : null; }
-    const fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size, tail = slice(fd, Math.max(0, size - 4194304), 4194304);
-    fs.closeSync(fd);
+    let tail;
+    try { const fd = fs.openSync(f, 'r'); try { tail = slice(fd, Math.max(0, fs.fstatSync(fd).size - 4194304), 4194304); } finally { fs.closeSync(fd); } } catch { return null; }
     return turnBy(field(tail, 'lastPrompt', true), blogSent(n.id), n.at);
   };
   setInterval(() => {
@@ -2573,7 +2606,8 @@ async function web() {
         return { ...gptHistory(home, id, { from: q.get('from') || undefined, end: q.get('end') || undefined, live }), id };
       }
       const { t, file } = recordOf(q);
-      if (!file) { if (t) return { items: [], start: 0, end: 0 }; throw new Error('找不到这个对话'); }
+      // its terminal on a conversation with no record yet (a /clear typed there): id null, for the page to let the other go
+      if (!file) { if (t) return { items: [], start: 0, end: 0, ...(t.file === null && { id: null }) }; throw new Error('找不到这个对话'); }
       return { ...history(file, { from: q.get('from') || undefined, end: q.get('end') || undefined }), id: path.basename(file, '.jsonl') };
     },
     'POST /api/read': (q, b) => { // {id} one conversation's notifications, {all: true} every one; the island drops them too
@@ -2601,8 +2635,15 @@ async function web() {
     },
     'POST /api/delete': (q, b) => (b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''))),
     // open a conversation's terminal: {id, acct?} continues one (its window here if it runs in one),
-    // {dir, acct} starts one. acct is 1-based; the page proposes it like the island does.
-    'POST /api/open': (q, b) => {
+    // {dir, acct} starts one. acct is 1-based; the page proposes it like the island does. One started (or starting) here
+    // comes back with its Claude's pid, once the pseudo-terminal knows it (a moment): the 管家's chat new and say find
+    // its Claude by that, not by its folder (two started in one folder at once got each other's)
+    'POST /api/open': async (q, b) => {
+      const opened = async (t) => {
+        for (let k = 0; k < 50 && !t.pid && !t.gone; k++) await sleep(100);
+        if (t.gone || !t.pid) throw new Error('终端尚未就绪或已结束，未取得 PID；请先确认启动状态再重试');
+        return { key: t.key, kind: 'pty', pid: t.pid };
+      };
       const reg = load(), cols = Math.max(40, Math.min(300, b.cols | 0 || 100)), rows = Math.max(10, Math.min(200, b.rows | 0 || 30));
       if (b.gpt) { // a GPT one: {id} its Codex here, or continued here on its own account (a GPT one changes none); {dir, acct}
         if (!b.id) {
@@ -2622,24 +2663,24 @@ async function web() {
         sessCache = null;
         const s = sessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
-        if (s.pid) { const t = where(s) ?? mirror(s.pid); t.file = s.file; return { key: t.key, kind: t.kind }; }
+        if (s.pid) { const t = where(s) ?? mirror(s.pid, reg.profiles[s.acct].configDir); t.file = s.file; return { key: t.key, kind: t.kind }; }
         const r = resuming(s.id);
-        if (r) return { key: r.key, kind: 'pty' };
+        if (r) return opened(r);
         if (b.live) throw new Error('这个对话已经不在运行了'); // the page reconnecting: an ended one isn't started anew
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
         copyTo(s, p);
-        return { key: startPty(p, s.cwd, ['--resume', s.id], cols, rows).key, kind: 'pty' };
+        return opened(startPty(p, s.cwd, ['--resume', s.id], cols, rows));
       }
       const p = reg.profiles[b.acct - 1];
       if (!p) throw new Error('没有这个账号');
       if (!b.dir || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
       // the 管家 is one: two screens starting it at once (it isn't listed before its first message) get the same
       const one = sameDir(b.dir, BUTLER) && [...terms.values()].find((t) => t.kind === 'pty' && !t.gone && sameDir(t.cwd, BUTLER));
-      if (one) return { key: one.key, kind: 'pty' };
+      if (one) return opened(one);
       if (sameDir(b.dir, BUTLER)) shareTrust(p.configDir, undefined, [BUTLER.replace(/\\/g, '/')]); // on any account, no trust question
       sessCache = null;
-      return { key: startPty(p, b.dir, [], cols, rows).key, kind: 'pty' };
+      return opened(startPty(p, b.dir, [], cols, rows));
     },
     // 换账号继续 {id, acct, now}: the conversation goes on with account acct (nothing sent: it waits for you).
     // Not running: started here like a continued one. Running here: ended once its answer is over (now: at once; at a
@@ -2672,23 +2713,26 @@ async function web() {
         return { pty: true };
       } finally { if (later) later.finally(free); else free(); }
     },
-    'POST /api/input': (q, b) => {
+    'POST /api/input': async (q, b) => {
       const t = terms.get(b.key);
       if (!t || t.gone) throw new Error('这个终端已经结束');
       // the 管家 (chat say, pick) doesn't type where you typed words in the last 2 minutes: yours and its would mix.
       // Keys a page sends by itself (focus reports, arrows, Enter) aren't words.
       if (b.by === 'butler') { if (Date.now() - (t.typed ?? 0) < 120000) throw new Error('用户两分钟内在这个对话里打过字，先别发，过一会儿再试'); }
       else if (/[^\x00-\x1f\x7f]/.test(String(b.data).replace(/\x1b(\[[0-9;?]*[A-Za-z~]|O.)/g, ''))) t.typed = Date.now();
-      const write = (d) => { if (t.kind === 'pty') t.proc.write(d); else t.proc.stdin.write(JSON.stringify({ k: d }) + '\n'); };
-      if (!t.gpt && !t.codex) { write(String(b.data)); return {}; }
-      // a Codex: in turn, an Enter alone waits until 600 ms after the last words (sooner, it's a new line in them)
+      const write = (d) => t.kind === 'pty' ? t.proc.write(d)
+        : new Promise((resolve, reject) => t.proc.stdin.write(JSON.stringify({ k: d }) + '\n', (e) => e ? reject(e) : resolve()));
+      if (!t.gpt && !t.codex) { await write(String(b.data)); return {}; }
+      // a Codex: in turn, an Enter alone waits until 600 ms after the last words (sooner, it's a new line in them). Answered
+      // once written: one that didn't get there (its Codex gone meanwhile) says so, for the page to put the message back
+      // (one failing doesn't stop the next in the queue)
       const { data, words } = codexKeys(b.data);
-      t.q = (t.q ?? Promise.resolve()).then(async () => {
+      await (t.q = (t.q ?? Promise.resolve()).catch(() => {}).then(async () => {
         if (data === '\r') { const w = (t.wordsAt ?? 0) + 600 - Date.now(); if (w > 0) await sleep(w); }
-        if (t.gone) return;
-        write(data);
+        if (t.gone) throw new Error('这个终端已经结束');
+        await write(data);
         if (words) t.wordsAt = Date.now();
-      }).catch(() => {});
+      }));
       return {};
     },
     'POST /api/resize': (q, b) => { // phone-sized for our own terminals; a window here keeps its own size
@@ -2755,7 +2799,9 @@ async function web() {
           t.clients.add(sse);
         };
         if (t.kind === 'pc' && !t.frame && !t.gone) t.waiting.push(begin); else begin();
-        const beat = setInterval(() => sse.write('event: ping\ndata: {}\n\n'), 15000); // a named event: the page sees it and knows the stream lives
+        // a named event: the page sees it and knows the stream lives. The key asked again each time: a stream opened with
+        // one since replaced (web-link new) is cut (the key is only asked as a request comes in, and this one stays open)
+        const beat = setInterval(() => { if (!keyMatch(keyCookie(req.headers.cookie), webKey())) return res.destroy(); sse.write('event: ping\ndata: {}\n\n'); }, 15000);
         req.on('close', () => {
           closed = true; clearInterval(beat); t.clients.delete(sse); z?.destroy();
           // nobody watching: the reader stays 20 min, still keeping what scrolls by, for when you come back
@@ -2790,8 +2836,8 @@ async function web() {
       let body = {};
       if (req.method === 'POST') {
         if (!/^application\/json/.test(req.headers['content-type'] ?? '')) return out(415, { err: '只收 JSON' });
-        let raw = ''; for await (const ch of req) { raw += ch; if (raw.length > 1 << 20) return out(413, { err: '太大' }); }
-        body = JSON.parse(raw || '{}');
+        body = await jsonBody(req);
+        if (body === undefined) return out(413, { err: '太大' });
       }
       out(200, await fn(url.searchParams, body));
     } catch (e) { out(500, { err: e.message }); }
@@ -3072,7 +3118,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

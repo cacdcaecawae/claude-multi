@@ -362,14 +362,16 @@ $win = X @"
   <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="3" Direction="270" Opacity="0.5"/></Border.Effect>
   <Border.RenderTransform><ScaleTransform x:Name="Scale"/></Border.RenderTransform>
   <StackPanel>
+   <ScrollViewer x:Name="PillScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
    <DockPanel x:Name="Pill" Background="Transparent" Cursor="Hand" LastChildFill="False">
     <TextBlock x:Name="PillName" Text="Claude · 读取中…" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
     <StackPanel x:Name="PillAccts" Orientation="Horizontal" Visibility="Collapsed"/>
     <Border x:Name="BadgeBox" Visibility="Collapsed" Background="#FF9F0A" CornerRadius="8" Padding="6,0" Margin="10,0,0,0" VerticalAlignment="Center" ToolTip="未读提示，点开查看">
      <TextBlock x:Name="Badge" FontSize="11" FontWeight="SemiBold" Foreground="Black"/>
     </Border>
-   </DockPanel>
-   <StackPanel x:Name="Alerts" Visibility="Collapsed" Background="Transparent" Cursor="Hand"/>
+   </DockPanel></ScrollViewer>
+    <ScrollViewer x:Name="PanelScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"><StackPanel>
+    <StackPanel x:Name="Alerts" Visibility="Collapsed" Background="Transparent" Cursor="Hand"/>
    <StackPanel x:Name="Panel" Visibility="Collapsed" Margin="0,12,0,0" MinWidth="420">
     <StackPanel x:Name="HistoryBox" Visibility="Collapsed" Margin="0,0,0,14">
      <DockPanel>
@@ -397,6 +399,7 @@ $win = X @"
      <TextBlock x:Name="Status" FontSize="11" Foreground="#73FFFFFF" VerticalAlignment="Center"/>
     </DockPanel>
    </StackPanel>
+    </StackPanel></ScrollViewer>
   </StackPanel>
  </Border>
  <!-- floats on the island's top-right corner, only while hovered: takes no room in the pill -->
@@ -407,7 +410,7 @@ $win = X @"
  </Grid>
 </Window>
 "@
-foreach ($n in 'Island', 'Scale', 'Pill', 'Pin', 'PinIcon', 'PillName', 'PillAccts', 'HistTitle', 'Alerts', 'Panel',
+foreach ($n in 'Island', 'Scale', 'Pill', 'PillScroll', 'Pin', 'PinIcon', 'PillName', 'PillAccts', 'HistTitle', 'Alerts', 'Panel', 'PanelScroll',
   'Status', 'BtnChats', 'BtnTokens', 'BtnRefresh', 'BtnWarm', 'BtnQuit', 'Rows', 'ProjView', 'BtnBack', 'ProjTitle', 'ProjList',
   'BadgeBox', 'Badge', 'HistoryBox', 'History', 'BtnClearHist') {
   Set-Variable -Name $n -Value $win.FindName($n)
@@ -447,6 +450,7 @@ function Slide([bool]$hide) {
 }
 function Recenter {
   $wa = [Windows.SystemParameters]::WorkArea
+  Fit-Panel $wa
   $win.Left = $wa.Left + ($wa.Width - $win.ActualWidth) / 2
   $win.BeginAnimation([Windows.Window]::TopProperty, $null) # drop a finished slide so Top can be set
   $win.Top = TopFor $script:hidden
@@ -513,7 +517,7 @@ $PAY = @{
 # An account at its limit while conversations run on it: one notice (per account, until it's off its limit again) that
 # they wait for the reset; a click opens the running ones, each with 换账号继续. Nothing switches by itself.
 $script:limitTold = @{}
-$script:kind = 'claude' # the panel's cards: 'claude', or 'gpt' (GPT accounts, once there are any)
+$script:kind = $null # the panel's cards: 'claude', or 'gpt' (GPT accounts, once there are any); none picked: Claude's, GPT's with no Claude account
 function Check-Limits {
   $accs = @($script:data.accounts)
   for ($i = 0; $i -lt $accs.Count; $i++) {
@@ -530,7 +534,7 @@ function Render {
   $d = $script:data
   $all = @($d.accounts)
   if ($null -eq $d.rec) {
-    $PillName.Text = 'Claude · 暂无可用数据'
+    $PillName.Text = if ($all.Count) { 'Claude · 暂无可用数据' } else { 'Claude · 还没有账号' }
     $PillName.Visibility = 'Visible'; $PillAccts.Visibility = 'Collapsed'
   } else {
     $r = $all[$d.rec]; $p = Pct5 $r
@@ -558,7 +562,7 @@ function Render {
   $Rows.Children.Clear()
   # with a GPT account: Claude / GPT over the cards, which of them the panel shows (the pill stays on Claude)
   $gs = @($d.gpt | Where-Object { $_ })
-  $kind = if ($gs.Count) { $script:kind } else { 'claude' }
+  $kind = if (-not $gs.Count) { 'claude' } elseif ($script:kind) { $script:kind } elseif ($all.Count) { 'claude' } else { 'gpt' }
   if ($gs.Count) {
     $seg = New-Object Windows.Controls.StackPanel
     $seg.Orientation = 'Horizontal'; $seg.Margin = '4,0,0,8'
@@ -574,7 +578,8 @@ function Render {
     [void]$Rows.Children.Add($seg)
   }
   if ($kind -eq 'gpt') { Render-Gpt $gs $names; return }
-  $order = @(@($d.rec | Where-Object { $null -ne $_ }) + @(0..($all.Count - 1) | Where-Object { $_ -ne $d.rec }))
+  # not 0..($all.Count - 1): with no account that's 0, -1
+  $order = @(@($d.rec | Where-Object { $null -ne $_ }) + @(for ($i = 0; $i -lt $all.Count; $i++) { if ($i -ne $d.rec) { $i } }))
   foreach ($i in $order) {
     # Every account shows the same details; the recommended one is the bright card with the big button,
     # the rest sit on a fainter card in greyer text with a small launch icon.
@@ -738,7 +743,15 @@ function Focus-Claude([int]$claudePid) {
   } $null
 }
 
+function Fit-Panel($wa) {
+  # Alerts share the scroll area: arriving while expanded must not push the bottom off-screen.
+  $PanelScroll.MaxHeight = [Math]::Max(1, $wa.Height - [Math]::Max(18, $Pill.ActualHeight) - [Windows.SystemParameters]::HorizontalScrollBarHeight - 40)
+  $PanelScroll.MaxWidth = [Math]::Max(1, $wa.Width - 62)
+  $PillScroll.MaxWidth = $PanelScroll.MaxWidth
+  $Panel.MinWidth = [Math]::Min(420, $PanelScroll.MaxWidth)
+}
 function Expand {
+  Fit-Panel ([Windows.SystemParameters]::WorkArea)
   Show-Rows; $Panel.Visibility = 'Visible'; Pop
   [void]$win.Activate() # so a click elsewhere deactivates and collapses it
   if (((Get-Date) - $script:fetched).TotalSeconds -gt 60) { Refresh }
@@ -988,16 +1001,18 @@ function Open-Chats {
   <Border Background="#F7000000" CornerRadius="22" BorderBrush="#1FFFFFFF" BorderThickness="1">
    <Grid>
     <Grid.RowDefinitions><RowDefinition Height="52"/><RowDefinition/></Grid.RowDefinitions>
-    <Grid.ColumnDefinitions><ColumnDefinition x:Name="SideCol" Width="240"/><ColumnDefinition/></Grid.ColumnDefinitions>
-    <DockPanel x:Name="Bar" Grid.ColumnSpan="2" Background="Transparent" Margin="22,0,12,0">
+     <DockPanel x:Name="Bar" Background="Transparent" Margin="22,0,12,0">
      <Button x:Name="Close" Style="{StaticResource Icon}" Content="&#xE711;" ToolTip="关闭（Esc）" DockPanel.Dock="Right" VerticalAlignment="Center"/>
      <Ellipse Width="8" Height="8" Fill="#30D158" VerticalAlignment="Center"/>
      <TextBlock Text="Claude 对话" FontSize="13" FontWeight="SemiBold" Foreground="#CCFFFFFF" Margin="10,0,0,0" VerticalAlignment="Center"/>
     </DockPanel>
-    <Border x:Name="Side" Grid.Row="1" BorderBrush="#14FFFFFF" BorderThickness="0,0,1,0" Margin="0,0,0,18">
+     <ScrollViewer x:Name="ChatsScroll" Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+     <Grid MinWidth="520" MinHeight="360" Width="{Binding ViewportWidth, ElementName=ChatsScroll}" Height="{Binding ViewportHeight, ElementName=ChatsScroll}">
+     <Grid.ColumnDefinitions><ColumnDefinition x:Name="SideCol" Width="240"/><ColumnDefinition/></Grid.ColumnDefinitions>
+     <Border x:Name="Side" BorderBrush="#14FFFFFF" BorderThickness="0,0,1,0" Margin="0,0,0,18">
      <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="12,4,10,0"><StackPanel x:Name="Folders"/></ScrollViewer>
     </Border>
-    <DockPanel Grid.Row="1" Grid.Column="1" Margin="28,2,20,16">
+     <DockPanel Grid.Column="1" Margin="28,2,20,16">
      <TextBlock x:Name="Heading" DockPanel.Dock="Top" FontSize="22" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
      <TextBlock x:Name="SubHeading" DockPanel.Dock="Top" FontSize="12" Foreground="#66FFFFFF" Margin="0,3,0,16" TextTrimming="CharacterEllipsis"/>
      <Border x:Name="SearchBox" DockPanel.Dock="Top" Background="#17FFFFFF" CornerRadius="12" Padding="12,8" Margin="0,0,8,10">
@@ -1017,11 +1032,15 @@ function Open-Chats {
      </Border>
      <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="List" Margin="0,0,8,0"/></ScrollViewer>
     </DockPanel>
+     </Grid></ScrollViewer>
    </Grid>
   </Border>
  </Grid>
 </Window>
 "@
+  # 980 x 680 where the screen has room for it; a smaller (or zoomed) one's work area, less a little, where it hasn't
+  $wa = [Windows.SystemParameters]::WorkArea
+  $script:cw.Width = [Math]::Min(980, $wa.Width - 16); $script:cw.Height = [Math]::Min(680, $wa.Height - 16)
   foreach ($n in 'Bar', 'Close', 'Folders', 'Heading', 'SubHeading', 'Hint', 'Search', 'SearchBox', 'List', 'Side', 'SideCol', 'NewBar', 'NewGo', 'NewAccts') { Set-Variable -Scope Script -Name "c$n" -Value $script:cw.FindName($n) }
   $script:newAcct = 0 # the account picked for 新建对话 in this window; 0: the recommended one
   $cNewGo.Add_Click({ New-Chat })

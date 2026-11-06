@@ -41,7 +41,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 4l4 4-4 4' fill='none' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E"); }
   /* 亮色: VS Code's Light Modern */
   :root[data-theme=light] { color-scheme: light; --bg: #ffffff; --bar: #f3f3f3; --act: #e8e8e8; --border: #e0e0e0; --hover: #f0f0f0; --sel: #e4e6f1; --input: #ffffff;
-    --inputB: #cecece; --fg: #3b3b3b; --fg2: #616161; --fg3: #8b8b8b; --fgHi: #1f1f1f; --msg: #2b2b2b; --accent: #005fb8; --accentH: #0258a8;
+    --inputB: #cecece; --fg: #3b3b3b; --fg2: #616161; --fg3: #6e6e6e; --fgHi: #1f1f1f; /* fg3 (times, paths): VS Code's #8b8b8b read 3.5:1 on white, this 5:1 */ --msg: #2b2b2b; --accent: #005fb8; --accentH: #0258a8;
     --accentBg: rgba(0,95,184,.1); --link: #005fb8; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.06);
     --btn: #e8e8e8; --btnH: #dadada; --badge: #cccccc; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #d4d4d4; --cellB: #d9d9d9;
     --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --gpt: #0b8a5c; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
@@ -55,6 +55,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
   svg { display: block; flex: none; }
   [hidden] { display: none !important; }
+  /* where the keyboard is (Tab), ringed as VS Code rings it; a mouse's click shows none */
+  :focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .row:focus-visible, .tab:focus-visible { outline-width: 2px; outline-offset: -2px; }
   #app { flex: 1; min-height: 0; display: flex; }
 
   /* activity bar | side bar | editor groups, a status bar under them */
@@ -147,7 +150,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   @media (hover: hover) { .row:hover { background: var(--hover); } .row.sel:hover { background: var(--sel); } .row:hover .aside { display: grid; } .row:hover > .when, .row:hover > .chip { visibility: hidden; } .link:hover { text-decoration: underline; } }
   .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .m { font-size: 12px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .when { font-size: 11.5px; color: var(--fg3); flex: none; }
+  .when { font-size: 12px; color: var(--fg3); flex: none; font-variant-numeric: tabular-nums; }
   /* 设置: a setting a line, its words left, its control right */
   .setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; color: var(--fgHi); }
   .switch { width: 36px; height: 20px; flex: none; border-radius: 10px; background: var(--split); position: relative; transition: background .15s; }
@@ -329,8 +332,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk > .dsec:first-child { border-top: 0; padding-top: 0; }
   .desk .dsec > summary { list-style: none; cursor: pointer; padding-bottom: 8px; } .desk .dsec > summary::-webkit-details-marker { display: none; }
   .desk .dsec:not([open]) > summary { padding-bottom: 0; }
-  .desk h4 { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 6px; font-size: 13px; font-weight: 700; color: var(--fgHi); }
-  .desk h4 .dg { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .desk h4 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 2px 6px; font-size: 13px; font-weight: 600; line-height: 1.5; color: var(--fgHi); }
+  .desk h4 .dg { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .desk h4::after { content: ''; flex: none; width: 6px; height: 6px; margin: 0 2px 0 4px; border: solid var(--fg3); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); transition: transform .15s; }
   .desk .dsec[open] > summary h4::after { transform: rotate(45deg); margin-top: -4px; }
   @media (hover: hover) { .desk .dsec > summary:hover h4::after { border-color: var(--fgHi); } }
@@ -390,8 +393,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .acct .today b { color: var(--orange); }
   .desk .cost { display: grid; grid-template-columns: 66px 1fr 54px; align-items: center; gap: 8px; padding: 3px 6px; font-size: 12px; }
   .desk .cost .pill { justify-self: start; } .desk .cost b { text-align: right; color: var(--fgHi); }
-  #deskCost .m { padding: 6px 6px 0; font-size: 11.5px; color: var(--fg2); }
-  #deskCost .sub { padding: 6px 6px 2px; font-size: 11px; color: var(--fg3); }
+  #deskCost .m { padding: 6px 6px 0; font-size: 12px; color: var(--fg2); }
+  #deskCost .sub { padding: 6px 6px 2px; font-size: 12px; color: var(--fg3); }
   #deskAcct .tot { padding: 0 6px 2px; font-size: 11.5px; color: var(--fg2); }
   /* quick questions over the 管家's input box */
   .send .quick { display: flex; gap: 6px; padding: 0 2px 6px; overflow-x: auto; scrollbar-width: none; }
@@ -404,7 +407,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .ah { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
   .desk .ah b { font-size: 13px; color: var(--fgHi); }
   .desk .acct .gauge { padding: 0 0 6px; }
-  .desk .acct .m { font-size: 11.5px; color: var(--fg3); }
+  .desk .acct .m { font-size: 12px; color: var(--fg3); }
   /* a conversation looked at in its place: 「← 回到管家」 over it, the 管家's own things put away meanwhile */
   #peekBar { display: none; flex: none; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
   #butler.peeking #peekBar { display: flex; }
@@ -450,7 +453,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .msgs { flex: 1; min-height: 0; overflow-y: auto; display: none; padding: 12px 20px 18px; }
   .pane.hist .msgs { display: block; }
   .pane.hist .screen, .pane.hist .keys { display: none; }
-  .col { max-width: 1600px; margin: 0 auto; /* wide: your messages out to the right, Claude's to the left; capped for a huge screen */ display: flex; flex-direction: column; gap: 10px; }
+  .col { max-width: 1200px; margin: 0 auto; /* wide: your messages out to the right, Claude's to the left; capped near 80 Chinese characters a line (1600 px ran past 100, hard to read), room enough for code and tables */ display: flex; flex-direction: column; gap: 10px; }
   .hOld, .hNew, .live { display: contents; } /* their messages sit in the column's flow */
   .hm { white-space: pre-wrap; word-break: break-word; font-size: 15px; line-height: 1.65; color: var(--msg); } /* the conversation a size up from the frame (13px), for reading */
   .hm .katex { font-size: 1.05em; white-space: normal; } /* a formula's own spacing, not the message's pre-wrap */
@@ -463,9 +466,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hm.user.cmd { align-self: center; margin-top: 8px; padding: 2px 8px; background: none; color: var(--fg3); font: 12px/1.5 var(--mono); }
   .hm.user.byb { background: color-mix(in srgb, #d97757 14%, var(--bg)); } .hm.user.byb .lab { color: #d97757; }
   .hm.user.pending { opacity: .5; }
-  .hm.user.long:not(.open) .clip { max-height: 16.5em; overflow: hidden; -webkit-mask: linear-gradient(#000 55%, transparent); mask: linear-gradient(#000 55%, transparent); } /* 10 lines */
-  .hm.user .more { display: block; margin-top: 4px; font-size: 12.5px; color: var(--link); }
-  .hm.user .more::after { content: '展开全部'; } .hm.user.open .more::after { content: '收起'; }
+  .hm.long:not(.open) .clip { max-height: 16.5em; overflow: hidden; -webkit-mask: linear-gradient(#000 55%, transparent); mask: linear-gradient(#000 55%, transparent); } /* 10 lines: a long message of yours, a huge answer */
+  .hm .more { display: block; margin-top: 4px; font-size: 12.5px; color: var(--link); }
+  .hm .more::after { content: '展开全部'; } .hm.open .more::after { content: '收起'; }
   .hm.tool { font: 12.5px/1.5 var(--mono); color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hm.tool::before { content: '● '; color: var(--green); }
   .hm.note { align-self: center; font-size: 12px; color: var(--fg3); }
@@ -525,7 +528,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .keys { display: flex; gap: 4px; padding: 6px; overflow-x: auto; border-top: 1px solid var(--border); scrollbar-width: none; flex: none; }
   .keys button { flex: 1 0 auto; min-width: 32px; background: var(--btn); border-radius: 6px; padding: 8px 4px; font-size: 13px; font-weight: 600; }
   /* the input: one box, the pictures waiting at its top, the text, a bar inside its bottom (pictures left, 发送 right) */
-  .send { position: relative; width: 100%; max-width: 1640px; margin: 0 auto; padding: 6px 20px calc(14px + env(safe-area-inset-bottom)); flex: none; }
+  .send { position: relative; width: 100%; max-width: 1240px; margin: 0 auto; padding: 6px 20px calc(14px + env(safe-area-inset-bottom)); flex: none; }
   /* scrolled up in the conversation: back to its end, over the input box */
   .toEnd { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 2; padding: 4px 12px; border-radius: 14px; font-size: 12.5px; white-space: nowrap;
     color: var(--fgHi); background: var(--pop); border: 1px solid var(--popB); box-shadow: 0 2px 10px var(--shadow); }
@@ -634,30 +637,34 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
       width: auto; border: 0; background: var(--bar); }
     .group:not(.focus), .group.blank .hint { display: none; }
     .tabs { height: 46px; padding-left: 0; }
-    .tab { height: 38px; }
-    .tabs .list { display: grid; width: 40px; height: 40px; margin: 0 2px; }
+    .tab { height: 44px; }
+    .tabs .list { display: grid; width: 44px; height: 44px; margin: 0 2px; }
     #app.side .tabs .list { color: var(--fgHi); background: var(--bg); }
     #app.side .tab.on { background: none; color: var(--fg2); border-color: transparent; }
     .tab { max-width: 170px; padding: 0 2px 0 12px; }
     .tab .ac { width: 18px; height: 18px; font-size: 11px; }
-    .x { width: 30px; height: 30px; }
+    .x { width: 44px; height: 44px; flex: none; }
     .brand { display: flex; align-items: center; align-self: center; padding: 0 6px; font-weight: 600; color: var(--fg); }
     .sideHead { height: 44px; padding-left: 16px; font-size: 16px; }
-    .sideHead .ico { width: 36px; height: 36px; } .sideHead .ico svg { width: 20px; height: 20px; } /* 新对话 is the + here */
+    .sideHead .ico { width: 44px; height: 44px; } .sideHead .ico svg { width: 20px; height: 20px; } /* 新对话 is the + here */
     .panel { padding: 0 14px 0 16px; }
     .row { min-height: 56px; padding: 8px 8px 8px 10px; gap: 10px; }
     .row .t { font-size: 15px; } .m { font-size: 12.5px; }
     .row .ac, .row .dot { width: 24px; height: 24px; font-size: 12px; }
-    .crumbs { height: 38px; padding-left: 12px; }
-    .crumbs .ico { width: 34px; height: 34px; } .crumbs .ico svg { width: 18px; height: 18px; }
-    .seg button { padding: 3px 10px; font-size: 13px; }
+    .crumbs { height: 44px; padding-left: 12px; }
+    .crumbs .ico { width: 44px; height: 44px; } .crumbs .ico svg { width: 18px; height: 18px; }
+    .crumbs [data-act=end] { margin-left: 8px; } /* 结束 apart from 换账号 */
+    .cpy { width: 44px; height: 44px; }
+    .att button::before { content: ''; position: absolute; inset: -12px; }
+    .seg button { min-height: 44px; padding: 7px 12px; font-size: 13px; }
+    .sheet .ico, .sheet .btn, .sheet .opt, .keys button, .ask button { min-width: 44px; min-height: 44px; }
     .msgs { padding: 12px 14px 16px; }
     .hm { font-size: 15px; } .hm.tool { font-size: 12.5px; } .hm.sub { font-size: 13.5px; }
     .hm th, .hm td { padding: 4px 7px; min-width: 3.5em; }
     .send { padding: 6px 8px max(8px, env(safe-area-inset-bottom)); }
     .send:focus-within { padding-bottom: 8px; }
     .box textarea { height: 36px; padding: 7px 4px; line-height: 22px; }
-    .go, .bar .pic { width: 36px; height: 36px; } .bar .pic svg { width: 20px; height: 20px; }
+    .go, .bar .pic { width: 44px; height: 44px; } .bar .pic svg { width: 20px; height: 20px; }
     .hm.img img { height: 160px; }
   }
   @media (pointer: fine) {
@@ -676,7 +683,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     .sheet { align-items: flex-start; justify-content: center; background: rgba(0,0,0,.3); }
     .sheet .in { width: 560px; margin-top: 8vh; border-radius: 12px; border: 1px solid var(--popB); box-shadow: 0 8px 32px var(--shadow); padding: 16px; }
   }
-  .stitle { font-size: 15px; font-weight: 600; color: var(--fgHi); }
+  .stitle { font-size: 15px; font-weight: 600; line-height: 1.5; margin-bottom: 8px; color: var(--fgHi); }
   .sheet.mid { align-items: center; justify-content: center; }
   .sheet.mid .in { width: min(400px, calc(100% - 32px)); margin: 0; border-radius: 12px; border: 1px solid var(--popB); padding: 14px 18px 18px; }
   .shead { display: flex; align-items: center; justify-content: space-between; }
@@ -723,7 +730,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 </div>
 <footer id="status"><span class="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span id="host">…</span></span>
   <span id="conn"></span><span class="grow"></span><span id="here"></span><button id="sAcct" title="看额度"></button></footer>
-<div class="sheet" id="sheet"><div class="in" id="sheetIn"></div></div>
+<div class="sheet" id="sheet"><div class="in" id="sheetIn" role="dialog" aria-modal="true" aria-label="对话框" tabindex="-1"></div></div>
 <div class="toast" id="toast"></div>
 <div id="offline" hidden>连不上电脑，正在重试…</div>
 <div id="cmenu" hidden></div>
@@ -760,10 +767,13 @@ addEventListener('pointerdown', (e) => { held = e.target; }, true);
 addEventListener('dragstart', () => (dragging = true), true);
 for (const t of ['pointerup', 'pointercancel']) addEventListener(t, letGo, true);
 for (const t of ['dragend', 'drop']) addEventListener(t, () => { dragging = false; letGo(); }, true);
+// The row or tab the keyboard was on (Tab) is on its new copy after such a redraw (a minute's "3 分钟前" redraws a row).
 Object.defineProperty(HTMLElement.prototype, 'html', { set(h) {
   if (held && this.contains(held)) return void heldOff.set(this, h);
   if (this.$html === h && this.$first === this.firstChild) return; // the same, and nothing else wrote it since
+  const f = this.contains(document.activeElement) ? document.activeElement.closest('[data-open], [data-i]') : null;
   this.innerHTML = h; this.$html = h; this.$first = this.firstChild;
+  if (f) this.querySelector(f.dataset.open != null ? `[data-open="${CSS.escape(f.dataset.open)}"]` : `[data-i="${CSS.escape(f.dataset.i)}"]`)?.focus({ preventScroll: true });
 } });
 // a message of yours as shown here: its [Image #N] out (the pictures show), a file's path as 📎 and its name, a paste unwrapped
 const shownText = (t) => t.replace(/\[Image #\d+\]\s*/g, '').replace(/^附件：.*?[\\/]\d{8}T\d{6}-[0-9a-f]{6}-(.+)$/gm, '📎 $1')
@@ -816,7 +826,7 @@ const saved = (() => { try { return JSON.parse(localStorage.getItem('cm-layout')
 let side = ['chats', 'usage', 'tokens'].includes(saved.side) ? saved.side : 'chats', sideOn = saved.sideOn ?? true, sideW = saved.sideW ?? 300;
 let deskW = saved.deskW ?? null, deskRW = saved.deskRW ?? null; // the 管家's columns as dragged (null: as the window makes them)
 const secs = saved.secs ?? {}; // its 操作台's sections opened or closed by you (by data-sec), the rest as the page has them
-let state = null, tokens = null, tokensNow = null, tokensAt = 0, groups = [], focusG = null, drag = null, restored = false;
+let state = null, tokens = null, tokensNow = null, tokensAt = 0, tokensErr = '', groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
 let listMode = saved.listMode === 'run' ? 'run' : 'dirs'; // 对话: by folder, or (the bell) 提示 and the running ones
 let listKind = ['claude', 'gpt'].includes(saved.listKind) ? saved.listKind : 'all'; // which kind of conversation it lists, with GPT accounts
@@ -851,6 +861,48 @@ function pickAcct(s) {
   });
 }
 const sheetOff = () => { $('#sheet').classList.remove('on', 'mid'); $('#sheetIn').onclick = null; $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') sheetOff(); }; };
+// The keyboard: a sheet up takes the focus (its first control, unless it put it in one itself) and gives it back to where it
+// was once it goes; Esc puts it away as a tap outside it does (a choice waiting on it answered "none"). A row or a tab
+// reached with Tab opens with Enter or Space, as clicked.
+{
+  let before = null, opened = false;
+  const sheet = $('#sheet'), inside = $('#sheetIn'), background = new Map();
+  const controls = () => [...inside.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')]
+    .filter((x) => !x.disabled && x.tabIndex >= 0 && x.getClientRects().length);
+  const focusSheet = () => (controls()[0] ?? inside).focus({ preventScroll: true });
+  addEventListener('focusin', (e) => {
+    if (sheet.contains(e.target)) return;
+    if (sheet.classList.contains('on')) focusSheet(); else before = e.target;
+  });
+  const focusModal = () => {
+    const on = sheet.classList.contains('on');
+    if (on && !opened) {
+      for (const x of document.body.children) if (x !== sheet && !['SCRIPT', 'STYLE'].includes(x.tagName)) { background.set(x, x.inert); x.inert = true; }
+    } else if (!on && opened) {
+      for (const [x, inert] of background) x.inert = inert;
+      background.clear();
+      const target = before?.isConnected ? before : before?.dataset.open
+        ? document.querySelector(`[data-open="${CSS.escape(before.dataset.open)}"][tabindex]`) : null;
+      (target ?? $('#gear')).focus({ preventScroll: true });
+    }
+    opened = on;
+    if (on) {
+      inside.setAttribute('aria-label', inside.querySelector('.stitle')?.textContent || '对话框');
+      if (!sheet.contains(document.activeElement)) focusSheet();
+    }
+  };
+  new MutationObserver(focusModal).observe(sheet, { attributes: true, attributeFilter: ['class'] });
+  new MutationObserver(focusModal).observe(inside, { childList: true, subtree: true });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Tab' && sheet.classList.contains('on')) {
+      const xs = controls(), i = xs.indexOf(document.activeElement);
+      if (i < 0 || (e.shiftKey ? i === 0 : i === xs.length - 1)) {
+        e.preventDefault(); (e.shiftKey ? xs.at(-1) ?? inside : xs[0] ?? inside).focus({ preventScroll: true });
+      }
+    } else if (e.key === 'Escape' && sheet.classList.contains('on')) { e.preventDefault(); sheet.click(); }
+    else if ((e.key === 'Enter' || e.key === ' ') && !e.repeat && e.target.matches?.('[data-open][tabindex], .tab[tabindex]')) { e.preventDefault(); e.target.click(); }
+  });
+}
 
 // Phone notifications: the page's helper (sw.js) subscribed to this service's pushes. iOS has them only for a page
 // opened from the home screen, and asks the permission straight from a tap.
@@ -923,12 +975,15 @@ function drawSide() {
   $('#sideTitle').textContent = { chats: '对话', usage: '额度', tokens: '用量' }[side];
   if (state) ({ chats: renderChats, usage: renderUsage, tokens: renderTokens })[side]();
 }
+// no Claude account open, as said everywhere: none at all, none read (no recommendation: the quota unknown, which isn't
+// the same as used up), or all at their limits
+const shut = (u) => (!u.accounts?.length ? '还没有 Claude 账号' : u.rec == null ? '额度暂时读不到' : `都到上限了，${u.ready ?? '稍后'}后恢复`);
 function drawStatus() {
   const u = state.usage, w = u.accounts?.[u.rec]?.windows?.find((x) => x.k === 'five_hour'), n = state.sessions.filter((s) => s.pid).length;
   const b = state.sessions.filter((s) => s.busy).length;
   $('#host').textContent = state.me;
   $('#conn').innerHTML = (n ? `${n} 个在运行` : '') + (b ? ` · <span class="spin"></span> ${b} 个在回复` : '');
-  $('#sAcct').innerHTML = u.open ? `<i style="background:${ACCT[u.rec % 4]}"></i>推荐 账号 ${u.rec + 1}${w ? ` · 5 小时已用 ${w.pct}%` : ''}` : `都到上限了，${esc(u.ready)} 后恢复`;
+  $('#sAcct').innerHTML = u.open ? `<i style="background:${ACCT[u.rec % 4]}"></i>推荐 账号 ${u.rec + 1}${w ? ` · 5 小时已用 ${w.pct}%` : ''}` : esc(shut(u));
 }
 // The conversation you're looking at, in the status bar: where it runs, its account (and that one's 5-hour use), model and
 // effort and context used (its terminal's status line), how long the prompt cache lives on (an hour from the last
@@ -977,21 +1032,21 @@ const chatMark = (x) => {
 const nd = (k) => (k ? `<i class="nd ${k}" title="${k === 'ask' ? '在等你' : '答完了，还没看'}"></i>` : '');
 const chatEnd = (x) => `${nd(chatMark(x))}${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}${x.pid ? `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(x.at)}</span>`}
     <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
-const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1, '', x.gpt)}
+const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1, '', x.gpt)}
     <div class="main"><div class="t">${mark(x.gpt, x.acct + 1)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
 function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
   const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run';
   // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
   const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', 'Claude'], ['gpt', 'GPT']].map(([k, l]) => `<button data-kind="${k}"${k === listKind ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : '';
-  const line = (x) => `<div class="row one" data-open="${esc(x.id)}" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1, '', x.gpt)}
+  const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1, '', x.gpt)}
     <div class="main t">${mark(x.gpt, x.acct + 1)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').html = `<button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   if (bell) {
     $('#view').html = kindBar + (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
-        notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
+        notes.map((n) => `<div class="row"${n.id ? ` data-open="${esc(n.id)}" tabindex="0" role="button"` : ''}><i class="dot ${n.kind === 'ask' ? 'ask' : 'done'}">${n.kind === 'ask' ? '!' : '✓'}</i>
           <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
           <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
       + sec('run', `<span>运行中<b class="count">${run.length}</b></span>`, run.length ? run.map(chatRow).join('') : '<div class="empty">没有在运行的对话</div>');
@@ -1085,7 +1140,7 @@ $('#side').onclick = (e) => {
   if (b.matches('[data-refresh]')) {
     if (side === 'usage') return refreshUsage();
     if (side === 'chats') return load().then((err) => toast(err ? `刷新失败：${err}` : '列表已刷新'));
-    tokens = null; return renderTokens();
+    tokens = null; tokensErr = ''; return renderTokens();
   }
   if (b.matches('[data-readall]')) { e.preventDefault(); return post('/api/read', { all: true }).then(() => load(), (x) => toast(x.message)); } // not the fold
   if (b.matches('[data-warm]')) return warm();
@@ -1108,7 +1163,7 @@ $('#act').onclick = (e) => {
   const b = e.target.closest('[data-side]');
   if (!b) return;
   if (b.dataset.side === side && sideOn && !NARROW.matches && !butler) sideOn = false; // the shown one again: the side bar closes
-  else { if (b.dataset.side === 'tokens' && side !== 'tokens') tokens = null; side = b.dataset.side; sideOn = true; }
+  else { if (b.dataset.side === 'tokens' && side !== 'tokens') { tokens = null; tokensErr = ''; } side = b.dataset.side; sideOn = true; }
   setButler(false); drawSide(); save();
 };
 $('#sAcct').onclick = () => { if (butler) return; setButler(false); side = 'usage'; sideOn = true; drawSide(); save(); };
@@ -1156,12 +1211,12 @@ function flipButler(on) {
   logo.title = '长按进入管家';
 }
 const QUICK = ['大家都怎么样', '谁在等我', '今天做了什么', '额度还够吗'], HAND = '交代一件事：';
-$('#deskAdd').onsubmit = (e) => {
+$('#deskAdd').onsubmit = async (e) => {
   e.preventDefault();
-  const i = $('#deskAdd input'), v = i.value.trim();
+  const i = $('#deskAdd input'), original = i.value, v = original.trim();
   if (!v) return i.focus();
   if (!bConv || bConv.ended || !bConv.started) return toast('管家没在运行：先启动它，或点「接着聊」');
-  bConv.say(HAND + v); i.value = '';
+  if (await bConv.say(HAND + v) && i.value === original) i.value = '';
 };
 // A conversation looked at in 管家 mode: a pane of its own in the 管家's place (one open in a tab too gets a second view
 // of it), till 「← 回到管家」, the 管家 tapped, or the mode left. Its Claude goes on either way.
@@ -1262,7 +1317,7 @@ function mood(up, thinking, run, decide = 0) {
   const wait = run.filter((x) => x.wait).length + decide, busy = run.filter((x) => x.busy).length, u = state.usage;
   const five = u.accounts?.[u.rec]?.windows?.find((x) => x.k === 'five_hour')?.pct ?? 0;
   if (!up) return ['😴', '在休息'];
-  if (!u.open) return ['😵', '额度都用完了，等恢复'];
+  if (!u.open) return u.rec == null ? ['😶', shut(u)] : ['😵', '额度都用完了，等恢复'];
   if (wait) return ['🙋', `有 ${wait} 件事等你拍板`];
   if (thinking) return ['🤔', '在想事情'];
   if (five >= 80) return ['😰', '额度快用完了'];
@@ -1291,7 +1346,7 @@ function drawDesk() {
     const box = text && (g === 'you' ? `<div class="need"><b>${NEED[stage] ?? '要你看'}</b>${esc(text)}</div>` : g === 'stuck' ? `<div class="need bad"><b>${stage}</b>${esc(text)}</div>` : '');
     const hover = [`你的原话：${x.ask}`, x.done && `做到什么算完：${x.done}`, x.limits && `约束：${x.limits}`, g === 'idle' && text && `它最后说：${text}`].filter(Boolean).join('\n');
     return `<div class="todo${g === 'you' ? ' you' : ''}" title="${esc(hover)}"><div class="tt"><b><span class="no">#${x.id}</span> ${esc(x.name)}</b><span class="pill ${GC[g]}">${stage}</span></div>
-      <div class="sum">${x.conv ? `<em>交给</em><span${conv ? ` data-open="${esc(x.conv)}"` : ''}>${esc(x.convTitle || '新开的对话')}</span>` : '<em>还没派给对话</em>'}</div>${box || ''}</div>`;
+      <div class="sum">${x.conv ? `<em>交给</em><span${conv ? ` data-open="${esc(x.conv)}" tabindex="0" role="button"` : ''}>${esc(x.convTitle || '新开的对话')}</span>` : '<em>还没派给对话</em>'}</div>${box || ''}</div>`;
   }).join('');
   const loose = (state.waits ?? []).filter((w) => w.until).map((w) => `<div class="wt"><span>⏰</span><span class="t" title="${esc(w.note ?? '')}">${hm(w.until)} ${esc(w.note || '到点提醒')}</span><span class="pill b">还有 ${mins(w.until - Date.now())}</span></div>`).join('');
   head('deskTodo', `任务${open.length ? `<b class="count">${open.length}</b>` : ''}`, nYou ? `${nYou} 件等你` : '');
@@ -1301,10 +1356,11 @@ function drawDesk() {
   const tag = (x) => (x.wait ? '<span class="pill o">等你</span>' : x.busy ? '<span class="pill g">在回复</span>' : '<span class="pill">空闲</span>');
   head('deskRun', '对话', `${run.length} 个在运行${wait.length ? ` · ${wait.length} 个等你` : ''}`);
   $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
-    ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" title="${esc(x.cwd)}">${mark(x.gpt, x.acct + 1)}<span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
+    ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" tabindex="0" role="button" title="${esc(x.cwd)}">${mark(x.gpt, x.acct + 1)}<span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
   if (!tokensNow && Date.now() - tokensAt > 120000) {
     tokensAt = Date.now();
-    tokensNow = fetch('/api/tokens').then((r) => r.json()).then((t) => { tokens = t; setTimeout(drawDesk); return t; }).finally(() => { tokensNow = null; });
+    tokensNow = getTokens().then((t) => { tokens = t; tokensErr = ''; setTimeout(drawDesk); return t; }).finally(() => { tokensNow = null; });
+    tokensNow.catch(() => {}); // failed: the last counts stay, asked again in 2 minutes
   }
   // what the 管家 itself costs today, by what set it going (its replies at the API price; the watchdog's Haiku logged)
   const bc = tokens?.butler, COST = [['you', '你问的', 'b', 'a1'], ['notice', '系统通知', 'o', 'orange'], ['bg', '后台任务', 'p', 'purple']];
@@ -1319,9 +1375,9 @@ function drawDesk() {
   const today = tokens?.days?.find((d) => d.d === tokens.today), all = (d) => (d ? d.i + d.o + d.cw + d.cr : 0);
   const u = state.usage, gauge = (k, p, v) => `<div class="gauge"><div class="k"><span>${k}</span><span>${v}</span></div><div class="meter"><i class="${p >= 85 ? 'bad' : p >= 60 ? 'warn' : ''}" style="width:${Math.min(100, p)}%"></i></div></div>`;
   const ra = u.accounts?.[u.rec];
-  head('deskAcct', '账号', !u.open ? '都到上限了' : ra ? `推荐 ${u.rec + 1} · 可连续用 ${ra.runway}h` : '');
+  head('deskAcct', '账号', !u.open ? shut(u) : ra ? `推荐 ${u.rec + 1} · 可连续用 ${ra.runway}h` : '');
   $('#deskAcct').html = u.accounts?.length ? `${today ? `<div class="m tot">今天共 ${fmtTok(all(today))} token</div>` : ''}${u.accounts.map((a, i) => {
-    const on = state.sessions.filter((x) => x.pid && x.acct === i).length;
+    const on = state.sessions.filter((x) => x.pid && !x.gpt && x.acct === i).length; // a GPT one's acct is its G number
     return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="pill g">推荐</span>' : ''}<span class="grow"></span><span class="pill ${a.err ? '' : a.runway >= 2 ? 'g' : a.runway > 0 ? 'o' : 'r'}">${a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
       ${a.err ? '' : (a.windows ?? []).filter((w) => w.k === 'five_hour' || w.k === 'seven_day').map((w) => gauge(w.k === 'five_hour' ? '5 小时' : '7 天', w.pct, `${w.pct}% · ${esc(w.reset)}后重置`)).join('')}
       ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · <b>约 ${usd(today.by[i].usd)}</b></div>` : ''}
@@ -1335,7 +1391,7 @@ function drawDesk() {
   const kindOf = (e) => { for (const [re, w, c, to] of KINDS) if (re.test(e.text)) return [w, c, e.text.replace(re, to)]; return ['管家', 'k', e.text]; };
   head('deskLog', '今天做了', tl.length ? `${tl.length} 件` : '');
   $('#deskLog').html = `${tl.length ? tl.map((e) => { const open = e.id && !mine.has(e.id) && state.sessions.some((x) => x.id === e.id), [w, c, t] = kindOf(e);
-    return `<div class="ev"${open ? ` data-open="${esc(e.id)}"` : ''}><span class="when">${hm(e.at)}</span><span class="pill ${c}">${w}</span><span class="t" title="${esc(e.text)}">${esc(t)}</span></div>`; }).join('')
+    return `<div class="ev"${open ? ` data-open="${esc(e.id)}" tabindex="0" role="button"` : ''}><span class="when">${hm(e.at)}</span><span class="pill ${c}">${w}</span><span class="t" title="${esc(e.text)}">${esc(t)}</span></div>`; }).join('')
     : '<div class="none">它今天还没替你做事</div>'}`;
   const gb = (b) => (b / 1073741824).toFixed(1), memPct = pc ? Math.round((100 * pc.mem) / pc.memAll) : 0;
   head('deskPc', '这台电脑', pc?.cpu != null ? `CPU ${pc.cpu}% · 内存 ${memPct}%` : '');
@@ -1420,7 +1476,7 @@ const winRow = (w) => `<div class="win"><span>${esc(winName(w.k))}</span>
 function renderUsage() {
   const u = state.usage, gp = state.gpt ?? [];
   $('#sideActs').html = `<button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
-  $('#view').html = `<div class="panel"><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : '都到上限了，最早 ' + esc(u.ready) + ' 后恢复'}</div>
+  $('#view').html = `<div class="panel"><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : esc(shut(u))}</div>
     ${u.accounts.map((a, i) => `<div class="card"><div class="cardHead">${ac(i + 1)}<b>账号 ${i + 1}</b>
       <span class="m grow">${esc(a.label)}</span>${renew(a.sub)}${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
       ${a.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(a.err)}</div>` : `
@@ -1454,13 +1510,18 @@ async function warm() {
   } catch (x) { msg = `预热失败：${x.message}`; }
   usageBusy = ''; toast(msg, 10000); load(true);
 }
+// the token counts; an answer that isn't them (the service's {err}, the relay's page) a failure, never kept as them
+// (tokensErr: the last count failed, said in the panel till 刷新, not asked again by itself every 5 s)
+const getTokens = (fresh) => fetch(`/api/tokens${fresh ? '?fresh=1' : ''}`).then((r) => r.json().catch(() => ({ err: `连不上（${r.status}）` })))
+  .then((t) => { if (!Array.isArray(t?.accounts)) throw new Error(t?.err || '统计失败'); return t; });
 async function renderTokens() {
   $('#sideActs').html = `<button class="ico" data-refresh title="重新统计">${svg(I.refresh)}</button>`;
   if (!tokens) {
+    if (tokensErr) return void ($('#view').html = `<div class="empty">统计失败：${esc(tokensErr)}<br>点右上角的刷新再试一次</div>`);
     $('#view').html = '<div class="empty">统计中…</div>';
     // one count at a time: it takes seconds, and the list's refresh every 10 s asks again meanwhile
-    tokensNow ??= fetch('/api/tokens?fresh=1').then((r) => r.json()).finally(() => { tokensNow = null; });
-    try { tokens = await tokensNow; } catch (e) { return toast(e.message); }
+    tokensNow ??= getTokens(true).finally(() => { tokensNow = null; });
+    try { tokens = await tokensNow; } catch (e) { tokensErr = e.message; if (side === 'tokens') renderTokens(); return; }
     if (side !== 'tokens') return;
   }
   const t = tokens, n = t.accounts.length, map = Object.fromEntries(t.days.map((d) => [d.d, d]));
@@ -1606,7 +1667,7 @@ function drawTabs(g) {
   g.strip.html = g.tabs.map((c, i) => {
     const turning = c.ended ? false : c === g.active && c.started ? c.live === 'busy' : busy.has(c.id);
     const dot = c.live === 'ask' || note.get(c.id) === 'ask' ? ' ask' : note.has(c.id) ? ' done' : '';
-    return `<div class="tab${c === g.active ? ' on' : ''}${c.ended ? ' gone' : ''}" data-i="${i}" draggable="${FINE}" title="${esc(c.title)}">
+    return `<div class="tab${c === g.active ? ' on' : ''}${c.ended ? ' gone' : ''}" data-i="${i}" tabindex="0" role="tab" aria-selected="${c === g.active}" draggable="${FINE}" title="${esc(c.title)}">
       ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct, '', c.gpt)}<span class="tt">${mark(c.gpt, c.acct)}${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
   }).join('') || '<span class="brand">Claude 多账号</span>';
   g.el.classList.toggle('blank', !g.tabs.length);
@@ -1750,7 +1811,9 @@ function makeConv(body, title) {
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
-  let switching = 0; // the account it's going to, while it goes
+  let switching = 0, conversationGen = 0; // a session change cancels writes still queued for the previous one
+  const drafts = new Map();
+  let session = { id: c.id }; // a new conversation acquires its first id while its first message is still sending
   const el = c.el = document.createElement('div');
   el.className = 'pane hist';
   el.innerHTML = `<div class="crumbs"><span class="path"></span>
@@ -1771,8 +1834,13 @@ function makeConv(body, title) {
   // whether Claude got it: a message's steps stop at one that didn't (its Enter would send whatever is in Claude's box)
   const input = (data) => {
     if (!key) return Promise.resolve(false);
-    const k = key, takeBack = kind === 'pty' && ptySize && mine && (ptySize.w !== mine.cols || ptySize.h !== mine.rows);
-    return (q = q.then(() => (takeBack ? claim() : null)).then(() => post('/api/input', { key: k, data })).then(() => true, (e) => { toast(e.message); return false; }));
+    const k = key, g = conversationGen, takeBack = kind === 'pty' && ptySize && mine && (ptySize.w !== mine.cols || ptySize.h !== mine.rows);
+    return (q = q.then(async () => {
+      if (k !== key || g !== conversationGen) return false;
+      if (takeBack) await claim();
+      if (k !== key || g !== conversationGen) return false;
+      await post('/api/input', { key: k, data }); return true;
+    }).catch((e) => { toast(e.message); return false; }));
   };
   function claim() { // this screen's size for the conversation, while its terminal is shown here
     if (!term || kind !== 'pty' || view !== 'term' || !shown) return Promise.resolve();
@@ -1875,28 +1943,48 @@ function makeConv(body, title) {
       return toast(`已停止。还没执行的那条消息回到了输入框，可以改了再发${pics ? '（图片要重新选一下）' : ''}`, 4000);
     }
   }
+  // Why a message can't go now, '' when it can (what you wrote stays where it is): the last one still going, not
+  // connected, or a menu waiting (the message would be typed into it, and its Enter pick what's highlighted: "No, exit")
+  const cantSend = () => (sending ? '上一条还在发，稍等一下'
+    : !key || c.ended ? (c.started && !c.ended ? '还在连接，稍等一下再发' : '这个对话没有在运行，先点上面的「接着聊」')
+    : menuNow && !typeNow ? 'Claude 在等你先在上面选一项，选完再发（你写的还在输入框里）' : '');
   // One message, whole and in order: its pictures (uploaded, each path pasted, Claude attaching it), its text as a paste
   // (its new lines stay in it), then Enter on its own; the next waits till this one is through. Typed in one piece with
   // its Enter, a long text was taken for a paste, the Enter with it for a new line, and the message sat there unsent.
-  go.onclick = async () => {
-    if (go.classList.contains('stop')) return stop();
-    const v = line.value.trim(), imgs = atts;
-    if (!v && !imgs.length) return;
-    if (sending) return toast('上一条还在发，稍等一下'); // what you wrote stays
-    if (!key || c.ended) return toast(c.started && !c.ended ? '还在连接，稍等一下再发' : '这个对话没有在运行，先点上面的「接着聊」');
-    // a menu waiting: the message would be typed into it, and its Enter pick what's highlighted ("No, exit", say)
-    if (menuNow && !typeNow) return toast('Claude 在等你先在上面选一项，选完再发（你写的还在输入框里）', 4000);
+  go.onclick = () => (go.classList.contains('stop') ? stop() : send());
+  async function send(quick = null) {
+    const v = (quick ?? line.value).trim(), imgs = quick === null ? atts : [];
+    if (!v && !imgs.length) return false;
+    if (view === 'hist') drawLive(); // the terminal may already have a question the debounced redraw hasn't shown
+    const why = cantSend();
+    if (why) { toast(why, 4000); return false; }
+    const g = conversationGen, origin = session, k0 = key;
+    const current = () => g === conversationGen && key === k0;
+    let delivered = false;
     const answer = typeNow, tick = typeTick; // what you write for Claude's 「Type something」: pasted into it, then Enter (a multi-select's: none, it's ticked)
     // out of the box at once: what you type while its pictures upload is the next message, not wiped when this one goes
     sending = true; stops++; // a 停止 still watching Claude's input box: this message isn't the one to take back
-    going = v; line.value = ''; grow(); atts = []; drawAtts();
+    going = v; if (quick === null) { line.value = ''; atts = []; } grow(); drawAtts();
     const wait = view === 'hist' && !answer && { text: v, imgs: imgs.filter((a) => !a.file).map((a) => a.url), at: Date.now() };
     if (wait) { sent.push(wait); drawLive(true); }
     const back = (why) => { // not sent after all: back in the box, before what you typed since, with its pictures
+      const id = origin.id;
+      if (g !== conversationGen && c.id !== id) {
+        const d = drafts.get(id);
+        if (d) {
+          d.text = [v, d.text.trim()].filter(Boolean).join('\n');
+          d.atts = [...imgs.filter((a) => !a.failed), ...d.atts];
+          d.sent = d.sent.filter((s) => s !== wait);
+          if (id) try { localStorage.setItem('cm-draft:' + id, d.text); } catch {}
+        }
+        toast('会话已切换，未发送的内容已保存在原会话草稿', 4000);
+        return true;
+      }
       if (wait) { sent = sent.filter((s) => s !== wait); drawLive(); }
       going = ''; line.value = [v, line.value.trim()].filter(Boolean).join('\n'); grow();
       atts = [...imgs.filter((a) => !a.failed), ...atts]; drawAtts();
       if (why) toast(why, 4000);
+      return true; // accepted, then restored: a quick form can clear its copy
     };
     try {
       let paths = [];
@@ -1905,11 +1993,11 @@ function makeConv(body, title) {
         try { paths = await Promise.all(imgs.map((a) => a.up)); } catch { return back(); }
       }
       // asked again after the wait: the conversation ended, or a menu came up (Enter would pick what's highlighted)
-      if (!key || c.ended) return back('这个对话已经不在运行了，消息放回了输入框');
+      if (!current() || c.ended) return back('这个对话换了会话、终端或已结束，消息已放回草稿');
       if (menuNow && !(answer && typeNow)) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
       const lost = '没发出去，消息放回了输入框'; // a step that didn't reach Claude: no Enter after it
       // each step to the terminal the message began on: switched to another account meanwhile, the rest isn't sent
-      const k0 = key, step = (d) => (key === k0 ? input(d) : Promise.resolve(false));
+      const step = (d) => (current() ? input(d) : Promise.resolve(false));
       // the pictures pasted one by one first; the files' paths go at the end of the words, a line each
       const pics = paths.filter((_, i) => !imgs[i].file), files = paths.filter((_, i) => imgs[i].file);
       const text = [v, ...files.map((f) => `附件：${f}`)].filter(Boolean).join('\n');
@@ -1920,16 +2008,29 @@ function makeConv(body, title) {
         for (const p of pics) if (!(await step(`\x1b[200~${p}\x1b[201~`))) return back(lost);
         for (const end = Date.now() + 4000; imagesShown() < before + pics.length && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 100));
         // asked again after that wait: a menu up now would take the words and the Enter
-        if (key !== k0 || c.ended) return back('这个对话换了终端或已结束，消息放回了输入框');
+        if (!current() || c.ended) return back('这个对话换了会话、终端或已结束，消息已放回草稿');
         if (menuNow && !(answer && typeNow)) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
       }
       if (text && !(await step(`\x1b[200~${text.replace(/\n/g, '\r')}\x1b[201~`))) return back(lost);
       // the Enter not through: back here too (the words may still sit in Claude's own box)
       if (!tick && !(await step('\r'))) return back('回车没发出去，消息放回了输入框（Claude 那边的输入框里可能还留着这段字）');
-      if (answer && !tick) typing = null;
-      else lastSent = { text, v, imgs, wait };
-    } finally { sending = false; going = ''; grow(); goMode(); } // through (or back in the box): out of the draft
-  };
+      delivered = true;
+      if (current()) {
+        if (answer && !tick) typing = null;
+        else lastSent = { text, v, imgs, wait };
+      }
+      return true;
+    } catch (e) { return back(`没发出去：${e.message}`); }
+    finally {
+      sending = false;
+      if (g === conversationGen) going = '';
+      else if (delivered && c.id !== origin.id && origin.id) {
+        const d = drafts.get(origin.id);
+        if (d) try { if (d.text) localStorage.setItem('cm-draft:' + origin.id, d.text); else localStorage.removeItem('cm-draft:' + origin.id); } catch {}
+      }
+      grow(); goMode();
+    }
+  }
   line.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim()) go.click(); } // only sends; Shift+Enter: a new line
     if (e.key === 'Escape' && busyNow) stop(); // as in Claude: Esc stops it
@@ -1997,7 +2098,24 @@ function makeConv(body, title) {
     try {
       const r = await histGet(first ? '' : `&from=${histEnd}`);
       if (g !== histGen) return; // started again meanwhile
-      if (r.id && !c.id) { c.id = r.id; redraw(); markRows(); save(); } // a new one: which conversation it became
+      // which conversation it is: a new one's, once it has a record; or another one, its terminal moved on (/clear or
+      // /resume typed there; id null: one with nothing said yet). That one read afresh, from its end: this answer was
+      // read from where the other's record had got to
+      if ('id' in r && r.id !== c.id) {
+        const d = drafts.get(r.id);
+        let saved = null;
+        if (r.id) try { saved = localStorage.getItem('cm-draft:' + r.id); } catch {}
+        if (c.id !== null || d || saved !== null) {
+          grow();
+          drafts.set(c.id, { text: line.value, atts, sent, lastSent });
+          conversationGen++; stops++; going = ''; typing = null; typeOpt.clear();
+          session = { id: r.id };
+          line.value = d?.text ?? saved ?? '';
+          atts = (d?.atts ?? []).filter((a) => !a.failed); sent = d?.sent ?? []; lastSent = d?.lastSent ?? null;
+        } else { session.id = r.id; drafts.delete(null); }
+        c.id = r.id; grow(); drawAtts(); redraw(); markRows(); save();
+        if (!first) { histEnd = histOldest = null; histGen++; histNow = false; liveHtml = ''; hist.innerHTML = ''; return loadHist(); }
+      }
       if (first) { histOldest = r.start; hist.innerHTML = '<div class="col"><div class="hTop hm note"></div><div class="hOld"></div><div class="hNew"></div><div class="live"></div></div>'; }
       histEnd = r.end;
       if (r.items.length) {
@@ -2361,7 +2479,10 @@ function makeConv(body, title) {
     setView(view);
   };
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(histTimer); gen++; es?.close(); es = null; c.live = ''; readNote(c.id); };
-  c.say = (text) => { const d = line.value, a = atts; line.value = text; atts = []; go.onclick(); line.value = d; atts = a; drawAtts(); grow(); };
+  // the 管家's quick questions and 交代: sent as typed here, never a 停止 (the button may be one, its box empty while it
+  // works). false, and why in a bubble, when it can't go now: the words stay where they were written. Taken, a step that
+  // fails later puts them back in this box, as for one typed here
+  c.say = (text) => send(text);
   c.close = () => { c.closed = true; c.sleep(); ro.disconnect(); clearTimeout(liveT); clearTimeout(fitT); term?.dispose(); term = null; key = null; switching = 0; el.remove(); };
   c.claim = claim; c.swap = swap;
   c.where = () => (key && !c.ended ? kind : null); // 'pc' a window on the computer, 'pty' the web service
@@ -2431,8 +2552,10 @@ function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies he
     }
     if (m.role !== 'tool') {
       // ponytail: an answer's Markdown kept on it for 复制, its words twice in the page; on demand from the record if a long one weighs on a phone
+      // a huge one (the service once cut those at 20,000 characters) folded as a long message of yours is: whole, 复制 too
+      const fold = m.role === 'claude' && m.text.length > 20000, body = m.role === 'claude' && (fold ? `<div class="clip">${md(m.text)}</div><button class="more" data-more></button>` : md(m.text));
       box.insertAdjacentHTML('beforeend', m.role === 'user' ? userHtml(m, mark) : m.role === 'claude'
-        ? `<div class="hm claude"${mark} data-raw="${esc(m.text)}">${md(m.text)}<button class="cpy" data-copy title="复制这段回答">${svg(I.copy)}</button></div>`
+        ? `<div class="hm claude${fold ? ' long' : ''}"${mark} data-raw="${esc(m.text)}">${body}<button class="cpy" data-copy title="复制这段回答">${svg(I.copy)}</button></div>`
         : `<div class="hm ${m.role}"${mark}>${m.role === 'note' ? esc(m.text) : md(m.text)}</div>`);
       continue;
     }
