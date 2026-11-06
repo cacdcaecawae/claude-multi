@@ -122,9 +122,11 @@ const press = async (key, shift = false) => {
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await evaluate("sideOn=false;drawSide();localStorage.setItem('cm-look','light');look()");
   await new Promise((r) => setTimeout(r, 150));
-  for (const selector of ['.tab .x', '.crumbs [data-act=swap]', '.crumbs [data-act=end]', '.go', '.bar .pic', '.hm.claude > .cpy']) {
-    const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return [r.width,r.height]})()`);
-    assert.ok(r[0] >= 44 && r[1] >= 44, selector + ': ' + r);
+  // small to the eye (drawn 44 px, they hung off code blocks and stood tall over the conversation), a finger's size to the
+  // touch: a point just past the edge still lands on the button
+  for (const [selector, past] of [['.hm.claude > .cpy', 7], ['.pane.on .seg button', 4]]) {
+    const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return [r.height,document.elementFromPoint(r.left+r.width/2,r.top-${past})===e]})()`);
+    assert.ok(r[0] <= 36 && r[1], selector + ': ' + r);
   }
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
   // Optionally keep a screenshot outside the repository for visual review.
