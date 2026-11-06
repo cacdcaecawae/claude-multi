@@ -2557,7 +2557,14 @@ async function web() {
     'POST /api/island': (q, b) => {
       if (b.on) { try { fs.unlinkSync(ISLAND_OFF); } catch {} island(); return { on: true }; }
       fs.writeFileSync(ISLAND_OFF, '');
-      try { process.kill(Number(fs.readFileSync(`${ISLAND}.pid`, 'utf8'))); } catch {}
+      // the island's own process only: its pid file outlives it, and Windows hands the number on. The file goes too,
+      // or a reused number would later keep 「打开」 from starting it (island() takes it for running)
+      try {
+        const pid = Number(fs.readFileSync(`${ISLAND}.pid`, 'utf8'));
+        const cmd = spawnSync('powershell.exe', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`], { encoding: 'utf8', windowsHide: true }).stdout;
+        if (/island\.ps1/i.test(cmd)) process.kill(pid);
+      } catch {}
+      fs.rmSync(`${ISLAND}.pid`, { force: true });
       try { for (const f of fs.readdirSync(INBOX)) fs.rmSync(path.join(INBOX, f), { force: true }); } catch {}
       return { on: false };
     },
