@@ -1376,6 +1376,7 @@ NARROW.addEventListener('change', () => { narrow(); drawSide(); });
 // 设置: 外观 (kept in this browser) and this device's notifications
 const LOOKS = { auto: '跟随系统', light: '亮色', dark: '暗色' };
 function openSettings() {
+  let island = null; // the computer's island: on, off, or not read yet
   const draw = () => {
     const now = look();
     $('#sheetIn').innerHTML = `<div class="shead"><span class="stitle">设置</span><button class="ico" data-x title="关闭">${svg(I.close)}</button></div>
@@ -1383,8 +1384,11 @@ function openSettings() {
       <div class="setting"><span>主题</span><div class="seg">${Object.entries(LOOKS).map(([k, t]) => `<button data-look="${k}" title="${t}"${k === now ? ' class="on"' : ''}>${svg(I[k])}</button>`).join('')}</div></div>
       <h3>通知</h3>
       <div class="setting"><span>通知</span><button class="switch${pushOn ? ' on' : ''}" data-push title="${pushOn ? '关闭' : '开启'}"></button></div>
-      ${pushOn ? '<div class="setting"><span>测试通知</span><button class="btn" data-pushtest>发送</button></div>' : ''}`;
+      ${pushOn ? '<div class="setting"><span>测试通知</span><button class="btn" data-pushtest>发送</button></div>' : ''}
+      <h3>电脑</h3>
+      <div class="setting"><span>桌面灵动岛</span>${island == null ? '<span class="m">读取中…</span>' : `<button class="switch${island ? ' on' : ''}" data-island title="${island ? '关闭：电脑桌面上不再显示和弹提示，网页和手机不受影响' : '打开'}"></button>`}</div>`;
   };
+  fetch('/api/island').then((r) => r.json()).then((j) => { island = j.on; draw(); }).catch(() => {});
   $('#sheetIn').onclick = (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -1395,6 +1399,7 @@ function openSettings() {
     }
     if (b.matches('[data-push]')) return (pushOn ? pushDisable() : pushEnable()).then(draw); // enabling asks the permission: straight from this tap
     if (b.matches('[data-pushtest]')) return pushTest();
+    if (b.matches('[data-island]')) return post('/api/island', { on: !island }).then((j) => { island = j.on; draw(); }).catch((err) => toast(`没改成：${err.message}`));
   };
   draw(); $('#sheet').classList.add('on', 'mid');
 }

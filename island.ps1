@@ -198,6 +198,11 @@ public struct RECT { public int L, T, R, B; }
   exit
 }
 $self = $PSCommandPath
+# switched off in the web page's settings: only the web service rides along (this is what starts it at login), no island
+if (Test-Path "$PSScriptRoot\island-off") {
+  Start-Process node -ArgumentList "`"$PSScriptRoot\claude-multi.js`" web" -WindowStyle Hidden
+  exit
+}
 
 $got = $false
 $mutex = New-Object Threading.Mutex($false, 'Local\ClaudeMultiIsland')
