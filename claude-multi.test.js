@@ -1,4 +1,13 @@
 // node claude-multi.test.js: the account pick on the cases it was designed around.
+// In a home of its own (claude-multi's ROOT is read from it as the module loads): nothing here reads or writes your
+// .claude-multi (its registry, its switch requests), whatever runs on it meanwhile
+const TEST_HOME = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'cm-test-home-'));
+process.env.USERPROFILE = process.env.HOME = TEST_HOME;
+delete process.env.CLAUDE_CODE_PLUGIN_DIRS; // the Claude running these tests has the real plugin in it
+require('fs').mkdirSync(require('path').join(TEST_HOME, '.claude-multi'));
+require('fs').writeFileSync(require('path').join(TEST_HOME, '.claude-multi', 'profiles.json'),
+  JSON.stringify({ active: null, profiles: [{ id: 'acct-test-001', label: 'me@example.com', configDir: require('path').join(TEST_HOME, 'acct') }] }));
+process.on('exit', () => require('fs').rmSync(TEST_HOME, { recursive: true, force: true }));
 const assert = require('assert');
 const { pickOpen } = require('./claude-multi');
 const at = (h) => (h == null ? null : new Date(Date.now() + h * 3.6e6).toISOString());
@@ -944,3 +953,50 @@ console.log('tokens ok');
   fs.rmSync(f);
   console.log('defaults kept ok');
 }
+
+// From the review (灵动岛审查清单). The commands as the island and the 管家 run them, each in a home of its own: a GPT
+// account isn't removed while a Codex runs on it (its marker, there before it has a conversation); usage --json stays JSON
+// with GPT accounts only (the island parses it); a record that can't be read (a folder by a record's name: reading it
+// fails as reading one deleted mid-look does) is left out and the rest listed (one threw the whole list away, and the
+// web service with it)
+{
+  const path = require('path'), os = require('os'), cp = require('child_process'), cli = path.join(__dirname, 'claude-multi.js');
+  const homeOf = (reg) => { const r = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-home-')); fs.mkdirSync(path.join(r, '.claude-multi')); fs.writeFileSync(path.join(r, '.claude-multi', 'profiles.json'), JSON.stringify(reg(r))); return r; };
+  const run = (root, ...args) => cp.spawnSync(process.execPath, [cli, ...args], { env: { ...process.env, USERPROFILE: root, HOME: root }, encoding: 'utf8' });
+  const r1 = homeOf((r) => ({ profiles: [], gpt: [{ id: 'gpt-1', label: 'g@example.com', home: path.join(r, 'gpt-1') }] })), g = path.join(r1, 'gpt-1');
+  fs.mkdirSync(g); fs.mkdirSync(path.join(r1, '.claude-multi', 'gpt-live'));
+  fs.writeFileSync(path.join(r1, '.claude-multi', 'gpt-live', `${process.pid}.json`), JSON.stringify({ pid: process.pid, home: g, cwd: __dirname, since: Date.now(), id: null }));
+  const rm = run(r1, 'remove', 'G1');
+  assert.equal(rm.status, 1, rm.stdout);
+  assert.match(rm.stdout, /Codex 正在运行/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(r1, '.claude-multi', 'profiles.json'), 'utf8')).gpt.length, 1); // still listed
+  assert.ok(fs.existsSync(g));                                                                                   // its folder kept
+  const u = run(r1, 'usage', '--json'), uj = JSON.parse(u.stdout);
+  assert.deepEqual([uj.accounts, uj.rec, uj.open, uj.gpt.map((x) => x.label)], [[], null, false, ['g@example.com']]);
+  fs.rmSync(r1, { recursive: true, force: true });
+  const r2 = homeOf((r) => ({ profiles: [{ id: 'acct-1', label: 'me@example.com', configDir: path.join(r, 'acct') }] })), f = path.join(r2, 'acct', 'projects', 'f');
+  fs.mkdirSync(path.join(f, '00000000-0000-0000-0000-000000000001.jsonl'), { recursive: true });
+  fs.writeFileSync(path.join(f, '00000000-0000-0000-0000-000000000002.jsonl'), JSON.stringify({ type: 'user', cwd: __dirname, aiTitle: '读得到的' }) + '\n');
+  const ls = run(r2, 'sessions', '--json');
+  assert.equal(ls.status, 0, ls.stderr);
+  assert.deepEqual(JSON.parse(ls.stdout).map((s) => s.title), ['读得到的']);
+  fs.rmSync(r2, { recursive: true, force: true });
+  console.log('review commands ok');
+}
+// A request's JSON in pieces cut inside a character (a Chinese one, an emoji): whole once decoded; past its size, none.
+// The page's token counts: an {err} (or the relay's page) is a failure, never kept as the counts; the quota line tells no
+// account, none read and all used up apart.
+(async () => {
+  const { jsonBody } = require('./claude-multi'), b = Buffer.from(JSON.stringify({ text: '中文😀' }));
+  for (const at of [b.indexOf(Buffer.from('文')) + 1, b.indexOf(Buffer.from('😀')) + 2]) assert.deepEqual(await jsonBody([b.subarray(0, at), b.subarray(at)]), { text: '中文😀' });
+  assert.equal(await jsonBody([b], 8), undefined);
+  const src = fs.readFileSync(require('path').join(__dirname, 'web.html'), 'utf8'), part = (re) => src.match(re)[0];
+  const answer = (status, j) => async () => ({ status, json: async () => { if (!j) throw new SyntaxError('not JSON'); return j; } });
+  const getTokens = (fetch) => new Function('fetch', `${part(/^const getTokens = [\s\S]*?return t; \}\);$/m)}\nreturn getTokens;`)(fetch)();
+  await assert.rejects(getTokens(answer(500, { err: '读不了' })), /读不了/);
+  await assert.rejects(getTokens(answer(502, null)), /502/);
+  assert.deepEqual(await getTokens(answer(200, { accounts: [], days: [] })), { accounts: [], days: [] });
+  const shut = new Function(`${part(/^const shut = .*$/m)}\nreturn shut;`)();
+  assert.deepEqual([shut({ accounts: [] }), shut({ accounts: [{}], rec: null }), shut({ accounts: [{}], rec: 0, ready: '2小时' })], ['还没有 Claude 账号', '额度暂时读不到', '都到上限了，2小时后恢复']);
+  console.log('review page ok');
+})();

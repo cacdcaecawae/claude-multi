@@ -371,6 +371,8 @@ $win = X @"
    </DockPanel>
    <StackPanel x:Name="Alerts" Visibility="Collapsed" Background="Transparent" Cursor="Hand"/>
    <StackPanel x:Name="Panel" Visibility="Collapsed" Margin="0,12,0,0" MinWidth="420">
+    <!-- the notes and the cards scroll once they'd run past the screen (many accounts, a small or zoomed one): Expand sets its height -->
+    <ScrollViewer x:Name="PanelScroll" VerticalScrollBarVisibility="Auto"><StackPanel>
     <StackPanel x:Name="HistoryBox" Visibility="Collapsed" Margin="0,0,0,14">
      <DockPanel>
       <Button x:Name="BtnClearHist" Style="{StaticResource Text}" Content="清空" DockPanel.Dock="Right"/>
@@ -386,6 +388,7 @@ $win = X @"
      </DockPanel>
      <StackPanel x:Name="ProjList"/>
     </StackPanel>
+    </StackPanel></ScrollViewer>
     <DockPanel Margin="0,10,-6,-2">
      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
       <Button x:Name="BtnChats" Style="{StaticResource Icon}" Content="&#xE8BD;" ToolTip="对话列表：回到之前的对话"/>
@@ -407,7 +410,7 @@ $win = X @"
  </Grid>
 </Window>
 "@
-foreach ($n in 'Island', 'Scale', 'Pill', 'Pin', 'PinIcon', 'PillName', 'PillAccts', 'HistTitle', 'Alerts', 'Panel',
+foreach ($n in 'Island', 'Scale', 'Pill', 'Pin', 'PinIcon', 'PillName', 'PillAccts', 'HistTitle', 'Alerts', 'Panel', 'PanelScroll',
   'Status', 'BtnChats', 'BtnTokens', 'BtnRefresh', 'BtnWarm', 'BtnQuit', 'Rows', 'ProjView', 'BtnBack', 'ProjTitle', 'ProjList',
   'BadgeBox', 'Badge', 'HistoryBox', 'History', 'BtnClearHist') {
   Set-Variable -Name $n -Value $win.FindName($n)
@@ -513,7 +516,7 @@ $PAY = @{
 # An account at its limit while conversations run on it: one notice (per account, until it's off its limit again) that
 # they wait for the reset; a click opens the running ones, each with 换账号继续. Nothing switches by itself.
 $script:limitTold = @{}
-$script:kind = 'claude' # the panel's cards: 'claude', or 'gpt' (GPT accounts, once there are any)
+$script:kind = $null # the panel's cards: 'claude', or 'gpt' (GPT accounts, once there are any); none picked: Claude's, GPT's with no Claude account
 function Check-Limits {
   $accs = @($script:data.accounts)
   for ($i = 0; $i -lt $accs.Count; $i++) {
@@ -530,7 +533,7 @@ function Render {
   $d = $script:data
   $all = @($d.accounts)
   if ($null -eq $d.rec) {
-    $PillName.Text = 'Claude · 暂无可用数据'
+    $PillName.Text = if ($all.Count) { 'Claude · 暂无可用数据' } else { 'Claude · 还没有账号' }
     $PillName.Visibility = 'Visible'; $PillAccts.Visibility = 'Collapsed'
   } else {
     $r = $all[$d.rec]; $p = Pct5 $r
@@ -558,7 +561,7 @@ function Render {
   $Rows.Children.Clear()
   # with a GPT account: Claude / GPT over the cards, which of them the panel shows (the pill stays on Claude)
   $gs = @($d.gpt | Where-Object { $_ })
-  $kind = if ($gs.Count) { $script:kind } else { 'claude' }
+  $kind = if (-not $gs.Count) { 'claude' } elseif ($script:kind) { $script:kind } elseif ($all.Count) { 'claude' } else { 'gpt' }
   if ($gs.Count) {
     $seg = New-Object Windows.Controls.StackPanel
     $seg.Orientation = 'Horizontal'; $seg.Margin = '4,0,0,8'
@@ -574,7 +577,8 @@ function Render {
     [void]$Rows.Children.Add($seg)
   }
   if ($kind -eq 'gpt') { Render-Gpt $gs $names; return }
-  $order = @(@($d.rec | Where-Object { $null -ne $_ }) + @(0..($all.Count - 1) | Where-Object { $_ -ne $d.rec }))
+  # not 0..($all.Count - 1): with no account that's 0, -1
+  $order = @(@($d.rec | Where-Object { $null -ne $_ }) + @(for ($i = 0; $i -lt $all.Count; $i++) { if ($i -ne $d.rec) { $i } }))
   foreach ($i in $order) {
     # Every account shows the same details; the recommended one is the bright card with the big button,
     # the rest sit on a fainter card in greyer text with a small launch icon.
@@ -739,6 +743,9 @@ function Focus-Claude([int]$claudePid) {
 }
 
 function Expand {
+  # the cards no taller than the screen leaves under the pill, the alerts and the buttons (~150 px with the margins): past
+  # that they scroll, the buttons stay in sight
+  $PanelScroll.MaxHeight = [Math]::Max(160, [Windows.SystemParameters]::WorkArea.Height - 150 - $Alerts.ActualHeight)
   Show-Rows; $Panel.Visibility = 'Visible'; Pop
   [void]$win.Activate() # so a click elsewhere deactivates and collapses it
   if (((Get-Date) - $script:fetched).TotalSeconds -gt 60) { Refresh }
@@ -1022,6 +1029,9 @@ function Open-Chats {
  </Grid>
 </Window>
 "@
+  # 980 x 680 where the screen has room for it; a smaller (or zoomed) one's work area, less a little, where it hasn't
+  $wa = [Windows.SystemParameters]::WorkArea
+  $script:cw.Width = [Math]::Min(980, $wa.Width - 16); $script:cw.Height = [Math]::Min(680, $wa.Height - 16)
   foreach ($n in 'Bar', 'Close', 'Folders', 'Heading', 'SubHeading', 'Hint', 'Search', 'SearchBox', 'List', 'Side', 'SideCol', 'NewBar', 'NewGo', 'NewAccts') { Set-Variable -Scope Script -Name "c$n" -Value $script:cw.FindName($n) }
   $script:newAcct = 0 # the account picked for 新建对话 in this window; 0: the recommended one
   $cNewGo.Add_Click({ New-Chat })
