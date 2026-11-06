@@ -15,6 +15,10 @@ const REGISTRY = path.join(ROOT, 'profiles.json');
 const LOG = path.join(ROOT, 'events.jsonl');
 const INBOX = path.join(ROOT, 'inbox');
 const ISLAND = path.join(ROOT, 'island.ps1');
+// the island switched off in the page's settings: not started (not by a note, not by the CLI; at login island.ps1
+// only starts the web service), and nothing put in its inbox. The web pages and phones get their notes as ever.
+const ISLAND_OFF = path.join(ROOT, 'island-off');
+const islandOff = () => fs.existsSync(ISLAND_OFF);
 const CLAUDE = 'claude';
 
 const SHARED_FILES = ['settings.json', 'CLAUDE.md', 'keybindings.json'];
@@ -1525,10 +1529,12 @@ function notify(kind) {
 // a click find its terminal window; and for the pages and phones, the notes file, which lists the latest ones (trimmed to
 // its last 200 now and then). Then the island, made sure it runs.
 function dropNote(n, pid = null) {
-  fs.mkdirSync(INBOX, { recursive: true });
-  const f = path.join(INBOX, `${Date.now()}-${process.pid}`);
-  fs.writeFileSync(`${f}.tmp`, JSON.stringify({ ...n, pid }));
-  fs.renameSync(`${f}.tmp`, `${f}.json`);
+  if (!islandOff()) {
+    fs.mkdirSync(INBOX, { recursive: true });
+    const f = path.join(INBOX, `${Date.now()}-${process.pid}`);
+    fs.writeFileSync(`${f}.tmp`, JSON.stringify({ ...n, pid }));
+    fs.renameSync(`${f}.tmp`, `${f}.json`);
+  }
   fs.appendFileSync(NOTES, JSON.stringify({ at: Date.now(), ...n }) + '\n');
   try { if (fs.statSync(NOTES).size > 262144) fs.writeFileSync(NOTES, readNotes(200).reverse().map((x) => JSON.stringify(x)).join('\n') + '\n'); } catch {}
   island();
@@ -1537,6 +1543,7 @@ function dropNote(n, pid = null) {
 // chats [arrange|tokens]: opens the island's conversation window, its window-arranging board or its token
 // page, through the inbox.
 function chats(page) {
+  if (islandOff()) { console.log('灵动岛在网页的设置里关了，先在那里打开它'); return; }
   fs.mkdirSync(INBOX, { recursive: true });
   const f = path.join(INBOX, `${Date.now()}-${process.pid}`);
   fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'chats', arrange: page === 'arrange', tokens: page === 'tokens' }));
@@ -1548,6 +1555,7 @@ function chats(page) {
 // because node's own children die with node (libuv's job) and `detached` ones get no console, where
 // PowerShell quits at once; a grandchild started by Start-Process has neither problem.
 function island() {
+  if (islandOff()) return;
   // ponytail: a crashed island's pid reused by another process skips the start; the login shortcut recovers it
   try { process.kill(Number(fs.readFileSync(`${ISLAND}.pid`, 'utf8')), 0); return; } catch {} // already up: skip ~1.5 s
   spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '
@@ -2576,6 +2584,23 @@ async function web() {
       savePush(s);
       return { n: s.subs.length };
     },
+    // the island, from the page's settings: off closes it (the web service it started at login runs on its own) and
+    // clears its inbox; on starts it
+    'GET /api/island': () => ({ on: !islandOff() }),
+    'POST /api/island': (q, b) => {
+      if (b.on) { try { fs.unlinkSync(ISLAND_OFF); } catch {} island(); return { on: true }; }
+      fs.writeFileSync(ISLAND_OFF, '');
+      // the island's own process only: its pid file outlives it, and Windows hands the number on. The file goes too,
+      // or a reused number would later keep 「打开」 from starting it (island() takes it for running)
+      try {
+        const pid = Number(fs.readFileSync(`${ISLAND}.pid`, 'utf8'));
+        const cmd = spawnSync('powershell.exe', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`], { encoding: 'utf8', windowsHide: true }).stdout;
+        if (/island\.ps1/i.test(cmd)) process.kill(pid);
+      } catch {}
+      fs.rmSync(`${ISLAND}.pid`, { force: true });
+      try { for (const f of fs.readdirSync(INBOX)) fs.rmSync(path.join(INBOX, f), { force: true }); } catch {}
+      return { on: false };
+    },
     'POST /api/push/off': (q, b) => { const s = pushStore(); if (s) { s.subs = s.subs.filter((x) => x.endpoint !== b.endpoint); savePush(s); } return {}; },
     // the 管家 telling you something worth it, on the phone (Bark, or the pages' pushes), whatever page is in front
     'POST /api/tell': async (q, b) => {
@@ -3132,7 +3157,7 @@ if (require.main === module) {
     const list = listSessions(load()), pid = new Map(list.map((x) => [x.id, x.pid]));
     console.log(JSON.stringify(unreadNotes(list).map((n) => ({ ...n, pid: pid.get(n.id) ?? null }))));
   }
-  else if (cmd === 'island') island();
+  else if (cmd === 'island') { if (islandOff()) console.log('灵动岛在网页的设置里关了，先在那里打开它'); else island(); }
   else if (cmd === 'chats') chats(process.argv[3]);
   else if (cmd === 'resume') resume(process.argv[3], process.argv[4]);
   else if (cmd === 'swap') switchChat(process.argv[3], Number(process.argv[4]), process.argv.includes('--now'));
