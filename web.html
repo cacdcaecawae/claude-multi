@@ -496,7 +496,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .who { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--fg2); margin-top: 2px; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
   .who .took { font-weight: 400; color: var(--green); margin-left: 6px; }
   .who .spark { width: 16px; height: 16px; color: #d97757; }
-  .who .gm { width: 12px; height: 12px; margin: 0 2px; border-radius: 50%; background: var(--gpt); } /* a GPT one's replies */
+  .who .gm { width: 15px; height: 15px; color: var(--gpt); } .who .gm svg { display: block; width: 100%; height: 100%; } /* a GPT one's replies: OpenAI's mark */
   /* a turn: Claude's tool calls in a row folded into one line (tap to see each); the end of the answer marked */
   details.tools summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: var(--fg2);
     padding: 3px 10px 3px 4px; border-radius: 6px; background: var(--tint); }
@@ -2533,7 +2533,7 @@ function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies he
   for (const m of items) {
     // Claude's answer begins (its words or its first tool call right after your message): marked as Claude's
     if ((m.role === 'claude' || m.role === 'tool') && box.lastElementChild?.matches('.hm.user, .hm.img'))
-      box.insertAdjacentHTML('beforeend', gpt ? '<div class="who"><i class="gm"></i>GPT</div>' : `<div class="who">${SPARK}Claude</div>`);
+      box.insertAdjacentHTML('beforeend', gpt ? `<div class="who"><i class="gm">${OPENAI}</i>GPT</div>` : `<div class="who">${SPARK}Claude</div>`);
     // a message of yours on the line an earlier one hung on, nothing answering that one: it was stopped and taken back
     // (the record keeps it, Claude doesn't), so it goes (the service leaves such out of what it reads at once)
     const mark = m.u ? ` data-p="${esc(m.p)}" data-u="${esc(m.u)}"` : '';
