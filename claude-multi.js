@@ -909,6 +909,24 @@ const oaiRead = (id) => {
 const oaiSave = (c) => { fs.mkdirSync(OAI, { recursive: true }); const f = path.join(OAI, `${c.id}.json`); fs.writeFileSync(`${f}.tmp`, JSON.stringify(c)); fs.renameSync(`${f}.tmp`, f); };
 // ponytail: every chat's file read for each look at the list (every 5 s a page is open); a small index of them if there are hundreds
 const oaiChats = () => ls(OAI).filter((f) => /^oai-\d+\.json$/.test(f)).flatMap((f) => { try { return [JSON.parse(fs.readFileSync(path.join(OAI, f), 'utf8'))]; } catch { return []; } });
+// as the CLI lists them (the 管家's sessions --all, chat look / say): no folder, no account, none running (busy: an
+// answer pending at OpenAI)
+const oaiList = () => oaiChats().map((c) => ({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, oai: true, pid: null, busy: !!c.pending, who: 'GPT 聊天' }));
+const oaiLast = (c) => c.msgs.findLast((m) => m.role === 'claude')?.text ?? ''; // its last answer
+const oaiHow = (o) => `${o.mode === 'pro' ? 'Pro' : '普通'} · ${o.effort}`;
+// the 管家's message to one (s), or the first of a new one (s null): through the web service, as the page sends it (one
+// at a time in a chat: that lock is there), with the mode and effort asked for, else the chat's last, else 普通 · 中
+async function oaiSay(s, text, ask = {}) {
+  if (!text) throw new Error('要问什么？');
+  const c = s ? oaiRead(s.id) : null, opts = { ...OAI_OPTS, ...c?.opts };
+  for (const k of ['mode', 'effort']) if (ask[k]) opts[k] = ask[k];
+  if (!OAI_MODES.includes(opts.mode) || !OAI_EFFORTS.includes(opts.effort)) throw new Error(`--mode 是 ${OAI_MODES.join(' 或 ')}，--effort 是 ${OAI_EFFORTS.join('、')} 之一`);
+  if (c?.pending) throw new Error(`「${s.title}」还在回答上一条：它答完网页服务会告诉你，之后再发`);
+  const { id } = await webPost('/api/oai/send', { id: s?.id, text, ...opts }), cut = text.length > 40 ? text.slice(0, 40) + '…' : text;
+  blog(s ? `给「${s.title}」发了消息：${cut}` : `新开了对话（GPT 聊天）：${cut}`, id);
+  console.log(`${s ? `已发给「${s.title}」` : `已新开 GPT 聊天，编号 ${id}`}（${oaiHow(opts)}），它在想了：答完网页服务会告诉你。`);
+  return { id, title: s?.title ?? '' };
+}
 // a chat's messages as the page's 对话 view takes a record's: a picture by where it is (msg.file), a file as 附件：path
 function oaiItems(c) {
   return c.msgs.flatMap((m, i) => m.role !== 'user' ? [{ role: m.role, text: m.text, at: m.at }, ...(m.took ? [{ role: 'done', text: String(m.took) }] : [])]
@@ -1177,8 +1195,8 @@ const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLo
 const realDir = (d) => { try { return fs.realpathSync.native(path.resolve(d)); } catch { return path.resolve(d); } };
 const inLive = (d) => { const r = path.relative(realDir(__dirname), realDir(d)); return r === '' || (r !== '..' && !r.startsWith('..' + path.sep) && !path.isAbsolute(r)); };
 const LIVE_NO = `这是正在用的 claude-multi 代码，不能在这里改：在单独的副本（${__dirname}-dev 这类 git worktree）里新开对话，交代里写明建分支、发 PR`;
-function findChat(ref) { // a Claude conversation or a GPT one (gpt: true), by its id or words of its title
-  const reg = load(), all = [...listSessions(reg), ...listGpt(reg)], byId = all.find((s) => s.id === ref), hit = byId ? [byId] : all.filter((s) => ref && s.title.includes(ref));
+function findChat(ref) { // a Claude conversation, a GPT one (gpt: true) or a GPT 聊天 one (oai: true), by its id or words of its title
+  const reg = load(), all = [...listSessions(reg), ...listGpt(reg), ...oaiList()], byId = all.find((s) => s.id === ref), hit = byId ? [byId] : all.filter((s) => ref && s.title.includes(ref));
   if (hit.length === 1) return hit[0];
   if (!hit.length) throw new Error(`找不到「${ref ?? ''}」这个对话`);
   throw new Error(`「${ref}」对上了好几个对话，用编号指定：\n${hit.slice(0, 8).map((s) => `  ${s.id}  ${s.title}`).join('\n')}`);
@@ -1278,6 +1296,11 @@ async function gptWent(home, id, text) {
 }
 async function chatLook(ref) {
   const s = findChat(ref);
+  if (s.oai) { // a GPT 聊天 one: its mode and effort as last sent, its answer pending or not, its last answer (and what came after it)
+    const c = oaiRead(s.id), ans = oaiLast(c) || '（还没有回答）', end = c.msgs.at(-1)?.role === 'note' ? c.msgs.at(-1).text : '';
+    return console.log(`「${s.title}」 ${s.id}\nGPT 聊天 · ${oaiHow(c.opts ?? OAI_OPTS)} · ${c.pending ? `正在回答（已经 ${Math.max(1, Math.round((Date.now() - c.since) / 60000))} 分钟）` : '空闲'}`
+      + `\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}${end ? `\n\n（之后：${end}）` : ''}`);
+  }
   if (s.gpt) { // a GPT one: whether it runs in the web service (its Codex is nowhere else), its last answer from its records
     let run = null;
     try { run = await webPost(`/api/gpt?id=${encodeURIComponent(s.id)}`, null, 'GET'); } catch {}
@@ -1308,9 +1331,10 @@ async function chatWait(ref, until, note) {
     if (s) await chatLook(s.id);
   } finally { fs.rmSync(wf, { force: true }); }
 }
-async function chatSay(ref, text, before) {
+async function chatSay(ref, text, before, ask) { // ask: a GPT 聊天 one's mode and effort
   if (!text) throw new Error('要说什么？');
   const s = findChat(ref), t0 = Date.now();
+  if (s.oai) return oaiSay(s, text, ask);
   if (s.gpt) { // a GPT one: its Codex in the web service (continued there if it isn't), up, and done with its turn first
     const { key } = await webPost('/api/open', { id: s.id, gpt: true, cols: 120, rows: 40 });
     const stuck = codexBlocked(await screenRows(key, { max: 20000, still: 1500 }));
@@ -1350,6 +1374,7 @@ async function pickOn(id, n, ask, by = 'butler') {
 }
 async function chatPick(ref, n) {
   const s = findChat(ref);
+  if (s.oai) throw new Error('GPT 聊天不会问选择题');
   if (s.gpt) throw new Error('GPT 对话的选择题这里还选不了，请用户在网页上打开它回答');
   if (!s.pid) throw new Error('它现在没在问选择题');
   const label = await pickOn(s.id, n);
@@ -1402,13 +1427,15 @@ async function chatNew(dir, text, n, before, gpt = false) {
 async function chat([sub, ...a]) {
   const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a.splice(i, 2)[1] : undefined; }, flag = (k) => { const i = a.indexOf(k); return i >= 0 && a.splice(i, 1).length > 0; };
   try {
+    const ask = { mode: opt('--mode'), effort: opt('--effort') }; // a GPT 聊天 one's, for say and new --oai
     if (sub === 'look') await chatLook(a[0]);
     else if (sub === 'wait') { const until = opt('--until'), note = opt('--note'); await chatWait(a[0], until, note); }
-    else if (sub === 'say') await chatSay(a[0], a.slice(1).join(' '));
+    else if (sub === 'say') await chatSay(a[0], a.slice(1).join(' '), undefined, ask);
     else if (sub === 'pick') await chatPick(a[0], a[1]);
+    else if (sub === 'new' && flag('--oai')) await oaiSay(null, a.join(' '), ask); // a GPT 聊天 one: no folder, all of it the first words
     else if (sub === 'new') { const n = Number(String(opt('--acct') ?? '').replace(/^g/i, '')) || 0, gpt = flag('--gpt'); await chatNew(a[0], a.slice(1).join(' '), n, undefined, gpt); }
     else if (sub === 'tell') { if (!a.join(' ').trim()) throw new Error('要告诉用户什么？'); await webPost('/api/tell', { text: a.join(' ') }); console.log('已发到用户手机。'); }
-    else console.log('claude-multi chat look <对话> | wait [<对话>] --until 15:40 [--note 备注] | say <对话> <消息> | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N] [--gpt（GPT 对话，--acct 是 G 几）] | tell <要告诉用户的话>');
+    else console.log('claude-multi chat look <对话> | wait [<对话>] --until 15:40 [--note 备注] | say <对话> <消息> [--mode pro --effort max（GPT 聊天）] | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N] [--gpt（GPT 对话，--acct 是 G 几）] | new --oai <第一句话> [--mode standard|pro] [--effort low|medium|high|xhigh|max]（GPT 聊天） | tell <要告诉用户的话>');
   } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
 }
 // claude-multi ticket …: the 管家's tickets, which the web service keeps. give: to a new conversation (a folder given)
@@ -1432,8 +1459,9 @@ async function ticket([sub, ...a]) {
       const brief = `${text}\n\n（这是管家派的工单 #${t.id}「${t.name}」。用户的原话：${t.ask}${t.done ? `\n做到什么算完：${t.done}` : ''}${t.limits ? `\n约束：${t.limits}` : ''}`
         + `\n做完了、要用户决定、或者卡住了，用命令告诉管家（不用等它来问）：\n  claude-multi report ${no} 做完 <一句话结果>\n  claude-multi ask ${no} <要用户决定的问题>\n  claude-multi report ${no} 卡住 <原因>（失败、不用做 也这样报）`
         + '\n只是告一段落、下一步你自己清楚的，不用报告，停下就行，管家会让你接着做。）';
-      // not in the claude-multi in use: the conversation given to, by the folder it runs in
+      // not in the claude-multi in use: the conversation given to, by the folder it runs in; not a GPT 聊天 one (no folder)
       const dir = fs.existsSync(where) && fs.statSync(where).isDirectory();
+      if (!dir && findChat(where).oai) throw new Error('GPT 聊天只能问问题，不能在电脑上干活，不派工单：要问它就用 chat say');
       if (inLive(dir ? where : findChat(where).cwd)) throw new Error(LIVE_NO);
       const bind = (conv) => webPost('/api/ticket', { op: 'give', id: t.id, n: (t.n ?? 0) + 1, conv, title: dir ? path.basename(path.resolve(where)) : findChat(conv).title });
       const c = dir ? await chatNew(where, brief, n, bind, gpt) : await chatSay(where, brief, bind); // to a GPT one going already: it is one
@@ -2567,14 +2595,16 @@ async function web() {
     const k = `${n.id}|${n.at}`;
     if (!owners.has(k)) {
       let o = null;
-      try { o = /^oai-/.test(n.id ?? '') ? 'you' : ownerOf(n); } catch {}
+      try { o = ownerOf(n); } catch {}
       if (owners.size > 500) owners.clear();
       owners.set(k, o);
     }
     return owners.get(k);
   };
-  // (the 管家's own turn: 'notice' when the service set it going, a [系统通知] typed into it; else 'you')
+  // (the 管家's own turn: 'notice' when the service set it going, a [系统通知] typed into it; else 'you'. A GPT 聊天 one's:
+  // its last message of yours, against what the 管家 sent it)
   const ownerOf = (n) => {
+    if (/^oai-/.test(n.id ?? '')) { let c; try { c = oaiRead(n.id); } catch { return null; } return turnBy(c.msgs.findLast((m) => m.role === 'user')?.text, blogSent(n.id), n.at); }
     const s = sessions().find((x) => x.id === n.id), f = s?.file;
     if (!f) { const g = gptSessions().find((x) => x.id === n.id); return g ? turnBy(gptLast(g.home, g.id, 'userMessage'), blogSent(n.id), n.at) : null; }
     let tail;
@@ -2609,7 +2639,8 @@ async function web() {
     const fresh = notesUnseen(allNotes(), seenTo);
     if (!fresh.length) return;
     try {
-      const words = (id) => wordsOf(anyChat(id), 300), owner = new Map();
+      const oaiWords = (id) => { try { return gistText(oaiLast(oaiRead(id)), 300); } catch { return ''; } }; // a GPT 聊天 one's answer
+      const words = (id) => (/^oai-/.test(id) ? oaiWords(id) : wordsOf(anyChat(id), 300)), owner = new Map();
       const by = (n) => (owner.has(n) ? owner.get(n) : owner.set(n, ownerOf(n)).get(n)), open = readTickets().filter((t) => !t.end);
       if (fresh.some((n) => n.id && open.some((t) => t.conv === n.id))) // the tickets first, then the place
         for (const i of editTickets((all) => notesInto(all, fresh, words, (n) => by(n) === 'you'))) { toTell.add(i); tries.delete(i); } // news: its tries start again
@@ -3332,8 +3363,8 @@ if (require.main === module) {
     update((r) => { const p = r.profiles[n - 1]; if (v === 'auto') delete p.renewOn; else p.renewOn = `${m[1] ?? new Date().getFullYear()}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; });
     console.log(v === 'auto' ? `账号 ${n} 改回按订阅开始时间推算` : `已记下：账号 ${n} 每月 ${+m[3]} 号续费（取消续订的，这天到期）`);
   }
-  else if (cmd === 'sessions') { // --all: the GPT ones too (gpt: true, acct its G number from 0), for the 管家; the island's reads Claude's only
-    const reg = load(), all = process.argv.includes('--all') ? [...listSessions(reg), ...listGpt(reg).map(({ home, ...s }) => ({ ...s, who: `G${s.acct + 1}` }))].sort((a, b) => b.at - a.at) : listSessions(reg);
+  else if (cmd === 'sessions') { // --all: the GPT ones too (gpt: true, acct its G number from 0) and the GPT 聊天 ones (oai: true), for the 管家; the island's reads Claude's only
+    const reg = load(), all = process.argv.includes('--all') ? [...listSessions(reg), ...listGpt(reg).map(({ home, ...s }) => ({ ...s, who: `G${s.acct + 1}` })), ...oaiList()].sort((a, b) => b.at - a.at) : listSessions(reg);
     if (process.argv.includes('--json')) console.log(JSON.stringify(all));
     else for (const s of all) console.log(`${s.pid ? '●' : ' '} ${new Date(s.at).toLocaleString('zh-CN', { hour12: false })}  ${pad(s.who, 16)} ${s.id}  ${path.basename(s.cwd)} · ${s.title}`);
   }
