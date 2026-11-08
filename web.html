@@ -176,7 +176,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .dot.ask { background: rgba(229,160,58,.2); color: var(--orange); }
   /* a row waiting on you (orange) or answered and not looked at (green), as a tab marks it; on a folded folder too */
   .nd { width: 8px; height: 8px; flex: none; border-radius: 4px; background: var(--green); }
-  .nd.ask { background: var(--orange); }
+  .nd.ask { background: var(--orange); } .nd.red { background: var(--red); }
   details.dir > summary .nd { margin-left: auto; } details.dir[open] > summary .nd { display: none; }
   /* a folder's ＋: a new conversation there (on a computer when the mouse is over the folder) */
   details.dir > summary .fnew { width: 22px; height: 22px; margin-right: -6px; color: var(--fg3); } details.dir > summary .fnew svg { width: 14px; height: 14px; }
@@ -964,8 +964,20 @@ async function load(fresh) {
   for (const c of allConvs()) c.sync();
   bConv?.sync(); peek?.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
-  drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere();
+  drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere(); newNotes();
   return ''; // read: no error
+}
+// In 管家 mode the list and its dots are out of sight: one you set going that answers, or asks you something, while you
+// look at another says so here (the 管家's own turns don't: it tells you itself). What came before the page did, never.
+let notesSeen = null;
+function newNotes() {
+  const key = (n) => `${n.id}|${n.at}`, first = !notesSeen, shown = new Set(shownConvs().map((c) => c.id));
+  notesSeen ??= new Set();
+  const fresh = notesOut().filter((n) => !notesSeen.has(key(n)) && n.by !== 'butler' && !shown.has(n.id));
+  for (const n of state.notes ?? []) notesSeen.add(key(n));
+  if (first || !butler || !fresh.length) return;
+  const n = fresh[0], title = n.title || state.sessions.find((x) => x.id === n.id)?.title || n.project || '一个对话';
+  toast(`${fresh.length > 1 ? `${fresh.length} 个对话有新回复，` : ''}「${title}」${n.kind === 'ask' ? '在等你' : '答完了'}，${FINE ? '在右边「对话」里点开看' : '点上面的「操作台」看'}`, 6000);
 }
 function drawSide() {
   if (NARROW.matches && !allConvs().length) sideOn = true; // a phone with nothing open: the list
@@ -1358,7 +1370,7 @@ const head = (id, title, digest) => { $('#' + id).parentElement.querySelector('h
 function drawDesk() {
   if (!butler || !state) return;
   // the conversations running, and a GPT 聊天 one answering or answered (it runs nowhere: its answer is made at OpenAI)
-  const me = state.sessions.find(isButler), run = state.sessions.filter((x) => !isButler(x) && (x.pid || (x.oai && (x.busy || chatMark(x))))), pc = state.pc;
+  const me = state.sessions.find(isButler), run = state.sessions.filter((x) => !isButler(x) && (x.pid || (x.oai && (x.busy || chatMark(x) === 'done')))), pc = state.pc;
   const tickets = state.tickets ?? [], open = tickets.filter((x) => !x.end), nYou = open.filter((x) => x.stage[1] === 'you').length;
   // it runs: listed with its Claude, or its pane here has one (just started, no message yet, it isn't listed)
   const up = !!me?.pid || !!(bConv?.started && !bConv.ended), thinking = bConv?.live === 'busy' || !!me?.busy, acct = me?.pid ? me.acct + 1 : bConv?.acct;
@@ -1383,9 +1395,12 @@ function drawDesk() {
   $('#deskTodo').html = `${cards || loose ? cards + loose
     : '<div class="none">还没有任务。在下面交代一件，或者跟管家说「把层析理论稿推到能给导师看」「15:40 提醒我看额度」</div>'}
     ${tickets.filter((x) => x.end).slice(0, 3).map((x) => `<div class="doneL" title="${esc(x.stage[2])}"><b>${x.end.how === 'stop' ? '–' : '✓'}</b> #${x.id} ${esc(x.name)}${x.stage[2] ? '：' + esc(x.stage[2]) : ''}</div>`).join('')}`;
-  // each: waiting on you, answering, answered and not looked at yet (the list's green dot: gone once you open it), idle
-  const done = run.filter((x) => !x.wait && !x.busy && chatMark(x) === 'done'), idle = run.filter((x) => !x.wait && !x.busy && !done.includes(x));
-  const tag = (x) => (x.wait ? '<span class="pill o">等你</span>' : x.busy ? '<span class="pill g">在回复</span>' : done.includes(x) ? '<span class="pill b">答完了</span>' : '<span class="pill">空闲</span>');
+  // each: waiting on you, answering, answered and not looked at yet (a turn you set going: the 管家's are its to tell you;
+  // a red dot till you open it), idle
+  const yours = new Set(notesOut().filter((n) => n.kind === 'done' && n.by !== 'butler').map((n) => n.id));
+  const done = run.filter((x) => !x.wait && !x.busy && yours.has(x.id)), idle = run.filter((x) => !x.wait && !x.busy && !done.includes(x));
+  const tag = (x) => (x.wait ? '<span class="pill o">等你</span>' : x.busy ? '<span class="pill g">在回复</span>'
+    : done.includes(x) ? '<i class="nd red" title="你问的，答完了还没看"></i><span class="pill b">答完了</span>' : '<span class="pill">空闲</span>');
   const n = run.filter((x) => x.pid).length;
   head('deskRun', '对话', [wait.length && `${wait.length} 个等你`, done.length && `${done.length} 个答完了`, n && `${n} 个在运行`].filter(Boolean).join(' · ')); // what's for you first: the rest may be cut short
   $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span>

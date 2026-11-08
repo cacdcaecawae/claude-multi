@@ -2559,6 +2559,14 @@ async function web() {
   const wordsOf = (s, max) => (s?.gpt ? gistText(gptLast(s.home, s.id, 'agentMessage'), max) : lastWords(s?.file, max));
   // who set a conversation's latest turn going (turnBy), by its record (a GPT one's: its last message of yours)
   // (null when its record can't be read now, deleted since the list was read: the push timer asks outside its try)
+  // the same for the page, on each note it gets (by: the 管家's turns aren't marked as answered for you), kept once known:
+  // it doesn't change, and a record's tail is 4 MB to read
+  const owners = new Map();
+  const noteBy = (n) => {
+    const k = `${n.id}|${n.at}`;
+    if (!owners.has(k)) { const o = ownerOf(n); if (!o) return null; if (owners.size > 500) owners.clear(); owners.set(k, o); }
+    return owners.get(k);
+  };
   const ownerOf = (n) => {
     const f = sessions().find((x) => x.id === n.id)?.file;
     if (!f) { const g = gptSessions().find((x) => x.id === n.id); return g ? turnBy(gptLast(g.home, g.id, 'userMessage'), blogSent(n.id), n.at) : null; }
@@ -2686,7 +2694,7 @@ async function web() {
       for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
       list.sort((a, b) => b.at - a.at);
-      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow() };
     },
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)

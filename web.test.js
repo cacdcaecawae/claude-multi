@@ -114,14 +114,18 @@ const press = async (key, shift = false) => {
   assert.deepEqual(quick, ['keep task', 'next task']);
   console.log('browser session drafts and quick form ok');
 
-  // the 管家's 操作台: a running conversation answered and not looked at says 答完了 (counted apart from 空闲), till it's
-  // opened (its note read)
-  const desk = () => evaluate("[...document.querySelectorAll('#deskRun .counts span')].map(s=>s.textContent.trim()).join(' ') + ' | ' + [...document.querySelectorAll('#deskRun .item .pill')].map(p=>p.textContent).join(' ')");
-  await evaluate("state.notes=[{id:'A',kind:'done',at:Date.now(),title:'Test conversation'}]; butler=true; drawDesk()");
-  assert.equal(await desk(), '0等你 0在回复 1答完了 0空闲 | 答完了');
+  // the 管家's 操作台: a running conversation that answered a turn you set going, not looked at, says 答完了 with a red
+  // dot (counted apart from 空闲) till it's opened (its note read); answering the 管家's own turn, it stays 空闲. One of
+  // yours answering while you look at another (in 管家 mode the list is out of sight) says so in a notice
+  const desk = () => evaluate("[...document.querySelectorAll('#deskRun .counts span')].map(s=>s.textContent.trim()).join(' ') + ' | ' + [...document.querySelectorAll('#deskRun .item .pill')].map(p=>p.textContent).join(' ') + (document.querySelector('#deskRun .nd.red') ? ' •' : '')");
+  await evaluate("state.notes=[{id:'A',kind:'done',at:1,by:'butler'}]; butler=true; drawDesk()");
+  assert.equal(await desk(), '0等你 0在回复 0答完了 1空闲 | 空闲');
+  await evaluate("state.notes=[{id:'A',kind:'done',at:2,by:'you'}]; drawDesk(); notesSeen=new Set(); newNotes()");
+  assert.equal(await desk(), '0等你 0在回复 1答完了 0空闲 | 答完了 •');
+  assert.match(await evaluate("document.querySelector('#toast').textContent"), /^「Test conversation」答完了，在右边「对话」里点开看$/);
   await evaluate("readNote('A')");
   assert.equal(await desk(), '0等你 0在回复 0答完了 1空闲 | 空闲');
-  await evaluate('butler=false');
+  await evaluate("butler=false; document.querySelector('#toast').style.display='none'");
   console.log('browser 管家 desk 答完了 ok');
 
   // The settings dialog cycles focus, makes the background inert, and returns focus to its opener on Escape.
