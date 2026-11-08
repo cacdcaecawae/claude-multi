@@ -627,6 +627,28 @@ console.log('tokens ok');
   console.log('gpt chat ok');
 }
 
+// GPT 聊天 for the 管家, as commands in a ROOT of its own: listed by sessions --all (oai), read with chat look (its mode
+// and effort, its last answer, what came after it); a bad effort refused, a second message while it answers refused, no
+// questions to pick — all before the web service is asked (none runs here)
+{
+  const fs = require('fs'), path = require('path'), os = require('os'), { spawnSync } = require('child_process');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-home-')), dir = path.join(root, '.claude-multi', 'oai');
+  fs.mkdirSync(dir, { recursive: true });
+  const chat = (o) => fs.writeFileSync(path.join(dir, 'oai-1.json'), JSON.stringify({ id: 'oai-1', title: '量子纠缠', at: 2, resp: 'r1',
+    msgs: [{ role: 'user', text: '量子纠缠是什么', files: [], at: 1 }, { role: 'claude', text: '是一种关联。', at: 2 }, { role: 'note', text: '已停止，这一条不算进对话', at: 3 }], ...o }));
+  const cli = (...a) => spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), ...a], { env: { ...process.env, USERPROFILE: root, HOME: root }, encoding: 'utf8' }).stdout.trim();
+  chat({ opts: { mode: 'pro', effort: 'max' } });
+  assert.deepEqual(JSON.parse(cli('sessions', '--json', '--all')).filter((s) => s.oai).map((s) => [s.id, s.title, s.busy, s.who]), [['oai-1', '量子纠缠', false, 'GPT 聊天']]);
+  assert.equal(cli('chat', 'look', '量子'), '「量子纠缠」 oai-1\nGPT 聊天 · Pro · max · 空闲\n\n最后的回答：\n是一种关联。\n\n（之后：已停止，这一条不算进对话）');
+  assert.equal(cli('chat', 'say', 'oai-1', '再说说', '--effort', 'none'), '--mode 是 standard 或 pro，--effort 是 low、medium、high、xhigh、max 之一');
+  assert.equal(cli('chat', 'pick', 'oai-1', '1'), 'GPT 聊天不会问选择题');
+  chat({ pending: 'resp_x', since: Date.now() - 120000 });
+  assert.match(cli('chat', 'look', 'oai-1'), /^「量子纠缠」 oai-1\nGPT 聊天 · 普通 · medium · 正在回答（已经 2 分钟）/);
+  assert.equal(cli('chat', 'say', 'oai-1', '再说说'), '「量子纠缠」还在回答上一条：它答完网页服务会告诉你，之后再发');
+  fs.rmSync(root, { recursive: true, force: true });
+  console.log('gpt chat for the 管家 ok');
+}
+
 // A picture in a record: history() names it by its line's place in bytes and which picture it is, recordImage() gives
 // it back. A picture from the page is saved under a new name; ones older than a week go.
 {
