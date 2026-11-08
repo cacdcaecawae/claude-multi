@@ -302,7 +302,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .send .bset::after { content: ''; width: 5px; height: 5px; margin: -3px 0 0 2px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); opacity: .55; }
   .send .bset.open::after { transform: rotate(225deg); margin-top: 3px; }
   @media (hover: hover) { .send .bset:hover { background: var(--hover); } }
-  @media (max-width: 759px) { #butler .send .bar { flex-wrap: wrap; } #butler .send .bsel { order: 9; flex-basis: 100%; padding: 2px 0 2px 36px; } }
+  @media (max-width: 759px) { #butler .send .bar, .pane.oai .send .bar { flex-wrap: wrap; } #butler .send .bsel, .pane.oai .send .bsel { order: 9; flex-basis: 100%; padding: 2px 0 2px 36px; } }
   .bPop { position: absolute; bottom: calc(100% - 4px); width: 300px; padding: 6px 14px 14px; border-radius: 16px; background: var(--input); border: 1px solid var(--cardB); box-shadow: 0 12px 32px var(--shadow); z-index: 20; }
   .bPop .h { display: flex; justify-content: space-between; align-items: baseline; margin: 12px 2px 6px; font-size: 12px; font-weight: 600; color: var(--fg2); }
   .bPop .h b { font-size: 13px; color: var(--fgHi); } .bPop .h b small { font-weight: 400; color: var(--fg2); margin-left: 4px; }
@@ -1052,14 +1052,14 @@ function renderChats() {
           <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
       + sec('run', `<span>运行中<b class="count">${run.length}</b></span>`, run.length ? run.map(chatRow).join('') : '<div class="empty">没有在运行的对话</div>');
   } else {
-    const dirs = new Map(), pro = S.filter((x) => x.pro); // the GPT Pro chats, folder-less: a group of their own on top
-    for (const x of S) if (!x.pro) dirs.set(x.cwd, [...(dirs.get(x.cwd) ?? []), x]);
-    $('#view').html = kindBar + (pro.length ? sec('pro', `<i class="mk" style="color:var(--gpt)">${OPENAI}</i><span class="t">GPT Pro</span>${nd(pro.some((x) => chatMark(x) === 'ask') ? 'ask' : pro.some(chatMark) ? 'done' : '')}
-        <button class="ico fnew" data-newpro title="新的 GPT Pro 对话">${svg(I.plus)}</button>`, pro.map(line).join(''), 'dir') : '')
+    const dirs = new Map(), oai = S.filter((x) => x.oai); // the GPT 聊天 ones, folder-less: a group of their own on top
+    for (const x of S) if (!x.oai) dirs.set(x.cwd, [...(dirs.get(x.cwd) ?? []), x]);
+    $('#view').html = kindBar + (oai.length ? sec('oai', `<i class="mk" style="color:var(--gpt)">${OPENAI}</i><span class="t">GPT 聊天</span>${nd(oai.some((x) => chatMark(x) === 'ask') ? 'ask' : oai.some(chatMark) ? 'done' : '')}
+        <button class="ico fnew" data-newoai title="新的 GPT 聊天">${svg(I.plus)}</button>`, oai.map(line).join(''), 'dir') : '')
       + (dirs.size ? [...dirs].map(([cwd, list]) => sec('d:' + cwd,
       `<i class="fc">${svg(I.folder)}</i><i class="fo">${svg(I.folderOpen)}</i><span class="t" title="${esc(cwd)}">${esc(base(cwd) || cwd)}</span>${nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : '')}
         <button class="ico fnew" data-newin="${esc(cwd)}" title="在这里开新对话（用推荐的账号）">${svg(I.plus)}</button>`,
-      list.map(line).join(''), 'dir')).join('') : pro.length ? '' : '<div class="empty">还没有对话</div>');
+      list.map(line).join(''), 'dir')).join('') : oai.length ? '' : '<div class="empty">还没有对话</div>');
   }
   markRows();
 }
@@ -1071,8 +1071,8 @@ function rowMenu(id, x, y) {
   if (!s || (NARROW.matches && Date.now() - menuAt < 1000)) return; // held on Android: its own contextmenu and the hold both
   menuFor = s; menuAt = Date.now();
   // a GPT one: not renamed nor moved to another account here; deleted is archived (Codex's own, undone with codex unarchive).
-  // A GPT Pro chat: renamed and deleted here, at any time (an answer on its way is stopped)
-  const items = (s.pro ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
+  // A GPT 聊天 one: renamed and deleted here, at any time (an answer on its way is stopped)
+  const items = (s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
     ['del', '归档…', s.pid && '正在运行：先结束对话再归档']] : [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
     ['swap', '换账号继续…'], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean)
     .map(([k, l, off]) => `<button data-m="${k}"${off ? ' disabled' : ''}>${l}${off ? `<small>${esc(off)}</small>` : ''}</button>`).join('');
@@ -1091,12 +1091,12 @@ async function menuPick(e) {
   if (k === 'rename') {
     const name = prompt('新名字', s.title)?.trim();
     if (!name || name === s.title) return;
-    try { toast((await post('/api/rename', { id: s.id, name, pro: s.pro })).said); } catch (er) { toast(er.message, 4000); }
+    try { toast((await post('/api/rename', { id: s.id, name, oai: s.oai })).said); } catch (er) { toast(er.message, 4000); }
   } else if (k === 'del') {
-    if (!confirm(s.gpt && !s.pro ? `归档「${s.title}」？\n归档后不在列表里显示，在 Codex 里用 codex unarchive 能找回。`
-      : `删除「${s.title}」？\n${s.pro && s.busy ? '正在回答的那一条会停下。' : ''}对话记录会移到电脑的回收站，可以找回。`)) return;
+    if (!confirm(s.gpt && !s.oai ? `归档「${s.title}」？\n归档后不在列表里显示，在 Codex 里用 codex unarchive 能找回。`
+      : `删除「${s.title}」？\n${s.oai && s.busy ? '正在回答的那一条会停下。' : ''}对话记录会移到电脑的回收站，可以找回。`)) return;
     try {
-      toast((await post('/api/delete', { id: s.id, gpt: s.gpt, pro: s.pro })).said);
+      toast((await post('/api/delete', { id: s.id, gpt: s.gpt, oai: s.oai })).said);
       const c = convOf(s.id); if (c) closeConv(c);
       try { localStorage.removeItem('cm-draft:' + s.id); } catch {}
     } catch (er) { toast(er.message, 4000); }
@@ -1141,7 +1141,7 @@ $('#side').onclick = (e) => {
     e.preventDefault();
     return addConv(focusG, makeConv({ dir: b.dataset.newin, acct: (state.usage.rec ?? 0) + 1 }, base(b.dataset.newin) || '新对话'));
   }
-  if (b.matches('[data-newpro]')) { e.preventDefault(); return addConv(focusG, makePro(null, '新对话')); }
+  if (b.matches('[data-newoai]')) { e.preventDefault(); return addConv(focusG, makeOai(null, '新对话')); }
   if (b.matches('[data-bell]')) { listMode = listMode === 'run' ? 'dirs' : 'run'; save(); return renderChats(); }
   if (b.matches('[data-refresh]')) {
     if (side === 'usage') return refreshUsage();
@@ -1276,6 +1276,29 @@ async function setButlerModel(m) { await post('/api/butler-model', { model: m })
 // its thinking effort (Claude Code's levels); Claude's own when none is set: xhigh
 const EFFORTS = [['low', '低', '最快最省'], ['medium', '中', ''], ['high', '高', ''], ['xhigh', '很高', 'Claude 默认'], ['max', '最高', '最慢，额度用得最多']];
 const effortOf = (me) => state?.butlerEffort ?? me?.line?.effort ?? 'xhigh', effortName = (v) => EFFORTS.find(([k]) => k === v)?.[1] ?? v;
+// A card over the button by an input box (the 管家's account, model and effort; a GPT 聊天's mode and effort): gone on a
+// press outside it, or that button pressed again (null then). place() once it's drawn: over its button, kept inside the
+// box (on a phone the button is at the left)
+function popOver(btn) {
+  const send = btn.closest('.send'), was = send.querySelector('.bPop');
+  if (was) { was.close(); return null; }
+  send.insertAdjacentHTML('beforeend', '<div class="bPop"></div>');
+  const pop = send.querySelector('.bPop');
+  const off = (e) => { if (!pop.contains(e.target) && !btn.contains(e.target)) close(); };
+  const close = () => { pop.remove(); btn.classList.remove('open'); document.removeEventListener('pointerdown', off, true); };
+  document.addEventListener('pointerdown', off, true); pop.close = close; btn.classList.add('open');
+  pop.place = () => { pop.style.right = `${Math.max(8, Math.min(send.clientWidth - pop.offsetWidth - 8, send.getBoundingClientRect().right - btn.getBoundingClientRect().right))}px`; };
+  return pop;
+}
+// its 思考强度 slider: the markup (list: [value, name, note]), then wired once in the card, the name over it as it moves
+// and done(value, name) where it's let go
+const effortRow = (list, v) => `<div class="h">思考强度<b></b></div><div class="track">${'<i></i>'.repeat(list.length)}<input type="range" min="0" max="${list.length - 1}" step="1" value="${Math.max(0, list.findIndex(([k]) => k === v))}" aria-label="思考强度"></div>
+  <div class="ticks"><span>快、省</span><span>想得深</span></div>`;
+function effortSlide(pop, list, done) {
+  const r = pop.querySelector('input[type=range]');
+  const show = () => { const [, l, sub] = list[r.value]; pop.querySelector('.h b').innerHTML = `${l}${sub ? `<small>${sub}</small>` : ''}`; pop.style.setProperty('--f', r.value / (list.length - 1)); };
+  show(); r.oninput = show; r.onchange = () => done(...list[r.value]);
+}
 async function setButlerEffort(v) { await post('/api/butler-model', { effort: v }); state.butlerEffort = v; }
 // A question on a card: its header, the question, its options as buttons (a number badge, or a multi-select's box), each
 // one's description under it; Claude's own two last ones (write in, chat about it) in our words, quieter.
@@ -1559,27 +1582,31 @@ async function renderTokens() {
 function newSheet() {
   if (!state) return toast('还在加载，稍等');
   const u = state.usage, dirs = u.projects ?? [], gp = state.gpt ?? [];
-  let kind = '', acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? ''; // with a GPT account: Claude or GPT ('1'), its accounts then
-  // and with an OpenAI key: GPT Pro ('pro'), a chat with neither account nor folder
-  const kinds = [['', 'Claude'], gp.length && ['1', 'GPT'], state.pro && ['pro', 'GPT Pro']].filter(Boolean);
+  // with a GPT account or an OpenAI key: Claude or GPT; under GPT, Codex (its accounts) or 聊天 (with the key: neither
+  // account nor folder), whichever there are
+  let gptOn = false, chat = !gp.length, acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? '';
   const draw = () => {
-    const gpt = kind === '1', pro = kind === 'pro', accts = gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
+    const gpt = gptOn && !chat, oai = gptOn && chat, accts = gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
       : u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
         账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`);
     $('#sheetIn').innerHTML = `<div class="stitle">新对话</div>
-      ${kinds.length > 1 ? `<div class="seg kind">${kinds.map(([v, l]) => `<button data-g="${v}"${v === kind ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : ''}
-      ${pro ? `<div class="m" style="margin-top:12px;white-space:normal">和 GPT-6 Pro 聊天：GPT-6 Astra 的 pro 模式，思考强度 max，能联网、看图片和文件。
-        用你的 OpenAI key 按用量计费，难的问题一次要想几分钟，答好了会通知你。</div>`
+      ${gp.length || state.oai ? `<div class="seg kind">${[['', 'Claude'], ['1', 'GPT']].map(([v, l]) => `<button data-g="${v}"${!!v === gptOn ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : ''}
+      ${gptOn && gp.length && state.oai ? `<div class="opts" style="margin-top:12px">${[['', 'Codex：在文件夹里写代码'], ['1', '聊天：用 API key，按量计费']]
+        .map(([v, l]) => `<button class="opt ${!!v === chat ? 'on' : ''}" data-chat="${v}">${l}</button>`).join('')}</div>` : ''}
+      ${oai ? `<div class="m" style="margin-top:12px;white-space:normal">直接和 GPT-6 Astra 聊天，能联网、看图片和文件。输入框旁边可以选模式（普通，或 ChatGPT 的 GPT-6 Pro 那种 Pro）和思考强度。
+        用你的 OpenAI key 按用量计费，Pro 难的问题一次要想几分钟，答好了会通知你。</div>`
       : `<div class="m" style="margin-top:12px">账号</div><div class="opts">${accts.join('')}</div>
       <div class="m">文件夹</div><div class="opts">${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
       <input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径">`}
       <div class="btns" style="margin-top:14px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="start" style="flex:2">开始</button></div>`;
-    document.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { kind = b.dataset.g; acct = kind === '1' ? 1 : (u.rec ?? 0) + 1; draw(); }));
+    const kindTo = () => { acct = gptOn && !chat ? 1 : (u.rec ?? 0) + 1; draw(); }; // the first account of the kind picked
+    document.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { gptOn = !!b.dataset.g; kindTo(); }));
+    document.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => { chat = !!b.dataset.chat; kindTo(); }));
     document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
     document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { dir = b.dataset.d; draw(); }));
-    if (!pro) $('#dirIn').oninput = (e) => (dir = e.target.value.trim());
+    if (!oai) $('#dirIn').oninput = (e) => (dir = e.target.value.trim());
     $('#cancel').onclick = sheetOff;
-    $('#start').onclick = () => { sheetOff(); addConv(focusG, pro ? makePro(null, '新对话') : makeConv({ dir, acct, gpt }, base(dir) || '新对话')); };
+    $('#start').onclick = () => { sheetOff(); addConv(focusG, oai ? makeOai(null, '新对话') : makeConv({ dir, acct, gpt }, base(dir) || '新对话')); };
   };
   draw(); $('#sheet').classList.add('on');
 }
@@ -1780,10 +1807,10 @@ async function openSession(id, where) {
   const s = state?.sessions.find((x) => x.id === id), have = convOf(id);
   if (s && s === state.sessions.find(isButler)) return butler ? unpeek() : setButler(true); // the 管家 itself: its mode, not a second pane of it
   if (!s) return toast('这个对话已经不在列表里了');
-  if (butler) { const acct = s.pid || s.pro ? s.acct + 1 : await pickAcct(s); if (acct || s.pro) peekAt(s, acct); return; } // in 管家 mode it stays: the conversation in the 管家's place
+  if (butler) { const acct = s.pid || s.oai ? s.acct + 1 : await pickAcct(s); if (acct || s.oai) peekAt(s, acct); return; } // in 管家 mode it stays: the conversation in the 管家's place
   if (have) return where && where !== 'aside' && where !== have.g ? moveConv(have, where) : activate(have.g, have); // open already: that tab
-  const acct = s.pid || s.pro ? s.acct + 1 : await pickAcct(s); // a running one stays where it runs (a GPT Pro chat has no account)
-  if ((!acct && !s.pro) || convOf(id)) return;
+  const acct = s.pid || s.oai ? s.acct + 1 : await pickAcct(s); // a running one stays where it runs (a GPT 聊天 one has no account)
+  if ((!acct && !s.oai) || convOf(id)) return;
   const g = where === 'aside' ? sideGroup() : where ?? focusG;
   if (groups.includes(g)) addConv(g, convFor(s, acct));
 }
@@ -1822,8 +1849,8 @@ const KEYS = [['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z'], ['↑', '\x1
 // the box you write in, under a conversation
 const SEND_BOX = () => `<div class="send"><button class="toEnd" hidden></button><div class="box"><div class="atts"></div><div class="bar"><button class="ico pic" title="发图片或文件（也可以粘贴、拖进来）">${svg(I.clip)}</button><input type="file" multiple hidden>
       <textarea placeholder="${FINE ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入消息'}" enterkeyhint="send" rows="1"></textarea><button class="btn primary go" title="发送">${svg(I.send, 2)}</button></div></div></div>`;
-// a listed conversation's pane: a GPT Pro chat's, or one with a terminal behind it
-const convFor = (s, acct) => (s.pro ? makePro(s.id, s.title) : makeConv({ id: s.id, acct, gpt: s.gpt }, s.title));
+// a listed conversation's pane: a GPT 聊天 one's, or one with a terminal behind it
+const convFor = (s, acct) => (s.oai ? makeOai(s.id, s.title) : makeConv({ id: s.id, acct, gpt: s.gpt }, s.title));
 // body: {id, acct?} continues one, {dir, acct} starts one, {id} alone (a tab back after a reload) only attaches to it
 // if it runs. started: /api/open asked; ended: its Claude is gone (or couldn't start).
 function makeConv(body, title) {
@@ -2238,42 +2265,29 @@ function makeConv(body, title) {
   // its account, model and thinking effort: a card over the one button by its input box (as a chat app has them). Model
   // and effort set at once; an account goes as 换账号 does (one that hasn't spoken yet: ended, started on it)
   function bset(btn) {
-    const was = $p('.bPop');
-    if (was) return was.close();
-    const send = btn.closest('.send'), me = state?.sessions.find(isButler), accts = state?.usage?.accounts ?? [];
-    send.insertAdjacentHTML('beforeend', '<div class="bPop"></div>');
-    const pop = $p('.bPop');
-    const off = (e) => { if (!pop.contains(e.target) && !btn.contains(e.target)) close(); };
-    const close = () => { pop.remove(); btn.classList.remove('open'); document.removeEventListener('pointerdown', off, true); };
-    document.addEventListener('pointerdown', off, true); pop.close = close; btn.classList.add('open');
+    const pop = popOver(btn);
+    if (!pop) return;
+    const me = state?.sessions.find(isButler), accts = state?.usage?.accounts ?? [];
     const draw = () => {
       const cur = c.acct ?? (me ? me.acct + 1 : 0), m = state?.butlerModel ?? MODELS.find(([, l]) => (me?.line?.model ?? '').startsWith(l))?.[0];
-      const e = Math.max(0, EFFORTS.findIndex(([v]) => v === effortOf(me)));
       pop.innerHTML = `<div class="h">账号</div><div class="seg">${accts.map((a, i) => `<button class="${i + 1 === cur ? 'on' : ''}" data-ba="${i + 1}">账号 ${i + 1}<small>${a.err ? '读不到' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满'}${state.usage.rec === i ? ' · 推荐' : ''}</small></button>`).join('')}</div>
         <div class="h">模型</div><div class="seg">${MODELS.map(([v, l, sub]) => `<button class="${v === m ? 'on' : ''}" data-bm="${v}" title="${esc(sub)}">${l}</button>`).join('')}</div>
-        <div class="h">思考强度<b></b></div><div class="track">${'<i></i>'.repeat(EFFORTS.length)}<input type="range" min="0" max="${EFFORTS.length - 1}" step="1" value="${e}" aria-label="思考强度"></div>
-        <div class="ticks"><span>快、省</span><span>想得深</span></div>`;
-      const r = pop.querySelector('input');
-      const show = () => { const [, l, sub] = EFFORTS[r.value]; pop.querySelector('.h b').innerHTML = `${l}${sub ? `<small>${sub}</small>` : ''}`; pop.style.setProperty('--f', r.value / (EFFORTS.length - 1)); };
-      show(); r.oninput = show;
-      r.onchange = async () => {
-        const [v, l] = EFFORTS[r.value];
+        ${effortRow(EFFORTS, effortOf(me))}`;
+      effortSlide(pop, EFFORTS, async (v, l) => {
         try { await setButlerEffort(v); } catch (er) { return toast(er.message); }
         drawDesk(); tellNow('/effort ' + v, `「${l}」思考强度`);
-      };
+      });
     };
     pop.onclick = async (ev) => {
       const b = ev.target.closest('button');
-      if (b?.dataset.ba) { const n = +b.dataset.ba; if (n === (c.acct ?? 0)) return; close(); return c.id && state?.sessions.some((x) => x.id === c.id) ? swap(n) : restartOn(n); }
+      if (b?.dataset.ba) { const n = +b.dataset.ba; if (n === (c.acct ?? 0)) return; pop.close(); return c.id && state?.sessions.some((x) => x.id === c.id) ? swap(n) : restartOn(n); }
       if (b?.dataset.bm) {
         const v = b.dataset.bm;
         try { await setButlerModel(v); } catch (er) { return toast(er.message); }
         drawDesk(); draw(); tellNow('/model ' + v, ` ${modelName(v)} `);
       }
     };
-    draw();
-    // over its button, kept inside the box (on a phone the button is at the left)
-    pop.style.right = `${Math.max(8, Math.min(send.clientWidth - pop.offsetWidth - 8, send.getBoundingClientRect().right - btn.getBoundingClientRect().right))}px`;
+    draw(); pop.place();
   }
   async function endIt() {
     if (!key || c.ended || !confirm('结束这个对话？\n和在终端里按 Ctrl+C 一样，Claude 会退出，电脑上它的窗口也会关掉。对话记录会保留，之后可以从列表里接着聊。')) return;
@@ -2509,18 +2523,38 @@ function makeConv(body, title) {
   c.tick = () => { if (stale(45000)) connect(true); };
   return c;
 }
-// A GPT Pro chat (OpenAI's API with your key, no terminal behind it): its messages from /api/pro every 2 s while shown,
-// drawn as a record's are; one sent with /api/pro/send, its pictures and files uploaded first. The answer is made at
-// OpenAI (minutes for a hard one, the page there or not): 正在思考 meanwhile, 停止 cancels it. id null: a new chat, its
-// id from its first message.
-function makePro(id, title) {
-  const c = { id, title, acct: null, gpt: true, pro: true, g: null, started: false, ended: false, closed: false, live: '' };
+// A GPT 聊天 one (OpenAI's API with your key, no terminal behind it): its messages from /api/oai every 2 s while shown,
+// drawn as a record's are; one sent with /api/oai/send, its pictures and files uploaded first, with the mode and effort
+// on the button by the box (as the 管家's). The answer is made at OpenAI (minutes for a hard one, the page there or not):
+// 正在思考 meanwhile, 停止 cancels it. id null: a new chat, its id from its first message.
+const OAI_EFFORTS = EFFORTS.map(([v, l]) => [v, l, { low: '最快最省', medium: '默认', max: '最慢最贵' }[v] ?? '']);
+const OAI_MODES = [['standard', '普通', '快，按量计费'], ['pro', 'Pro', 'ChatGPT 的 GPT-6 Pro：更慢，token 多用几倍']];
+const oaiName = (o) => `${OAI_MODES.find(([v]) => v === o.mode)?.[1] ?? o.mode} · ${effortName(o.effort)}`;
+function makeOai(id, title) {
+  const c = { id, title, acct: null, gpt: true, oai: true, g: null, started: false, ended: false, closed: false, live: '' };
   const el = c.el = document.createElement('div');
-  el.className = 'pane hist';
+  el.className = 'pane hist oai';
   el.innerHTML = `<div class="crumbs"><span class="path"></span></div>
     <div class="msgs"><div class="col"><div class="hTop hm note"></div><div class="hNew"></div><div class="live"></div></div></div>${SEND_BOX()}`;
   const $p = (s) => el.querySelector(s), hist = $p('.msgs'), line = $p('.send textarea'), go = $p('.go'), attsEl = $p('.atts'), pick = $p('input[type=file]');
   let shown = false, timer = null, drawn = '', busy = false, since = 0, sending = false, atts = [];
+  // its mode and effort: the chat's own (as last sent) once read, unless picked here first; a new one's, as last picked
+  // in this browser
+  let opts = { mode: 'standard', effort: 'medium' }, picked = !c.id;
+  try { opts = { ...opts, ...JSON.parse(localStorage.getItem('cm-oai')) }; } catch {}
+  go.insertAdjacentHTML('beforebegin', '<div class="bsel"><button class="bset" data-oset title="模式、思考强度"></button></div>');
+  const drawOpts = () => { $p('.bset').innerHTML = `<span>${esc(oaiName(opts))}</span>`; };
+  const pickOpts = (o) => { opts = { ...opts, ...o }; picked = true; try { localStorage.setItem('cm-oai', JSON.stringify(opts)); } catch {} drawOpts(); };
+  function oset(btn) {
+    const pop = popOver(btn);
+    if (!pop) return;
+    pop.innerHTML = `<div class="h">模式</div><div class="seg">${OAI_MODES.map(([v, l, sub]) => `<button class="${v === opts.mode ? 'on' : ''}" data-om="${v}">${l}<small>${sub}</small></button>`).join('')}</div>
+      ${effortRow(OAI_EFFORTS, opts.effort)}`;
+    effortSlide(pop, OAI_EFFORTS, (v) => pickOpts({ effort: v }));
+    pop.onclick = (e) => { const b = e.target.closest('[data-om]'); if (b) { pickOpts({ mode: b.dataset.om }); pop.querySelectorAll('[data-om]').forEach((x) => x.classList.toggle('on', x === b)); } };
+    pop.place();
+  }
+  drawOpts();
   function goMode() { // 停止 while it answers and nothing is written
     const stop = busy && !sending && !line.value.trim() && !atts.length, m = stop ? 'stop' : 'send';
     if (go.dataset.m !== m) { go.dataset.m = m; go.innerHTML = svg(I[m], 2); }
@@ -2549,22 +2583,27 @@ function makePro(id, title) {
   $p('.pic').onclick = () => pick.click();
   pick.onchange = () => { c.attach([...pick.files]); pick.value = ''; };
   line.addEventListener('paste', (e) => { const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); c.attach(fs); } });
-  el.addEventListener('click', (e) => { const b = e.target.closest('[data-unatt]'); if (b) { atts.splice(+b.dataset.unatt, 1); drawAtts(); } });
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-unatt], [data-oset]');
+    if (b?.dataset.unatt) { atts.splice(+b.dataset.unatt, 1); drawAtts(); } else if (b) oset(b);
+  });
 
+  let sentWith = opts; // what the answer on its way was asked with
   async function look() { // drawn again only when something changed; kept at the end if you were there
     if (!c.id) return void ($p('.hTop').textContent = '还没有消息，在下面发一条开始');
     let r;
-    try { r = await (await fetch(`/api/pro?id=${encodeURIComponent(c.id)}`)).json(); } catch { return; }
+    try { r = await (await fetch(`/api/oai?id=${encodeURIComponent(c.id)}`)).json(); } catch { return; }
     if (r.err) return void ($p('.hTop').textContent = r.err);
     const end = hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80, now = JSON.stringify(r.items);
-    busy = r.busy; since = r.since ?? since; goMode();
+    busy = r.busy; since = r.since ?? since; sentWith = r.opts; goMode();
+    if (!picked) { picked = true; opts = r.opts; drawOpts(); }
     if (now !== drawn) {
       drawn = now;
-      for (const m of r.items) { if (m.role === 'img') m.src = `/api/pro/file?id=${encodeURIComponent(c.id)}&ref=${m.text}`; if (m.role === 'user') m.text = shownText(m.text); }
+      for (const m of r.items) { if (m.role === 'img') m.src = `/api/oai/file?id=${encodeURIComponent(c.id)}&ref=${m.text}`; if (m.role === 'user') m.text = shownText(m.text); }
       const box = $p('.hNew'); box.innerHTML = ''; box.$at = 0; addItems(box, r.items, true);
       $p('.hTop').textContent = r.items.length ? '对话开头' : '还没有消息，在下面发一条开始';
     }
-    if (!sending) $p('.live').innerHTML = busy ? `<div class="busy"><i></i>GPT Pro 正在思考 · ${dur(Date.now() - since)}</div>` : '';
+    if (!sending) $p('.live').innerHTML = busy ? `<div class="busy"><i></i>GPT 正在思考（${esc(oaiName(sentWith))}）· ${dur(Date.now() - since)}</div>` : '';
     if (end) hist.scrollTop = hist.scrollHeight;
   }
   // a message: off the box at once (shown as on its way), back in it with its pictures and files if it couldn't go
@@ -2572,16 +2611,16 @@ function makePro(id, title) {
     const v = (text ?? line.value).trim(), files = text == null ? atts : [];
     if (!v && !files.length) return false;
     if (sending) { toast('上一条还在发，稍等一下'); return false; }
-    if (busy) { toast('Pro 还在回答上一条，答完再发（也可以先停止）', 4000); return false; }
+    if (busy) { toast('GPT 还在回答上一条，答完再发（也可以先停止）', 4000); return false; }
     sending = true;
     if (text == null) { line.value = ''; atts = []; grow(); drawAtts(); }
     $p('.live').innerHTML = files.filter((a) => !a.file).map((a) => `<div class="hm img pending"><img src="${a.url}" alt=""></div>`).join('')
       + files.filter((a) => a.file).map((a) => `<div class="hm user pending">📎 ${esc(a.name)}</div>`).join('') + (v ? `<div class="hm user pending">${esc(v)}</div>` : '');
     hist.scrollTop = hist.scrollHeight;
     try {
-      const r = await post('/api/pro/send', { id: c.id, text: v, paths: await Promise.all(files.map((a) => a.up)) });
+      const r = await post('/api/oai/send', { id: c.id, text: v, paths: await Promise.all(files.map((a) => a.up)), ...opts });
       if (!c.id) { c.id = r.id; c.title = (v.split('\n')[0] || '新对话').slice(0, 40); save(); markRows(); if (c.g) drawTabs(c.g); }
-      busy = true; since = Date.now(); sending = false;
+      busy = true; since = Date.now(); sentWith = opts; sending = false;
       await look(); load(); // the list and the tab: it's answering
       return true;
     } catch (e) {
@@ -2591,13 +2630,13 @@ function makePro(id, title) {
       return false;
     } finally { sending = false; goMode(); }
   }
-  async function stop() { try { await post('/api/pro/stop', { id: c.id }); } catch (e) { toast(e.message, 4000); } await look(); load(); }
+  async function stop() { try { await post('/api/oai/stop', { id: c.id }); } catch (e) { toast(e.message, 4000); } await look(); load(); }
   go.onclick = () => (go.classList.contains('stop') ? stop() : send());
 
   c.sync = () => {
     const s = c.id && state?.sessions.find((x) => x.id === c.id);
     if (s) c.title = s.title;
-    $p('.path').innerHTML = '<b>GPT Pro</b> <span class="dim">· 用你的 OpenAI key，按用量计费</span>';
+    $p('.path').innerHTML = '<b>GPT 聊天</b> <span class="dim">· 用你的 OpenAI key，按用量计费</span>';
   };
   c.wake = () => {
     shown = true; el.classList.add('on'); readNote(c.id); c.sync(); goMode(); look();
@@ -2606,7 +2645,7 @@ function makePro(id, title) {
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(timer); readNote(c.id); };
   c.close = () => { c.closed = true; c.sleep(); el.remove(); };
   c.say = (t) => send(t);
-  c.swap = () => toast('GPT Pro 对话不用换账号');
+  c.swap = () => toast('GPT 聊天不用换账号');
   c.where = () => null; c.focus = () => line.focus({ preventScroll: true }); c.back = () => { if (shown) look(); }; c.tick = c.claim = () => {};
   return c;
 }
