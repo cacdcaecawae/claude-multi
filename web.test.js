@@ -126,6 +126,15 @@ const press = async (key, shift = false) => {
   await evaluate("readNote('A')");
   assert.equal(await desk(), '0等你 0在回复 0答完了 1空闲 | 空闲');
   await evaluate("butler=false; document.querySelector('#toast').style.display='none'");
+  // the 管家's own answer to you, its pane out of sight: a red dot on its icon and a notice; to a [系统通知], nothing
+  const bdot = () => evaluate("[document.querySelector('#act .logo').classList.contains('new'), document.querySelector('#toast').style.display === 'block' ? document.querySelector('#toast').textContent : '']");
+  await evaluate("state.butler='C:/b'; state.sessions.push({id:'M',title:'x',acct:0,cwd:'C:/b',at:1,pid:5}); state.notes=[{id:'M',kind:'done',at:3,by:'notice'}]; newNotes()");
+  assert.deepEqual(await bdot(), [false, '']);
+  await evaluate("state.notes=[{id:'M',kind:'done',at:4,by:'you'}]; newNotes()");
+  assert.deepEqual(await bdot(), [true, '管家答完了，进入管家看']);
+  await evaluate("readNote('M')");
+  assert.equal((await bdot())[0], false);
+  await evaluate("state.sessions.pop(); state.butler=null; document.querySelector('#toast').style.display='none'");
   console.log('browser 管家 desk 答完了 ok');
 
   // The settings dialog cycles focus, makes the background inert, and returns focus to its opener on Escape.

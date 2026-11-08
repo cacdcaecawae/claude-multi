@@ -69,6 +69,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* held to go in or out: a ring fills round the spark (let go early and it empties) */
   #act .logo { touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
   #act .logo .sp { position: relative; display: grid; place-items: center; }
+  /* the 管家 answered you (or asks you), its pane out of sight: a red dot on its icon, and on 「← 回到管家」 */
+  #act .logo.new .sp::after, #peekBar .back.new::after { content: ''; position: absolute; top: -3px; right: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
   #act .logo .ring { position: absolute; left: -8px; top: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; overflow: visible; }
   #act .logo .ring circle { fill: none; stroke: #d97757; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: 100; opacity: 0; }
   #act .logo.hold .ring circle { opacity: 1; animation: holdRing .8s linear forwards; }
@@ -412,7 +414,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #peekBar { display: none; flex: none; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
   #butler.peeking #peekBar { display: flex; }
   #butler.peeking #asks, #butler.peeking > .hint { display: none !important; }
-  #peekBar .back { flex: none; padding: 3px 10px; border-radius: 6px; background: var(--btn); color: var(--fgHi); }
+  #peekBar .back { position: relative; flex: none; padding: 3px 10px; border-radius: 6px; background: var(--btn); color: var(--fgHi); }
   #peekBar .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg2); }
   @media (hover: hover) { #peekBar .back:hover { background: var(--btnH); } }
   /* the others' questions, above it: answered here, or opened */
@@ -967,17 +969,29 @@ async function load(fresh) {
   drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere(); newNotes();
   return ''; // read: no error
 }
-// In 管家 mode the list and its dots are out of sight: one you set going that answers, or asks you something, while you
-// look at another says so here (the 管家's own turns don't: it tells you itself). What came before the page did, never.
+// A note for you, not looked at: one you set going that answers, or asks you something (the 管家's turns there don't: it
+// tells you itself); the 管家's own answer to what you asked it (not to a [系统通知]), or its question
+const forYou = (n, b = butlerIds()) => (b.has(n.id) ? n.kind === 'ask' || n.by === 'you' : n.by !== 'butler');
+// the 管家's, while its pane isn't in sight: a red dot on its icon (in 管家 mode that's the way out: not there), or on
+// 「← 回到管家」 while another one is looked at in its place
+function drawBDot() {
+  const b = butlerIds(), on = (state?.notes ?? []).some((n) => b.has(n.id) && forYou(n, b));
+  $('#act .logo').classList.toggle('new', on && !butler); $('#peekBar .back').classList.toggle('new', on && butler && !!peek);
+}
+// and it says so here, as it comes: the 管家's at any time, another's in 管家 mode, where the list and its dots are out of
+// sight. Not the one you're looking at; never what came before the page did
 let notesSeen = null;
 function newNotes() {
-  const key = (n) => `${n.id}|${n.at}`, first = !notesSeen, shown = new Set(shownConvs().map((c) => c.id));
+  const key = (n) => `${n.id}|${n.at}`, first = !notesSeen, shown = new Set(shownConvs().map((c) => c.id)), b = butlerIds();
   notesSeen ??= new Set();
-  const fresh = notesOut().filter((n) => !notesSeen.has(key(n)) && n.by !== 'butler' && !shown.has(n.id));
+  const fresh = (state.notes ?? []).filter((n) => !notesSeen.has(key(n)) && !shown.has(n.id) && forYou(n, b) && (butler || b.has(n.id)));
   for (const n of state.notes ?? []) notesSeen.add(key(n));
-  if (first || !butler || !fresh.length) return;
-  const n = fresh[0], title = n.title || state.sessions.find((x) => x.id === n.id)?.title || n.project || '一个对话';
-  toast(`${fresh.length > 1 ? `${fresh.length} 个对话有新回复，` : ''}「${title}」${n.kind === 'ask' ? '在等你' : '答完了'}，${FINE ? '在右边「对话」里点开看' : '点上面的「操作台」看'}`, 6000);
+  drawBDot();
+  if (first || !fresh.length) return;
+  const n = fresh.find((x) => b.has(x.id)) ?? fresh[0], more = fresh.length > 1 ? `${fresh.length} 个对话有新回复，` : '';
+  if (b.has(n.id)) return toast(`${more}管家${n.kind === 'ask' ? '在等你回答' : '答完了'}，${butler ? '点上面的「← 回到管家」看' : '进入管家看'}`, 6000);
+  const title = n.title || state.sessions.find((x) => x.id === n.id)?.title || n.project || '一个对话';
+  toast(`${more}「${title}」${n.kind === 'ask' ? '在等你' : '答完了'}，${FINE ? '在右边「对话」里点开看' : '点上面的「操作台」看'}`, 6000);
 }
 function drawSide() {
   if (NARROW.matches && !allConvs().length) sideOn = true; // a phone with nothing open: the list
@@ -1200,7 +1214,7 @@ function setButler(on) {
   for (const g of groups) if (g.active) on ? g.active.sleep() : g.active.wake();
   if (bConv) on ? bConv.wake() : bConv.sleep();
   if (on) { drawButler(); drawAsks(); drawDesk(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
-  markRows(); save();
+  markRows(); save(); drawBDot();
 }
 // Held ~0.8 s (the ring full): in or out as a console booting (with less motion asked for, at once). Dark first; once it's
 // dark (its animation done, not a timer: a slow phone never shows the change early) the mode changes under it, then a line
@@ -1243,13 +1257,14 @@ function peekAt(s, acct) {
   if (peek) peek.close(); else bConv?.sleep();
   peek = convFor(s, acct);
   $('#butler').classList.add('peeking'); $('#peekBar .t').textContent = s.title;
-  $('#butler').append(peek.el); peek.wake(); if (FINE) peek.focus();
+  $('#butler').append(peek.el); peek.wake(); if (FINE) peek.focus(); drawBDot();
 }
 function unpeek() {
   if (!peek) return;
   peek.close(); peek = null;
   $('#butler').classList.remove('peeking');
   if (butler) { bConv?.wake(); if (FINE) bConv?.focus(); }
+  drawBDot();
 }
 $('#peekBar .back').onclick = unpeek;
 function mountButler(c) {
@@ -1855,7 +1870,7 @@ function readNote(id) {
   if (!id || !state?.notes?.some((n) => n.id === id)) return;
   state.notes = state.notes.filter((n) => n.id !== id);
   post('/api/read', { id }).catch(() => {});
-  drawSide(); drawDesk(); // its 答完了 in the 管家's 操作台 too
+  drawSide(); drawDesk(); drawBDot(); // its 答完了 in the 管家's 操作台 too, the 管家's dot
 }
 
 // --- a conversation in a tab. One running in the web service (started or continued here) takes the size of the

@@ -2567,23 +2567,27 @@ async function web() {
     if (!owners.has(k)) { const o = ownerOf(n); if (!o) return null; if (owners.size > 500) owners.clear(); owners.set(k, o); }
     return owners.get(k);
   };
+  // (the 管家's own turn: 'notice' when the service set it going, a [系统通知] typed into it; else 'you')
   const ownerOf = (n) => {
-    const f = sessions().find((x) => x.id === n.id)?.file;
+    const s = sessions().find((x) => x.id === n.id), f = s?.file;
     if (!f) { const g = gptSessions().find((x) => x.id === n.id); return g ? turnBy(gptLast(g.home, g.id, 'userMessage'), blogSent(n.id), n.at) : null; }
     let tail;
     try { const fd = fs.openSync(f, 'r'); try { tail = slice(fd, Math.max(0, fs.fstatSync(fd).size - 4194304), 4194304); } finally { fs.closeSync(fd); } } catch { return null; }
-    return turnBy(field(tail, 'lastPrompt', true), blogSent(n.id), n.at);
+    const p = field(tail, 'lastPrompt', true);
+    if (sameDir(s.cwd, BUTLER)) return p ? (unwrapPaste(p).startsWith('[系统通知]') ? 'notice' : 'you') : null;
+    return turnBy(p, blogSent(n.id), n.at);
   };
   setInterval(() => {
     const fresh = readNotes(20).filter((n) => n.at > pushedTo && Date.now() - n.at > 1500).reverse();
     if (!fresh.length) return;
     pushedTo = fresh.at(-1).at;
-    // the 管家 running: a turn it set going is its to tell you (chat tell), not pushed; its own reply neither, but its own
-    // question is (stuck on that, it can't tell you); the rest, the ones you set going, as ever
+    // the 管家 running: a turn it set going is its to tell you (chat tell), not pushed; its own reply only to what you asked
+    // it (not to a [系统通知]: what's worth it there it tells you), and its own question (stuck on that, it can't tell you);
+    // the rest, the ones you set going, as ever
     const me = sessions().find((x) => x.pid && sameDir(x.cwd, BUTLER));
-    for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000) && (!me || (n.id === me.id ? n.kind === 'ask' : ownerOf(n) !== 'butler')))
+    for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000) && (!me || (n.id === me.id ? n.kind === 'ask' || ownerOf(n) === 'you' : ownerOf(n) !== 'butler')))
       try {
-        const s = n.id && anyChat(n.id), name = n.title || n.project || 'Claude', folder = s ? (sameDir(s.cwd, BUTLER) ? '' : path.basename(s.cwd)) : n.project;
+        const s = n.id && anyChat(n.id), mine = s && sameDir(s.cwd, BUTLER), name = mine ? '管家' : n.title || n.project || 'Claude', folder = s ? (mine ? '' : path.basename(s.cwd)) : n.project;
         const m = { ...pushText({ ...n, gist: s ? wordsOf(s, 150) : n.gist }), id: n.id, group: name, ask: n.kind === 'ask', // a GPT 聊天 one's: on its note
           sub: [folder !== name && folder, s && (s.gpt ? `GPT 账号 G${s.acct + 1}` : `账号 ${s.acct + 1}`)].filter(Boolean).join(' · ') };
         (barkUrl() ? bark(m) : pushAll(m)).catch(() => {}); // Bark set up: it alone, not twice
