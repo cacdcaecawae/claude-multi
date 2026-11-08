@@ -652,11 +652,11 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     .row .ac, .row .dot { width: 24px; height: 24px; font-size: 12px; }
     .crumbs { height: 38px; padding-left: 12px; }
     .crumbs .ico { width: 34px; height: 34px; } .crumbs .ico svg { width: 18px; height: 18px; }
-    /* small to the eye, a finger's size to the touch: copy, 对话 / 终端, a picture's × reach past their edges (drawn as
-       big, they hung off code blocks and stood tall over the conversation) */
-    .cpy, .seg button { position: relative; } /* (a code block's copy stays absolute: its rule is stronger) */
-    .cpy::before, .att button::before, .seg button::before { content: ''; position: absolute; inset: -9px; }
-    .att button::before { inset: -12px; } .seg button::before { inset: -8px 0; }
+    /* small to the eye, a finger's size to the touch: copy, 对话 / 终端, a picture's ×, the model and effort button by the
+       box reach past their edges (drawn as big, they hung off code blocks and stood tall over the conversation) */
+    .cpy, .seg button, .send .bset { position: relative; } /* (a code block's copy stays absolute: its rule is stronger) */
+    .cpy::before, .att button::before, .seg button::before, .send .bset::before { content: ''; position: absolute; inset: -9px; }
+    .att button::before { inset: -12px; } .seg button::before { inset: -8px 0; } .send .bset::before { inset: -9px -6px; }
     .seg button { padding: 3px 10px; font-size: 13px; }
     .sheet .ico, .sheet .btn, .sheet .opt { min-width: 44px; min-height: 44px; }
     .msgs { padding: 12px 14px 16px; }
@@ -2589,7 +2589,7 @@ function makeOai(id, title) {
   });
 
   let sentWith = opts; // what the answer on its way was asked with
-  async function look() { // drawn again only when something changed; kept at the end if you were there
+  async function refresh() { // its messages read again, drawn again only when something changed; kept at the end if you were there
     if (!c.id) return void ($p('.hTop').textContent = '还没有消息，在下面发一条开始');
     let r;
     try { r = await (await fetch(`/api/oai?id=${encodeURIComponent(c.id)}`)).json(); } catch { return; }
@@ -2621,7 +2621,7 @@ function makeOai(id, title) {
       const r = await post('/api/oai/send', { id: c.id, text: v, paths: await Promise.all(files.map((a) => a.up)), ...opts });
       if (!c.id) { c.id = r.id; c.title = (v.split('\n')[0] || '新对话').slice(0, 40); save(); markRows(); if (c.g) drawTabs(c.g); }
       busy = true; since = Date.now(); sentWith = opts; sending = false;
-      await look(); load(); // the list and the tab: it's answering
+      await refresh(); load(); // the list and the tab: it's answering
       return true;
     } catch (e) {
       $p('.live').innerHTML = '';
@@ -2630,7 +2630,7 @@ function makeOai(id, title) {
       return false;
     } finally { sending = false; goMode(); }
   }
-  async function stop() { try { await post('/api/oai/stop', { id: c.id }); } catch (e) { toast(e.message, 4000); } await look(); load(); }
+  async function stop() { try { await post('/api/oai/stop', { id: c.id }); } catch (e) { toast(e.message, 4000); } await refresh(); load(); }
   go.onclick = () => (go.classList.contains('stop') ? stop() : send());
 
   c.sync = () => {
@@ -2639,14 +2639,14 @@ function makeOai(id, title) {
     $p('.path').innerHTML = '<b>GPT 聊天</b> <span class="dim">· 用你的 OpenAI key，按用量计费</span>';
   };
   c.wake = () => {
-    shown = true; el.classList.add('on'); readNote(c.id); c.sync(); goMode(); look();
-    clearInterval(timer); timer = setInterval(() => { if (document.visibilityState === 'visible') look(); }, 2000);
+    shown = true; el.classList.add('on'); readNote(c.id); c.sync(); goMode(); refresh();
+    clearInterval(timer); timer = setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 2000);
   };
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(timer); readNote(c.id); };
   c.close = () => { c.closed = true; c.sleep(); el.remove(); };
   c.say = (t) => send(t);
   c.swap = () => toast('GPT 聊天不用换账号');
-  c.where = () => null; c.focus = () => line.focus({ preventScroll: true }); c.back = () => { if (shown) look(); }; c.tick = c.claim = () => {};
+  c.where = () => null; c.focus = () => line.focus({ preventScroll: true }); c.back = () => { if (shown) refresh(); }; c.tick = c.claim = () => {};
   return c;
 }
 setInterval(() => shownConvs().forEach((c) => c.tick()), 10000);

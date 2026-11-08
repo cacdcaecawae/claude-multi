@@ -907,6 +907,7 @@ const oaiRead = (id) => {
   try { return JSON.parse(fs.readFileSync(path.join(OAI, `${id}.json`), 'utf8')); } catch { throw new Error('找不到这个对话'); }
 };
 const oaiSave = (c) => { fs.mkdirSync(OAI, { recursive: true }); const f = path.join(OAI, `${c.id}.json`); fs.writeFileSync(`${f}.tmp`, JSON.stringify(c)); fs.renameSync(`${f}.tmp`, f); };
+// ponytail: every chat's file read for each look at the list (every 5 s a page is open); a small index of them if there are hundreds
 const oaiChats = () => ls(OAI).filter((f) => /^oai-\d+\.json$/.test(f)).flatMap((f) => { try { return [JSON.parse(fs.readFileSync(path.join(OAI, f), 'utf8'))]; } catch { return []; } });
 // a chat's messages as the page's 对话 view takes a record's: a picture by where it is (msg.file), a file as 附件：path
 function oaiItems(c) {
@@ -960,7 +961,7 @@ async function oaiPoll() {
       if (ok) c.resp = r.id;
       Object.assign(c, { pending: null, at: now });
       oaiSave(c);
-      dropNote({ kind: 'done', project: 'GPT 聊天', msg: ok ? '回答好了' : '没有答完', title: c.title, id, gpt: true });
+      dropNote({ kind: 'done', project: 'GPT 聊天', msg: ok ? '回答好了' : '没有答完', title: c.title, id, gpt: true, gist: ok ? gistText(text, 150) : null }); // its start, for the phones
     }
   } finally { oaiPolling = false; }
 }
@@ -2575,7 +2576,7 @@ async function web() {
     for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000) && (!me || (n.id === me.id ? n.kind === 'ask' : ownerOf(n) !== 'butler')))
       try {
         const s = n.id && anyChat(n.id), name = n.title || n.project || 'Claude', folder = s ? (sameDir(s.cwd, BUTLER) ? '' : path.basename(s.cwd)) : n.project;
-        const m = { ...pushText({ ...n, gist: wordsOf(s, 150) }), id: n.id, group: name, ask: n.kind === 'ask',
+        const m = { ...pushText({ ...n, gist: s ? wordsOf(s, 150) : n.gist }), id: n.id, group: name, ask: n.kind === 'ask', // a GPT 聊天 one's: on its note
           sub: [folder !== name && folder, s && (s.gpt ? `GPT 账号 G${s.acct + 1}` : `账号 ${s.acct + 1}`)].filter(Boolean).join(' · ') };
         (barkUrl() ? bark(m) : pushAll(m)).catch(() => {}); // Bark set up: it alone, not twice
       } catch {}
