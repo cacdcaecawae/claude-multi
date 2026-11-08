@@ -114,6 +114,16 @@ const press = async (key, shift = false) => {
   assert.deepEqual(quick, ['keep task', 'next task']);
   console.log('browser session drafts and quick form ok');
 
+  // the 管家's 操作台: a running conversation answered and not looked at says 答完了 (counted apart from 空闲), till it's
+  // opened (its note read)
+  const desk = () => evaluate("[...document.querySelectorAll('#deskRun .counts span')].map(s=>s.textContent.trim()).join(' ') + ' | ' + [...document.querySelectorAll('#deskRun .item .pill')].map(p=>p.textContent).join(' ')");
+  await evaluate("state.notes=[{id:'A',kind:'done',at:Date.now(),title:'Test conversation'}]; butler=true; drawDesk()");
+  assert.equal(await desk(), '0等你 0在回复 1答完了 0空闲 | 答完了');
+  await evaluate("readNote('A')");
+  assert.equal(await desk(), '0等你 0在回复 0答完了 1空闲 | 空闲');
+  await evaluate('butler=false');
+  console.log('browser 管家 desk 答完了 ok');
+
   // The settings dialog cycles focus, makes the background inert, and returns focus to its opener on Escape.
   await evaluate("document.querySelector('#gear').focus(); document.querySelector('#gear').click()");
   assert.equal(await evaluate("document.querySelector('#sheet').contains(document.activeElement)"), true);
