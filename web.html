@@ -69,6 +69,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* held to go in or out: a ring fills round the spark (let go early and it empties) */
   #act .logo { touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
   #act .logo .sp { position: relative; display: grid; place-items: center; }
+  /* the 管家 answered you (or asks you), its pane out of sight: a red dot on its icon, and on 「← 回到管家」 */
+  #act .logo.new .sp::after, #peekBar .back.new::after { content: ''; position: absolute; top: -3px; right: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
   #act .logo .ring { position: absolute; left: -8px; top: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; overflow: visible; }
   #act .logo .ring circle { fill: none; stroke: #d97757; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: 100; opacity: 0; }
   #act .logo.hold .ring circle { opacity: 1; animation: holdRing .8s linear forwards; }
@@ -176,7 +178,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .dot.ask { background: rgba(229,160,58,.2); color: var(--orange); }
   /* a row waiting on you (orange) or answered and not looked at (green), as a tab marks it; on a folded folder too */
   .nd { width: 8px; height: 8px; flex: none; border-radius: 4px; background: var(--green); }
-  .nd.ask { background: var(--orange); }
+  .nd.ask { background: var(--orange); } .nd.red { background: var(--red); }
   details.dir > summary .nd { margin-left: auto; } details.dir[open] > summary .nd { display: none; }
   /* a folder's ＋: a new conversation there (on a computer when the mouse is over the folder) */
   details.dir > summary .fnew { width: 22px; height: 22px; margin-right: -6px; color: var(--fg3); } details.dir > summary .fnew svg { width: 14px; height: 14px; }
@@ -332,7 +334,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk > .dsec:first-child { border-top: 0; padding-top: 0; }
   .desk .dsec > summary { list-style: none; cursor: pointer; padding-bottom: 8px; } .desk .dsec > summary::-webkit-details-marker { display: none; }
   .desk .dsec:not([open]) > summary { padding-bottom: 0; }
-  .desk h4 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 2px 6px; font-size: 13px; font-weight: 600; line-height: 1.5; color: var(--fgHi); }
+  .desk h4 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 2px 6px; font-size: 13px; font-weight: 600; line-height: 1.5; color: var(--fgHi); white-space: nowrap; } /* its title whole, what it comes to cut short */
   .desk h4 .dg { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .desk h4::after { content: ''; flex: none; width: 6px; height: 6px; margin: 0 2px 0 4px; border: solid var(--fg3); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); transition: transform .15s; }
   .desk .dsec[open] > summary h4::after { transform: rotate(45deg); margin-top: -4px; }
@@ -355,8 +357,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .counts { display: flex; gap: 6px; padding: 0 6px 6px; }
   .desk .counts span { flex: 1; text-align: center; padding: 4px 0; border-radius: 6px; background: var(--tint); font-size: 11px; color: var(--fg2); }
   .desk .counts b { display: block; font-size: 14px; color: var(--fgHi); }
-  .desk .counts span.o, .desk .counts span.g { color: var(--orange); background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
-  .desk .counts span.g { color: var(--green); } .desk .counts span.o b, .desk .counts span.g b { color: inherit; }
+  .desk .counts span.o, .desk .counts span.g, .desk .counts span.b { color: var(--orange); background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
+  .desk .counts span.g { color: var(--green); } .desk .counts span.b { color: var(--a1); } .desk .counts span.o b, .desk .counts span.g b, .desk .counts span.b b { color: inherit; }
   .desk .none { padding: 0 6px; font-size: 12px; color: var(--fg3); }
   .desk .gauge { padding: 2px 6px 8px; font-size: 12px; }
   .desk .gauge .k { display: flex; justify-content: space-between; color: var(--fg2); margin-bottom: 5px; }
@@ -412,7 +414,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #peekBar { display: none; flex: none; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
   #butler.peeking #peekBar { display: flex; }
   #butler.peeking #asks, #butler.peeking > .hint { display: none !important; }
-  #peekBar .back { flex: none; padding: 3px 10px; border-radius: 6px; background: var(--btn); color: var(--fgHi); }
+  #peekBar .back { position: relative; flex: none; padding: 3px 10px; border-radius: 6px; background: var(--btn); color: var(--fgHi); }
   #peekBar .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg2); }
   @media (hover: hover) { #peekBar .back:hover { background: var(--btnH); } }
   /* the others' questions, above it: answered here, or opened */
@@ -964,8 +966,33 @@ async function load(fresh) {
   for (const c of allConvs()) c.sync();
   bConv?.sync(); peek?.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
-  drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere();
+  drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere(); newNotes();
   return ''; // read: no error
+}
+// A note for you, not looked at: one you set going that answers, or asks you something (the 管家's turns there don't: it
+// tells you itself); the 管家's own answer to what you asked it (not to a [系统通知]), or its question: its newest
+// conversation's only (an older one's is never opened again, its dot would stay for good)
+const forYou = (n, b = butlerIds()) => (b.has(n.id) ? n.id === state.sessions.find(isButler)?.id && (n.kind === 'ask' || n.by === 'you') : n.by !== 'butler');
+// the 管家's, while its pane isn't in sight: a red dot on its icon (in 管家 mode that's the way out: not there), or on
+// 「← 回到管家」 while another one is looked at in its place
+function drawBDot() {
+  const b = butlerIds(), on = (state?.notes ?? []).some((n) => b.has(n.id) && forYou(n, b));
+  $('#act .logo').classList.toggle('new', on && !butler); $('#peekBar .back').classList.toggle('new', on && butler && !!peek);
+}
+// and it says so here, as it comes: the 管家's at any time, another's in 管家 mode, where the list and its dots are out of
+// sight. Not the one you're looking at; never what came before the page did
+let notesSeen = null;
+function newNotes() {
+  const key = (n) => `${n.id}|${n.at}`, first = !notesSeen, shown = new Set(shownConvs().map((c) => c.id)), b = butlerIds();
+  notesSeen ??= new Set();
+  const fresh = (state.notes ?? []).filter((n) => !notesSeen.has(key(n)) && !shown.has(n.id) && forYou(n, b) && (butler || b.has(n.id)));
+  for (const n of state.notes ?? []) notesSeen.add(key(n));
+  drawBDot();
+  if (first || !fresh.length) return;
+  const n = fresh.find((x) => b.has(x.id)) ?? fresh[0], more = fresh.length > 1 ? `${fresh.length} 个对话有新回复，` : '';
+  if (b.has(n.id)) return toast(`${more}管家${n.kind === 'ask' ? '在等你回答' : '答完了'}，${butler ? '点上面的「← 回到管家」看' : '进入管家看'}`, 6000);
+  const title = n.title || state.sessions.find((x) => x.id === n.id)?.title || n.project || '一个对话';
+  toast(`${more}「${title}」${n.kind === 'ask' ? '在等你' : '答完了'}，${FINE ? '在右边「对话」里点开看' : '点上面的「操作台」看'}`, 6000);
 }
 function drawSide() {
   if (NARROW.matches && !allConvs().length) sideOn = true; // a phone with nothing open: the list
@@ -1188,7 +1215,7 @@ function setButler(on) {
   for (const g of groups) if (g.active) on ? g.active.sleep() : g.active.wake();
   if (bConv) on ? bConv.wake() : bConv.sleep();
   if (on) { drawButler(); drawAsks(); drawDesk(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
-  markRows(); save();
+  markRows(); save(); drawBDot();
 }
 // Held ~0.8 s (the ring full): in or out as a console booting (with less motion asked for, at once). Dark first; once it's
 // dark (its animation done, not a timer: a slow phone never shows the change early) the mode changes under it, then a line
@@ -1231,13 +1258,14 @@ function peekAt(s, acct) {
   if (peek) peek.close(); else bConv?.sleep();
   peek = convFor(s, acct);
   $('#butler').classList.add('peeking'); $('#peekBar .t').textContent = s.title;
-  $('#butler').append(peek.el); peek.wake(); if (FINE) peek.focus();
+  $('#butler').append(peek.el); peek.wake(); if (FINE) peek.focus(); drawBDot();
 }
 function unpeek() {
   if (!peek) return;
   peek.close(); peek = null;
   $('#butler').classList.remove('peeking');
   if (butler) { bConv?.wake(); if (FINE) bConv?.focus(); }
+  drawBDot();
 }
 $('#peekBar .back').onclick = unpeek;
 function mountButler(c) {
@@ -1357,7 +1385,8 @@ function mood(up, thinking, run, decide = 0) {
 const head = (id, title, digest) => { $('#' + id).parentElement.querySelector('h4').html = `${title}<span class="dg">${esc(digest)}</span>`; };
 function drawDesk() {
   if (!butler || !state) return;
-  const me = state.sessions.find(isButler), run = state.sessions.filter((x) => x.pid && !isButler(x)), pc = state.pc;
+  // the conversations running, and a GPT 聊天 one answering or answered (it runs nowhere: its answer is made at OpenAI)
+  const me = state.sessions.find(isButler), run = state.sessions.filter((x) => !isButler(x) && (x.pid || (x.oai && (x.busy || chatMark(x) === 'done')))), pc = state.pc;
   const tickets = state.tickets ?? [], open = tickets.filter((x) => !x.end), nYou = open.filter((x) => x.stage[1] === 'you').length;
   // it runs: listed with its Claude, or its pane here has one (just started, no message yet, it isn't listed)
   const up = !!me?.pid || !!(bConv?.started && !bConv.ended), thinking = bConv?.live === 'busy' || !!me?.busy, acct = me?.pid ? me.acct + 1 : bConv?.acct;
@@ -1382,10 +1411,17 @@ function drawDesk() {
   $('#deskTodo').html = `${cards || loose ? cards + loose
     : '<div class="none">还没有任务。在下面交代一件，或者跟管家说「把层析理论稿推到能给导师看」「15:40 提醒我看额度」</div>'}
     ${tickets.filter((x) => x.end).slice(0, 3).map((x) => `<div class="doneL" title="${esc(x.stage[2])}"><b>${x.end.how === 'stop' ? '–' : '✓'}</b> #${x.id} ${esc(x.name)}${x.stage[2] ? '：' + esc(x.stage[2]) : ''}</div>`).join('')}`;
-  const tag = (x) => (x.wait ? '<span class="pill o">等你</span>' : x.busy ? '<span class="pill g">在回复</span>' : '<span class="pill">空闲</span>');
-  head('deskRun', '对话', `${run.length} 个在运行${wait.length ? ` · ${wait.length} 个等你` : ''}`);
-  $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span><span><b>${run.length - wait.length - busy.length}</b>空闲</span></div>
-    ${[...wait, ...busy, ...run.filter((x) => !x.wait && !x.busy)].map((x) => `<div class="item" data-open="${esc(x.id)}" tabindex="0" role="button" title="${esc(x.cwd)}">${mark(x.gpt, x.acct + 1)}<span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
+  // each: waiting on you, answering, answered and not looked at yet (a turn you set going: the 管家's are its to tell you;
+  // a red dot till you open it), idle
+  const yours = new Set(notesOut().filter((n) => n.kind === 'done' && n.by !== 'butler').map((n) => n.id));
+  const done = run.filter((x) => !x.wait && !x.busy && yours.has(x.id)), idle = run.filter((x) => !x.wait && !x.busy && !done.includes(x));
+  const tag = (x) => (x.wait ? '<span class="pill o">等你</span>' : x.busy ? '<span class="pill g">在回复</span>'
+    : done.includes(x) ? '<i class="nd red" title="你问的，答完了还没看"></i><span class="pill b">答完了</span>' : '<span class="pill">空闲</span>');
+  const n = run.filter((x) => x.pid).length;
+  head('deskRun', '对话', [wait.length && `${wait.length} 个等你`, done.length && `${done.length} 个答完了`, n && `${n} 个在运行`].filter(Boolean).join(' · ')); // what's for you first: the rest may be cut short
+  $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span>
+    <span class="${done.length ? 'b' : ''}"><b>${done.length}</b>答完了</span><span><b>${idle.length}</b>空闲</span></div>
+    ${[...wait, ...busy, ...done, ...idle].map((x) => `<div class="item" data-open="${esc(x.id)}" tabindex="0" role="button" title="${esc(x.cwd)}">${mark(x.gpt, x.acct + 1)}<span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
   if (!tokensNow && Date.now() - tokensAt > 120000) {
     tokensAt = Date.now();
     tokensNow = getTokens().then((t) => { tokens = t; tokensErr = ''; setTimeout(drawDesk); return t; }).finally(() => { tokensNow = null; });
@@ -1427,7 +1463,7 @@ function drawDesk() {
   $('#deskPc').html = pc ? `${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
   const sel = bConv?.el.querySelector('.bset');
   if (sel) sel.innerHTML = `${ac(acct ?? (me ? me.acct + 1 : 0))}<span>${esc(modelName(state.butlerModel ?? me?.line?.model))} · ${esc(effortName(effortOf(me)))}</span>`;
-  $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${open.length}</span>${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}<span class="more">操作台 ›</span>`;
+  $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${open.length}</span>${done.length ? `<span>${done.length} 个答完了</span>` : ''}${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}<span class="more">操作台 ›</span>`;
 }
 // a phone's 管家: its line opens the 操作台 over it, as a sheet; tapped outside it, or a conversation opened from it, away
 const deskOn = (on) => $('#app').classList.toggle('deskOn', on);
@@ -1835,7 +1871,7 @@ function readNote(id) {
   if (!id || !state?.notes?.some((n) => n.id === id)) return;
   state.notes = state.notes.filter((n) => n.id !== id);
   post('/api/read', { id }).catch(() => {});
-  drawSide();
+  drawSide(); drawDesk(); drawBDot(); // its 答完了 in the 管家's 操作台 too, the 管家's dot
 }
 
 // --- a conversation in a tab. One running in the web service (started or continued here) takes the size of the

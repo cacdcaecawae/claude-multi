@@ -114,6 +114,29 @@ const press = async (key, shift = false) => {
   assert.deepEqual(quick, ['keep task', 'next task']);
   console.log('browser session drafts and quick form ok');
 
+  // the 管家's 操作台: a running conversation that answered a turn you set going, not looked at, says 答完了 with a red
+  // dot (counted apart from 空闲) till it's opened (its note read); answering the 管家's own turn, it stays 空闲. One of
+  // yours answering while you look at another (in 管家 mode the list is out of sight) says so in a notice
+  const desk = () => evaluate("[...document.querySelectorAll('#deskRun .counts span')].map(s=>s.textContent.trim()).join(' ') + ' | ' + [...document.querySelectorAll('#deskRun .item .pill')].map(p=>p.textContent).join(' ') + (document.querySelector('#deskRun .nd.red') ? ' •' : '')");
+  await evaluate("state.notes=[{id:'A',kind:'done',at:1,by:'butler'}]; butler=true; drawDesk()");
+  assert.equal(await desk(), '0等你 0在回复 0答完了 1空闲 | 空闲');
+  await evaluate("state.notes=[{id:'A',kind:'done',at:2,by:'you'}]; drawDesk(); notesSeen=new Set(); newNotes()");
+  assert.equal(await desk(), '0等你 0在回复 1答完了 0空闲 | 答完了 •');
+  assert.match(await evaluate("document.querySelector('#toast').textContent"), /^「Test conversation」答完了，在右边「对话」里点开看$/);
+  await evaluate("readNote('A')");
+  assert.equal(await desk(), '0等你 0在回复 0答完了 1空闲 | 空闲');
+  await evaluate("butler=false; document.querySelector('#toast').style.display='none'");
+  // the 管家's own answer to you, its pane out of sight: a red dot on its icon and a notice; to a [系统通知], nothing
+  const bdot = () => evaluate("[document.querySelector('#act .logo').classList.contains('new'), document.querySelector('#toast').style.display === 'block' ? document.querySelector('#toast').textContent : '']");
+  await evaluate("state.butler='C:/b'; state.sessions.push({id:'M',title:'x',acct:0,cwd:'C:/b',at:1,pid:5}); state.notes=[{id:'M',kind:'done',at:3,by:'notice'}]; newNotes()");
+  assert.deepEqual(await bdot(), [false, '']);
+  await evaluate("state.notes=[{id:'M',kind:'done',at:4,by:'you'}]; newNotes()");
+  assert.deepEqual(await bdot(), [true, '管家答完了，进入管家看']);
+  await evaluate("readNote('M')");
+  assert.equal((await bdot())[0], false);
+  await evaluate("state.sessions.pop(); state.butler=null; document.querySelector('#toast').style.display='none'");
+  console.log('browser 管家 desk 答完了 ok');
+
   // The settings dialog cycles focus, makes the background inert, and returns focus to its opener on Escape.
   await evaluate("document.querySelector('#gear').focus(); document.querySelector('#gear').click()");
   assert.equal(await evaluate("document.querySelector('#sheet').contains(document.activeElement)"), true);
