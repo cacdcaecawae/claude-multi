@@ -970,8 +970,9 @@ async function load(fresh) {
   return ''; // read: no error
 }
 // A note for you, not looked at: one you set going that answers, or asks you something (the 管家's turns there don't: it
-// tells you itself); the 管家's own answer to what you asked it (not to a [系统通知]), or its question
-const forYou = (n, b = butlerIds()) => (b.has(n.id) ? n.kind === 'ask' || n.by === 'you' : n.by !== 'butler');
+// tells you itself); the 管家's own answer to what you asked it (not to a [系统通知]), or its question: its newest
+// conversation's only (an older one's is never opened again, its dot would stay for good)
+const forYou = (n, b = butlerIds()) => (b.has(n.id) ? n.id === state.sessions.find(isButler)?.id && (n.kind === 'ask' || n.by === 'you') : n.by !== 'butler');
 // the 管家's, while its pane isn't in sight: a red dot on its icon (in 管家 mode that's the way out: not there), or on
 // 「← 回到管家」 while another one is looked at in its place
 function drawBDot() {

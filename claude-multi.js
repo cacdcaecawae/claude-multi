@@ -2559,12 +2559,18 @@ async function web() {
   const wordsOf = (s, max) => (s?.gpt ? gistText(gptLast(s.home, s.id, 'agentMessage'), max) : lastWords(s?.file, max));
   // who set a conversation's latest turn going (turnBy), by its record (a GPT one's: its last message of yours)
   // (null when its record can't be read now, deleted since the list was read: the push timer asks outside its try)
-  // the same for the page, on each note it gets (by: the 管家's turns aren't marked as answered for you), kept once known:
-  // it doesn't change, and a record's tail is 4 MB to read
+  // the same for the page, on each note it gets (by: the 管家's turns aren't marked as answered for you), kept once read,
+  // none found too (a GPT 聊天 one's has no record to read): it doesn't change, and a record's tail is 4 MB to read. Never
+  // in the way of the list: one that can't be told is null
   const owners = new Map();
   const noteBy = (n) => {
     const k = `${n.id}|${n.at}`;
-    if (!owners.has(k)) { const o = ownerOf(n); if (!o) return null; if (owners.size > 500) owners.clear(); owners.set(k, o); }
+    if (!owners.has(k)) {
+      let o = null;
+      try { o = /^oai-/.test(n.id ?? '') ? 'you' : ownerOf(n); } catch {}
+      if (owners.size > 500) owners.clear();
+      owners.set(k, o);
+    }
     return owners.get(k);
   };
   // (the 管家's own turn: 'notice' when the service set it going, a [系统通知] typed into it; else 'you')
