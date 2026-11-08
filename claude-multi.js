@@ -861,6 +861,119 @@ function notifyGpt(arg, home = process.env.CODEX_HOME) {
     title: String(t?.name || t?.title || t?.first || '').split('\n')[0].trim().slice(0, 100) || null, id, gpt: true }, m?.pid ?? null);
 }
 
+// --- GPT 聊天: OpenAI's strongest model (GPT-6 Astra) over the API with your key (openai-key.txt here), as a plain chat:
+// no folder, no commands, so not Codex. Its mode and effort picked in the page for each message: pro mode is ChatGPT's
+// GPT-6 Pro. Each chat is oai\<id>.json (its messages as the page shows them) and oai\<id>\ (the pictures and files sent
+// in it, out of uploads\, which is emptied after a week). OpenAI keeps what was said (store), each message going on from
+// the last answer (previous_response_id): pictures and files are sent once. An answer is made at OpenAI in the background
+// (a hard one takes minutes): its id kept in the chat (pending) and asked after by the web service till it's done,
+// through a restart, the page there or not. (As LibreChat does it, without its own long-running jobs: OpenAI's background
+// mode holds the answer for us.)
+const OAI = path.join(ROOT, 'oai'), OAI_KEY = path.join(ROOT, 'openai-key.txt');
+const OAI_MODEL = 'gpt-6-astra', OAI_MODES = ['standard', 'pro'], OAI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // what it takes
+const OAI_OPTS = { mode: 'standard', effort: 'medium' }; // a chat's, till one is picked: OpenAI's own default effort
+// what OpenAI takes, by the name's end: pictures as pictures, these as files; any other text file as text/plain (its own
+// type, or application/octet-stream, is refused)
+const OAI_TYPES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' };
+const oaiPic = (p) => /^image\//.test(OAI_TYPES[path.extname(p).slice(1).toLowerCase()] ?? '');
+const oaiName = (p) => /^\d{8}T\d{6}-[0-9a-f]{6}-(.+)$/.exec(path.basename(p))?.[1] ?? path.basename(p); // as uploaded
+async function oaiApi(p, body) {
+  let key = '';
+  try { key = fs.readFileSync(OAI_KEY, 'utf8').trim(); } catch {} // trim takes a BOM too (Notepad's)
+  if (!key) throw new Error('还没有 OpenAI 的 key：存进 .claude-multi\\openai-key.txt');
+  const r = await fetch(`https://api.openai.com/v1/${p}`, { method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: body && JSON.stringify(body), signal: AbortSignal.timeout(60000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`OpenAI：${j.error?.message ?? r.status}`);
+  return j;
+}
+// a message as OpenAI takes it: your words, then each picture and file
+function oaiInput(text, files = []) {
+  const parts = text ? [{ type: 'input_text', text }] : [];
+  for (const p of files) {
+    const data = fs.readFileSync(p), type = OAI_TYPES[path.extname(p).slice(1).toLowerCase()] ?? (data.subarray(0, 8192).includes(0) ? null : 'text/plain');
+    if (!type) throw new Error(`${oaiName(p)}：GPT 读不了这种文件（图片、PDF、Word、Excel、PPT 和文本文件可以）`);
+    const url = `data:${type};base64,${data.toString('base64')}`;
+    parts.push(type.startsWith('image/') ? { type: 'input_image', image_url: url } : { type: 'input_file', filename: oaiName(p), file_data: url });
+  }
+  return parts;
+}
+// an answer's words (its sources are links in them already)
+const oaiText = (r) => (r.output ?? []).filter((o) => o.type === 'message').flatMap((o) => o.content ?? []).map((c) => c.text ?? c.refusal ?? '').join('\n\n').trim();
+const oaiRead = (id) => {
+  if (!/^oai-\d+$/.test(id ?? '')) throw new Error('没有这个对话');
+  try { return JSON.parse(fs.readFileSync(path.join(OAI, `${id}.json`), 'utf8')); } catch { throw new Error('找不到这个对话'); }
+};
+const oaiSave = (c) => { fs.mkdirSync(OAI, { recursive: true }); const f = path.join(OAI, `${c.id}.json`); fs.writeFileSync(`${f}.tmp`, JSON.stringify(c)); fs.renameSync(`${f}.tmp`, f); };
+// ponytail: every chat's file read for each look at the list (every 5 s a page is open); a small index of them if there are hundreds
+const oaiChats = () => ls(OAI).filter((f) => /^oai-\d+\.json$/.test(f)).flatMap((f) => { try { return [JSON.parse(fs.readFileSync(path.join(OAI, f), 'utf8'))]; } catch { return []; } });
+// a chat's messages as the page's 对话 view takes a record's: a picture by where it is (msg.file), a file as 附件：path
+function oaiItems(c) {
+  return c.msgs.flatMap((m, i) => m.role !== 'user' ? [{ role: m.role, text: m.text, at: m.at }, ...(m.took ? [{ role: 'done', text: String(m.took) }] : [])]
+    : [...(m.files ?? []).flatMap((p, k) => (oaiPic(p) ? [{ role: 'img', text: `${i}.${k}`, at: m.at }] : [])),
+      { role: 'user', text: [m.text, ...(m.files ?? []).filter((p) => !oaiPic(p)).map((p) => `附件：${p}`)].filter(Boolean).join('\n'), at: m.at }]);
+}
+// one message sent, with the mode and effort picked (kept on the chat: the page shows them again): to OpenAI first
+// (refused, nothing is kept), then into the chat, its answer pending. One already being sent (or answered) in that chat:
+// not a second (its answer would be lost to the chat, and paid for)
+const oaiSending = new Set();
+async function oaiSend(b) {
+  const text = String(b.text ?? '').trim(), ups = (Array.isArray(b.paths) ? b.paths : []).map((p) => path.resolve(String(p)));
+  if (!text && !ups.length) throw new Error('要发什么？');
+  if (ups.some((p) => path.dirname(p) !== UPLOADS)) throw new Error('只能发从这里传上去的图片和文件');
+  if (!OAI_MODES.includes(b.mode) || !OAI_EFFORTS.includes(b.effort)) throw new Error('模式或思考强度不对');
+  const old = b.id ? oaiRead(String(b.id)) : null, id = old?.id ?? `oai-${Date.now()}`, opts = { mode: b.mode, effort: b.effort };
+  if (old?.pending || oaiSending.has(id)) throw new Error('上一条还在回答，等它答完再发（或者先停止）');
+  oaiSending.add(id);
+  try {
+    // ponytail: a chat whose last answer OpenAI no longer keeps (30 days) can't go on; sending its messages again would
+    const r = await oaiApi('responses', { model: OAI_MODEL, reasoning: opts, tools: [{ type: 'web_search' }], input: [{ role: 'user', content: oaiInput(text, ups) }],
+      previous_response_id: old?.resp ?? undefined, background: true, store: true });
+    const c = old ? oaiRead(id) : { id, title: (text.split('\n')[0] || oaiName(ups[0])).slice(0, 40), msgs: [], resp: null }, now = Date.now();
+    const dir = path.join(OAI, id), files = ups.map((p) => path.join(dir, path.basename(p)));
+    if (ups.length) fs.mkdirSync(dir, { recursive: true });
+    ups.forEach((p, k) => fs.renameSync(p, files[k]));
+    c.msgs.push({ role: 'user', text, files, at: now });
+    Object.assign(c, { opts, pending: r.id, since: now, at: now });
+    oaiSave(c);
+    return { id };
+  } finally { oaiSending.delete(id); }
+}
+// the web service, every few seconds: each answer pending asked after; one done goes into its chat, and a note out (the
+// page's dot, the island, the phones). A failed one is said there, the chat going on from the answer before it.
+let oaiPolling = false;
+async function oaiPoll() {
+  if (oaiPolling) return;
+  oaiPolling = true;
+  try {
+    for (const { id, pending } of oaiChats().filter((c) => c.pending)) {
+      let r;
+      try { r = await oaiApi(`responses/${pending}`); } catch { continue; } // the network: asked again next time
+      if (['queued', 'in_progress'].includes(r.status)) continue;
+      let c;
+      try { c = oaiRead(id); } catch { continue; } // deleted meanwhile
+      if (c.pending !== pending) continue; // stopped meanwhile
+      const now = Date.now(), text = oaiText(r), ok = r.status === 'completed' && !!text;
+      if (text) c.msgs.push({ role: 'claude', text, at: now, ...(ok && { took: now - c.since }) });
+      if (!ok) c.msgs.push({ role: 'note', text: `没有答完（${r.error?.message ?? r.incomplete_details?.reason ?? r.status}），这一条不算进对话，可以再发一次`, at: now });
+      if (ok) c.resp = r.id;
+      Object.assign(c, { pending: null, at: now });
+      oaiSave(c);
+      dropNote({ kind: 'done', project: 'GPT 聊天', msg: ok ? '回答好了' : '没有答完', title: c.title, id, gpt: true, gist: ok ? gistText(text, 150) : null }); // its start, for the phones
+    }
+  } finally { oaiPolling = false; }
+}
+async function oaiStop(id) {
+  const c = oaiRead(id);
+  if (!c.pending) return {};
+  await oaiApi(`responses/${c.pending}/cancel`, {}).catch(() => {}); // done just now: stopped all the same, not kept
+  const now = oaiRead(id);
+  if (now.pending === c.pending) { now.msgs.push({ role: 'note', text: '已停止，这一条不算进对话', at: Date.now() }); now.pending = null; oaiSave(now); }
+  return {};
+}
+
 // The key the island presses to split a conversation's tab into its own window before tiling: Windows
 // Terminal's built-in "move tab to new window" action, which has no key by default. Prints added / ok / fail.
 // The island's window arranging presses these. Windows Terminal can only move a tab into another window by
@@ -2463,11 +2576,12 @@ async function web() {
     for (const n of fresh) if (!(n.id && Date.now() - (viewing.get(n.id) ?? 0) < 12000) && (!me || (n.id === me.id ? n.kind === 'ask' : ownerOf(n) !== 'butler')))
       try {
         const s = n.id && anyChat(n.id), name = n.title || n.project || 'Claude', folder = s ? (sameDir(s.cwd, BUTLER) ? '' : path.basename(s.cwd)) : n.project;
-        const m = { ...pushText({ ...n, gist: wordsOf(s, 150) }), id: n.id, group: name, ask: n.kind === 'ask',
+        const m = { ...pushText({ ...n, gist: s ? wordsOf(s, 150) : n.gist }), id: n.id, group: name, ask: n.kind === 'ask', // a GPT 聊天 one's: on its note
           sub: [folder !== name && folder, s && (s.gpt ? `GPT 账号 G${s.acct + 1}` : `账号 ${s.acct + 1}`)].filter(Boolean).join(' · ') };
         (barkUrl() ? bark(m) : pushAll(m)).catch(() => {}); // Bark set up: it alone, not twice
       } catch {}
   }, 2000);
+  setInterval(() => oaiPoll().catch(() => {}), 4000); // the GPT 聊天 answers pending at OpenAI
 
   // A ticket's conversation ended a turn (its last words kept: what it stopped on), or stopped on a question: the 管家 told.
   // Read from where the last service left off (kept in a file): one written just before a restart, or during it, isn't
@@ -2568,8 +2682,11 @@ async function web() {
       const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
       // and the GPT ones among them, by when they were last written (a GPT one runs here or not at all)
       for (const { home, ...s } of gptSessions()) list.push({ ...s, where: !s.pid ? null : s.web ? 'web' : 'pc', line: s.pid ? { model: s.model, effort: s.effort } : null });
+      // and the GPT 聊天 ones: no folder, no account, none running anywhere (busy: an answer pending at OpenAI)
+      for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
+        prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
       list.sort((a, b) => b.at - a.at);
-      return { usage: usageCache, gpt: gptState(), sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), sessions: list, notes: unreadNotes(all), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow() };
     },
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
@@ -2653,12 +2770,24 @@ async function web() {
     // refused), run apart as warmup is: a deletion's PowerShell would hold up every terminal's stream meanwhile. One just
     // continued here isn't listed as running yet: refused here first. The list read afresh after.
     'POST /api/rename': (q, b) => {
-      if (b.gpt) throw new Error('GPT 对话暂时不能在这里改名');
       const id = String(b.id ?? ''), name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
       if (!name) throw new Error('名字不能是空的');
+      if (b.oai) { const c = oaiRead(id); c.title = name; oaiSave(c); return { said: `已改名：${name}` }; }
+      if (b.gpt) throw new Error('GPT 对话暂时不能在这里改名');
       return command('rename', id, name);
     },
-    'POST /api/delete': (q, b) => (b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''))),
+    'POST /api/delete': async (q, b) => {
+      if (!b.oai) return b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''));
+      const c = oaiRead(String(b.id ?? '')); // a GPT 聊天 one: an answer on its way stopped (not paid for), then its files to the Recycle Bin
+      if (c.pending) await oaiApi(`responses/${c.pending}/cancel`, {}).catch(() => {});
+      recycle([path.join(OAI, `${c.id}.json`), path.join(OAI, c.id)].filter((p) => fs.existsSync(p)));
+      return { said: `已删除「${c.title}」，可以在回收站里找回。` };
+    },
+    // a GPT 聊天 one: its messages and the mode and effort it was last sent with (the page asks every 2 s while it's
+    // shown); one sent; the answer on its way stopped
+    'GET /api/oai': (q) => { const c = oaiRead(q.get('id')); return { items: oaiItems(c), busy: !!c.pending, since: c.since ?? null, title: c.title, opts: c.opts ?? OAI_OPTS }; },
+    'POST /api/oai/send': (q, b) => oaiSend(b),
+    'POST /api/oai/stop': (q, b) => oaiStop(String(b.id ?? '')),
     // open a conversation's terminal: {id, acct?} continues one (its window here if it runs in one),
     // {dir, acct} starts one. acct is 1-based; the page proposes it like the island does. One started (or starting) here
     // comes back with its Claude's pid, once the pseudo-terminal knows it (a moment): the 管家's chat new and say find
@@ -2841,6 +2970,13 @@ async function web() {
         const img = recordImage(file, +ref[1], +ref[2]);
         res.writeHead(200, { 'content-type': img.type, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
         return res.end(img.data);
+      }
+      // a picture in a GPT 聊天 one (?ref "message.k" from its items): only one that chat holds
+      if (req.method === 'GET' && url.pathname === '/api/oai/file') {
+        const [i, k] = (url.searchParams.get('ref') ?? '').split('.'), p = oaiRead(url.searchParams.get('id')).msgs[i]?.files?.[k];
+        if (!p || !oaiPic(p) || !fs.existsSync(p)) return out(404, { err: '没有这张图片' });
+        res.writeHead(200, { 'content-type': OAI_TYPES[path.extname(p).slice(1).toLowerCase()], 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
+        return res.end(fs.readFileSync(p));
       }
       // only from our own page: from the same origin, as JSON or a picture's own type (another site's page can't send
       // either cross-origin without asking first, and nothing here answers that)
@@ -3143,7 +3279,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
