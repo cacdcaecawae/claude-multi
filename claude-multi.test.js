@@ -604,6 +604,29 @@ console.log('tokens ok');
   console.log('gpt ok');
 }
 
+// GPT Pro: a message as OpenAI takes it (a picture as one, a known file by its type, any text file as text/plain, a
+// binary one refused, its uploaded name back); an answer's words; a chat's messages as the 对话 view takes a record's
+{
+  const fs = require('fs'), path = require('path'), os = require('os');
+  const { proInput, proText, proItems } = require('./claude-multi');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-pro-')), f = (n, data) => { fs.writeFileSync(path.join(d, n), data); return path.join(d, n); };
+  const png = f('20261108T101010-abcdef.png', Buffer.from('89504e47', 'hex')), pdf = f('20261108T101010-abcdef-报告.pdf', '%PDF-1.4');
+  const py = f('20261108T101010-abcdef-x.py', 'print(1)'), bin = f('20261108T101010-abcdef-x.exe', Buffer.from([77, 90, 0, 1]));
+  const parts = proInput('看看这些', [png, pdf, py]);
+  assert.deepEqual(parts.map((p) => p.type), ['input_text', 'input_image', 'input_file', 'input_file']);
+  assert.equal(parts[1].image_url, 'data:image/png;base64,iVBORw==');
+  assert.equal(parts[2].filename, '报告.pdf'); assert.match(parts[2].file_data, /^data:application\/pdf;base64,/);
+  assert.match(parts[3].file_data, /^data:text\/plain;base64,/);
+  assert.deepEqual(proInput('', [png]).map((p) => p.type), ['input_image']);
+  assert.throws(() => proInput('x', [bin]), /x\.exe：Pro 读不了/);
+  assert.equal(proText({ output: [{ type: 'reasoning' }, { type: 'web_search_call' }, { type: 'message', content: [{ type: 'output_text', text: '答案 ([a.com](https://a.com))' }] }] }), '答案 ([a.com](https://a.com))');
+  assert.equal(proText({ output: [] }), '');
+  assert.deepEqual(proItems({ msgs: [{ role: 'user', text: '看看', files: [png, pdf], at: 1 }, { role: 'claude', text: '好', at: 2, took: 65000 }, { role: 'note', text: '已停止', at: 3 }] }), [
+    { role: 'img', text: '0.0', at: 1 }, { role: 'user', text: `看看\n附件：${pdf}`, at: 1 }, { role: 'claude', text: '好', at: 2 }, { role: 'done', text: '65000' }, { role: 'note', text: '已停止', at: 3 }]);
+  fs.rmSync(d, { recursive: true, force: true });
+  console.log('gpt pro ok');
+}
+
 // A picture in a record: history() names it by its line's place in bytes and which picture it is, recordImage() gives
 // it back. A picture from the page is saved under a new name; ones older than a week go.
 {

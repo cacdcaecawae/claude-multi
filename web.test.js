@@ -8,11 +8,18 @@ const browser = process.env.BROWSER_EXE || [
 if (!browser) throw Error('Set BROWSER_EXE to a Chromium browser executable');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-browser-test-'));
 const state = { me: 'isolated test', sessions: [{ id: 'A', title: 'Test conversation', acct: 0, cwd: 'C:/test', at: Date.now(), pid: 123 }],
-  notes: [], gpt: [], tickets: [], waits: [], usage: { accounts: [{ label: 'test', windows: [], runway: 2 }], rec: 0, open: true, projects: [] } };
+  notes: [], gpt: [], pro: true, tickets: [], waits: [], usage: { accounts: [{ label: 'test', windows: [], runway: 2 }], rec: 0, open: true, projects: [] } };
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
-let historyId = 'A';
+let historyId = 'A', pro = { items: [], busy: false }, proSent = null; // a GPT Pro chat as the service has it, and the message it got
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/api/pro/send') {
+    let b = ''; req.on('data', (d) => (b += d));
+    return req.on('end', () => {
+      proSent = JSON.parse(b); pro = { items: [{ role: 'user', text: proSent.text, at: Date.now() }], busy: true, since: Date.now() };
+      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ id: 'pro-1' }));
+    });
+  }
   if (url.pathname === '/api/term') {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write('event: size\ndata: {"w":100,"h":30,"kind":"pty"}\n\n');
@@ -22,7 +29,8 @@ const server = http.createServer((req, res) => {
     const data = url.pathname === '/api/state' ? state : url.pathname === '/api/asks' ? []
       : url.pathname === '/api/tokens' ? { accounts: [], days: [] }
       : url.pathname === '/api/open' ? { key: 'fixture', pid: 123, kind: 'pty' }
-      : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: [{ role: 'claude', text: long }] } : {};
+      : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: [{ role: 'claude', text: long }] }
+      : url.pathname === '/api/pro' ? { ...pro, title: 'Pro 你好' } : {};
     res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(data));
   }
   const relative = url.pathname === '/' ? 'web.html' : url.pathname.startsWith('/lib/') ? 'node_modules/' + url.pathname.slice(5) : url.pathname.slice(1);
@@ -118,6 +126,24 @@ const press = async (key, shift = false) => {
   await evaluate("document.querySelector('#sheetIn').innerHTML='<p>Message</p>';document.querySelector('#sheet').classList.add('on')");
   await press('Tab'); assert.equal(await evaluate('document.activeElement.id'), 'sheetIn'); await press('Escape');
   console.log('browser modal focus, Tab, Shift+Tab and Escape ok');
+
+  // GPT Pro: picked in 新对话 (no account, no folder), a message sent, 正在思考 (and 停止) while OpenAI answers, then the
+  // answer under OpenAI's mark with how long it took
+  const until = async (expr) => { for (let i = 0; i < 100 && !(await evaluate(expr)); i++) await new Promise((r) => setTimeout(r, 50)); assert.ok(await evaluate(expr), expr); };
+  await evaluate("document.querySelector('[data-new]').click()");
+  await evaluate("document.querySelector('[data-g=\"pro\"]').click()");
+  assert.equal(await evaluate("!!document.querySelector('#dirIn')"), false);
+  await evaluate("document.querySelector('#start').click()");
+  await evaluate("const t=document.querySelector('.pane.on .send textarea');t.value='Pro 你好';t.dispatchEvent(new Event('input'));document.querySelector('.pane.on .go').click()");
+  await until("document.querySelector('.pane.on .live .busy')?.textContent.includes('正在思考')");
+  assert.deepEqual(proSent, { id: null, text: 'Pro 你好', paths: [] });
+  assert.deepEqual(await evaluate("[focusG.active.id, document.querySelector('.pane.on .go').dataset.m, document.querySelector('.pane.on .hm.user').textContent]"), ['pro-1', 'stop', 'Pro 你好']);
+  pro = { items: [...pro.items, { role: 'claude', text: '你好，我是 **Pro**', at: Date.now() }, { role: 'done', text: '65000' }], busy: false };
+  await until("document.querySelector('.pane.on .hm.claude')?.textContent.includes('我是 Pro')");
+  assert.deepEqual(await evaluate("[!!document.querySelector('.pane.on .who .gm'), document.querySelector('.pane.on .who .took').textContent, document.querySelector('.pane.on .live').innerHTML, document.querySelector('.pane.on .go').dataset.m]"),
+    [true, '✓ 回复完成 · 用时 1 分 5 秒', '', 'send']);
+  await evaluate('closeConv(focusG.active)');
+  console.log('browser GPT Pro chat ok');
 
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await evaluate("sideOn=false;drawSide();localStorage.setItem('cm-look','light');look()");
