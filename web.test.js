@@ -30,6 +30,7 @@ const server = http.createServer((req, res) => {
     const data = url.pathname === '/api/state' ? state : url.pathname === '/api/asks' ? []
       : url.pathname === '/api/tokens' ? { accounts: [], days: [] }
       : url.pathname === '/api/open' ? { key: 'fixture', pid: 123, kind: 'pty' }
+      : url.pathname === '/api/machines' ? [{ name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
       : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: [{ role: 'claude', text: long }] }
       : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' } : {};
     res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(data));
@@ -114,6 +115,14 @@ const press = async (key, shift = false) => {
   })()`);
   assert.deepEqual(quick, ['keep task', 'next task']);
   console.log('browser session drafts and quick form ok');
+
+  // 额度's 电脑: Claude Code's part of each meter, then the rest in use
+  await evaluate("document.querySelector('#act [data-side=usage]').click()");
+  for (let i = 0; i < 100 && !(await evaluate("!!document.querySelector('#machines .meter.two')")); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('#machines .meter.two > i')].map((i) => i.style.width)"), ['20%', '30%', '12.5%', '37.5%']);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('#machines .win')].map((r) => r.textContent)"), ['CPU50%Claude 20%', '内存50%Claude 2.0 GB']);
+  await evaluate("document.querySelector('#act [data-side=chats]').click()");
+  console.log('browser 电脑 in 额度 ok');
 
   // the 管家's 操作台: a running conversation that answered a turn you set going, not looked at, says 答完了 with a red
   // dot (counted apart from 空闲) till it's opened (its note read); answering the 管家's own turn, it stays 空闲. One of

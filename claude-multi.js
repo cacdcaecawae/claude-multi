@@ -2367,6 +2367,22 @@ function hold(id, what) {
   return () => doing.delete(id);
 }
 
+// Claude Code's part of this computer: its processes ('<pid> <cpu ms> <memory bytes> <path>' a line, CLAUDE_PS), CPU since
+// the sample before (prev: pid → cpu ms, ms before) across all cores, and memory. The desktop app is a claude.exe too: not
+// counted. cpu null: no sample before.
+const CLAUDE_PS = "Get-Process -Name claude -ErrorAction SilentlyContinue | % { '{0} {1} {2} {3}' -f $_.Id, [long]$_.TotalProcessorTime.TotalMilliseconds, $_.WorkingSet64, $_.Path }";
+function claudeShare(text, prev, ms, ncpu) {
+  const now = new Map();
+  let mem = 0, used = 0;
+  for (const l of text.split(/\r?\n/)) {
+    const m = /^(\d+) (\d+) (\d+) ?(.*)$/.exec(l.trim());
+    if (!m || /\\(AnthropicClaude|WindowsApps)\\/i.test(m[4])) continue;
+    now.set(+m[1], +m[2]); mem += +m[3];
+    used += Math.max(0, +m[2] - (prev?.get(+m[1]) ?? 0)); // one started since: all of its time is since
+  }
+  return { cpu: prev && ms > 0 ? Math.min(100, Math.round((100 * used) / (ms * ncpu))) : null, mem, n: now.size, prev: now };
+}
+
 async function web() {
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
@@ -2690,6 +2706,21 @@ async function web() {
     }
     return { cpu: cpuPct, mem: os.totalmem() - os.freemem(), memAll: os.totalmem() };
   };
+  // 额度's 电脑: this one's, Claude Code's part in it (read with PowerShell every 3 s at most, whoever asks: the newest
+  // sample given at once, the next read meanwhile). A read that failed starts over (no CPU till the next one).
+  const UNREAD = { cpu: null, mem: null, n: null, prev: null };
+  let share = { ...UNREAD, at: 0 }, sharing = false;
+  const machines = () => {
+    if (!sharing && Date.now() - share.at >= 3000) {
+      sharing = true; const at = Date.now();
+      require('child_process').execFile('powershell.exe', ['-NoProfile', '-Command', CLAUDE_PS], { windowsHide: true, timeout: 15000 }, (e, out) => {
+        sharing = false;
+        share = { ...(e ? UNREAD : claudeShare(out, share.prev, at - share.at, os.cpus().length)), at };
+      });
+    }
+    const pc = pcNow(), within = (x, all) => (x == null || all == null ? x : Math.min(x, all)); // its CPU over its own 2 s, Claude's over 3
+    return [{ name: os.hostname(), cpu: pc.cpu, mem: pc.mem, memAll: pc.memAll, n: share.n, cpuClaude: within(share.cpu, pc.cpu), memClaude: within(share.mem, pc.mem) }];
+  };
   // its tickets, as the 操作台 shows them: the open ones, what waits on you first, then the last 5 ended. Only this service
   // writes them (written whole, then swapped in: a crash mid-write leaves the old file)
   const editTickets = (fn) => { const all = readTickets(), r = fn(all); fs.writeFileSync(`${TICKETS}.tmp`, JSON.stringify(all, null, 1)); fs.renameSync(`${TICKETS}.tmp`, TICKETS); return r; };
@@ -2764,6 +2795,7 @@ async function web() {
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
     'GET /api/tickets': () => ticketsNow(),
     'POST /api/ticket': (q, b) => editTickets((all) => ticketOp(all, b)),
+    'GET /api/machines': () => machines(),
     'GET /api/tokens': (q) => { if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) { tokCache = { ...tokenStats(), butler: butlerCost() }; tokAt = Date.now(); } return tokCache; },
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
     'POST /api/push/sub': (q, b) => { // a page's subscription, one per endpoint
@@ -3362,7 +3394,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

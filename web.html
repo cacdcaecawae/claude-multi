@@ -228,6 +228,10 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .win b { width: 36px; text-align: right; color: var(--fg); font-weight: 600; }
   .win span:first-child { width: 40px; }
   .win span:last-child { width: 76px; text-align: right; color: var(--fg3); }
+  /* 额度's 电脑: a meter in two parts, Claude Code's (its orange) and the rest in use (grey) */
+  .meter.two { display: flex; } .meter.two > i:first-child, .key.claude { background: #d97757; } .meter.two > i + i, .key.rest { background: var(--fg3); }
+  .win.mach span:last-child { width: 96px; }
+  .key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin: 0 4px 0 0; }
   .renew { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--fg3); white-space: nowrap; }
   .renew svg { width: 11px; height: 11px; margin-top: -2px; }
   .renew.end { color: var(--orange); } /* renewal turned off: the day it ends */
@@ -1565,8 +1569,28 @@ function renderUsage() {
     <div class="m" style="margin-top:8px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div>
     <h3>GPT 账号</h3>${gp.length ? gp.map((g, i) => `<div class="card"><div class="cardHead">${ac(i + 1, '', true)}<b>G${i + 1}</b><span class="m grow">${esc(g.label)}</span>${g.plan ? `<span class="m">${esc(g.plan)}</span>` : ''}</div>
       ${g.windows?.length ? g.windows.map(winRow).join('') : '<div class="m" style="margin-top:4px;white-space:normal">额度还没读到：在它上面回复过一次后才有</div>'}</div>`).join('')
-      : '<div class="m" style="white-space:normal">还没有。在电脑上运行 claude-multi new gpt，用 ChatGPT 登录后，就能在这里新开 GPT 对话。</div>'}</div>`;
+      : '<div class="m" style="white-space:normal">还没有。在电脑上运行 claude-multi new gpt，用 ChatGPT 登录后，就能在这里新开 GPT 对话。</div>'}
+    <h3>电脑</h3><div id="machines">${machinesHtml()}</div></div>`;
 }
+// 额度's 电脑: each computer's CPU and memory in use, Claude Code's part first, and how many of it run there. Asked every
+// 3 s while the panel is in sight (it's drawn again from the state every 5 s: this patches itself in, kept meanwhile)
+let machines = null;
+function machinesHtml() {
+  if (!Array.isArray(machines)) return '<div class="m">读取中…</div>';
+  const gb = (b) => (b / 1073741824).toFixed(1), pct = (x, all) => (all > 0 ? Math.max(0, Math.min(100, (100 * x) / all)) : 0);
+  const row = (k, claude, used, all, said, mine) => `<div class="win mach"><span>${k}</span><div class="meter two"><i style="width:${pct(claude ?? 0, all)}%"></i><i style="width:${pct(used - (claude ?? 0), all)}%"></i></div><b>${said}</b><span>Claude ${mine}</span></div>`;
+  return machines.map((m) => `<div class="card"><div class="cardHead"><b>${esc(m.name)}</b><span class="m grow"></span>${m.n != null ? `<span class="m">${m.n} 个 Claude Code</span>` : ''}</div>
+    ${m.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(m.err)}</div>` : `
+    ${row('CPU', m.cpuClaude, m.cpu ?? 0, 100, m.cpu == null ? '…' : `${m.cpu}%`, m.cpuClaude == null ? '…' : `${m.cpuClaude}%`)}
+    ${row('内存', m.memClaude, m.mem, m.memAll, `${Math.round(pct(m.mem, m.memAll))}%`, m.memClaude == null ? '…' : `${gb(m.memClaude)} GB`)}
+    <div class="m" style="margin-top:4px">内存 ${gb(m.mem)} / ${gb(m.memAll)} GB</div>`}</div>`).join('')
+    + '<div class="m" style="margin-top:8px"><i class="key claude"></i>Claude Code　<i class="key rest"></i>其他程序</div>';
+}
+setInterval(async () => {
+  if (document.visibilityState !== 'visible' || side !== 'usage' || !sideOn || !state) return;
+  try { const r = await (await fetch('/api/machines')).json(); machines = Array.isArray(r) ? r : null; } catch { return; }
+  const el = $('#machines'); if (el) el.html = machinesHtml();
+}, 3000);
 // 刷新 and 预热 under 额度: the button says it's at work while it is (the panel is drawn again every 5 s meanwhile),
 // a bubble says how it went
 let usageBusy = ''; // 'refresh' or 'warm' while one runs
