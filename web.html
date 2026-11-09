@@ -782,7 +782,19 @@ Object.defineProperty(HTMLElement.prototype, 'html', { set(h) {
 // a message of yours as shown here: its [Image #N] out (the pictures show), a file's path as 📎 and its name, a paste unwrapped
 const shownText = (t) => t.replace(/\[Image #\d+\]\s*/g, '').replace(/^附件：.*?[\\/]\d{8}T\d{6}-[0-9a-f]{6}-(.+)$/gm, '📎 $1')
   .replace(/<pasted_content id="[^"]*">\n?([\s\S]*?)\n?<\/pasted_content id="[^"]*">/g, '$1').trim();
-const toast = (t, ms = 2600) => { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = 'none'), ms); };
+const toast = (t, ms = 2600) => { const e = $('#toast'); e.onclick = null; e.textContent = t; e.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = 'none'), ms); };
+// Claude Code's copy in a terminal (a selection, /copy): OSC 52, the text in base64, to the clipboard here. Where the
+// browser lets a page write it only on a tap (an iPhone), the bubble is that tap.
+const clip = (b64) => {
+  let t = '';
+  try { t = new TextDecoder().decode(Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0))); } catch {} // '?' asks what's on it: not answered
+  if (!t) return;
+  const go = () => navigator.clipboard?.writeText(t) ?? Promise.reject();
+  go().then(() => toast('已复制', 1200), () => {
+    toast('点这里复制', 8000);
+    $('#toast').onclick = () => go().then(() => toast('已复制', 1200), () => toast('复制失败', 2000));
+  });
+};
 const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
 const fmtTok = (n) => n >= 1e8 ? `${(n / 1e8).toFixed(2)} 亿` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString()} 万` : Math.round(n).toLocaleString();
 const usd = (u) => '$' + (u >= 1000 ? Math.round(u).toLocaleString() : u.toFixed(2));
@@ -1914,6 +1926,7 @@ function makeConv(body, title) {
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
+  let past = false, quiet = 0; // a (re)connection's first output is everything so far: its copies were made before, not again
   let switching = 0, conversationGen = 0; // a session change cancels writes still queued for the previous one
   const drafts = new Map();
   let session = { id: c.id }; // a new conversation acquires its first id while its first message is still sending
@@ -2466,13 +2479,14 @@ function makeConv(body, title) {
   async function start() {
     c.started = true; c.ended = false; notice();
     gen++; es?.close(); es = null; term?.dispose(); scr.innerHTML = '';
-    mine = ptySize = key = kind = null; switching = 0; fails = 0;
+    mine = ptySize = key = kind = null; switching = 0; fails = 0; past = false; quiet = 0;
     histEnd = histOldest = null; histNow = false; histGen++; sent = []; liveHtml = ''; hist.innerHTML = '';
     term = new Terminal({ fontSize: FONT, lineHeight: 1.12, theme: THEME, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
       fontFamily: '"SF Mono", Menlo, "Cascadia Mono", Consolas, "PingFang SC", "Microsoft YaHei", monospace' });
     fit = new FitAddon.FitAddon(); term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon.Unicode11Addon()); term.unicode.activeVersion = '11'; // Chinese and emoji two cells wide, as Claude Code counts them
     term.loadAddon(new WebLinksAddon.WebLinksAddon()); // links open in a new tab
+    term.parser.registerOscHandler(52, (d) => { if (!quiet && shown) clip(d.slice(d.indexOf(';') + 1)); return true; });
     term.open(scr);
     txt = document.createElement('div'); txt.className = 'txt'; txt.style.fontSize = FONT + 'px'; scr.append(txt);
     txt.onclick = () => { if (!getSelection().toString()) term.focus(); }; // the keys to Claude; a selection is for copying
@@ -2525,9 +2539,12 @@ function makeConv(body, title) {
     const on = (ev, fn) => s.addEventListener(ev, (e) => { if (es !== s) return; lastSeen = Date.now(); fn(e); });
     // every (re)connection, the browser's own retries too, starts with everything sent again: a conversation's
     // output so far, or a window's kept lines and screen, so the screen is cleared first
-    s.onopen = () => { if (es === s) { term.reset(); fails = 0; } };
+    s.onopen = () => { if (es === s) { term.reset(); fails = 0; past = true; } };
     on('ping', () => {});
-    on('data', (e) => term.write(JSON.parse(e.data)));
+    on('data', (e) => {
+      if (!past) return term.write(JSON.parse(e.data));
+      past = false; quiet++; term.write(JSON.parse(e.data), () => quiet--); // parsed in order: what comes after is live
+    });
     on('size', (e) => {
       const z = JSON.parse(e.data);
       if (!z.w) return;

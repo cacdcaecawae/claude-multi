@@ -24,6 +24,10 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/term') {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write('event: size\ndata: {"w":100,"h":30,"kind":"pty"}\n\n');
+    // Claude Code's copies (OSC 52): one in the output sent again on connecting, one live after it
+    const osc = (t) => `event: data\ndata: ${JSON.stringify(`x\x1b]52;c;${Buffer.from(t).toString('base64')}\x07y`)}\n\n`;
+    res.write(osc('旧的复制'));
+    setTimeout(() => res.write(osc('终端里复制的中文')), 300);
     return;
   }
   if (url.pathname.startsWith('/api/')) {
@@ -79,13 +83,16 @@ const press = async (key, shift = false) => {
   });
   await call('Runtime.enable'); await call('Page.enable');
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
-  await call('Page.addScriptToEvaluateOnNewDocument', { source: `Object.defineProperty(navigator,'clipboard',{value:{writeText:async t=>{window.copied=t;}}});` });
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `Object.defineProperty(navigator,'clipboard',{value:{writeText:async t=>{window.copied=t;(window.copies||=[]).push(t);}}});` });
   await call('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port });
   for (let i = 0; i < 100 && !(await evaluate("typeof state!=='undefined' && !!state")); i++) await new Promise((r) => setTimeout(r, 50));
   assert.equal(await evaluate('!!state'), true);
   await evaluate("document.querySelector('[data-open=\"A\"]').focus()"); await press('Enter');
   for (let i = 0; i < 100 && !(await evaluate("!!document.querySelector('.hm[data-raw]')")); i++) await new Promise((r) => setTimeout(r, 50));
   assert.equal(await evaluate("document.querySelector('.hm[data-raw]').dataset.raw.endsWith('END_MARKER')"), true);
+  for (let i = 0; i < 40 && !(await evaluate("(window.copies||[]).includes('终端里复制的中文')")); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(await evaluate('window.copies'), ['终端里复制的中文']); // the live copy, not the one sent again
+  console.log('browser terminal copy (OSC 52) ok');
   await evaluate("document.querySelector('.hm[data-raw] [data-copy]').click()");
   assert.equal(await evaluate('window.copied'), long);
   assert.equal(await evaluate("!!document.querySelector('.hm.long [data-more]')"), true);
