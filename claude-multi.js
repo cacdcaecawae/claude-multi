@@ -3045,7 +3045,7 @@ async function web() {
       });
     }
     const pc = pcNow(), within = (x, all) => (x == null || all == null ? x : Math.min(x, all)); // its CPU over its own 2 s, Claude's over 3
-    const reg = load(), mac = !reg.mac ? [] : [{ name: macLabel(reg), ...(macSys && Date.now() - macSys.at < 30000 ? macSys : { err: '读不到：还没连上 Mac' }) }];
+    const reg = load(), mac = !reg.mac ? [] : [{ id: 'mac', name: macLabel(reg), ...(macSys && Date.now() - macSys.at < 30000 ? macSys : { err: '读不到：还没连上 Mac' }) }];
     return [{ id: 'here', name: os.hostname(), cpu: pc.cpu, mem: pc.mem, memAll: pc.memAll, n: share.n, cpuClaude: within(share.cpu, pc.cpu), memClaude: within(share.mem, pc.mem) }, ...mac];
   };
   // its tickets, as the 操作台 shows them: the open ones, what waits on you first, then the last 5 ended. Only this service

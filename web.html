@@ -1584,7 +1584,7 @@ function renderUsage() {
     ${u.mac ? `<div class="card"><div class="cardHead">${mark(false, 0, true)}<b>${esc(u.mac.label)}</b><span class="m grow">${esc(u.mac.dir)}</span>${u.mac.plan ? `<span class="m">${esc(u.mac.plan)}</span>` : ''}</div>
       ${u.mac.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(u.mac.err)}</div>` : `
       ${u.mac.runway != null ? `<div class="m" style="margin-top:4px">可连续用 ${u.mac.runway} 小时 · 在 Mac 上读的，不参与推荐</div>` : ''}
-      ${u.mac.windows.map(winRow).join('')}`}</div>` : ''}
+      ${u.mac.windows.map(winRow).join('')}`}<div data-machine="mac">${machineRows('mac')}</div></div>` : ''}
     <div class="btns"><button class="btn" data-refresh${usageBusy ? ' disabled' : ''}>${usageBusy === 'refresh' ? '刷新中…' : '刷新'}</button>
       <button class="btn" data-warm${usageBusy ? ' disabled' : ''}>${usageBusy === 'warm' ? '预热中…' : '预热'}</button></div>
     <div class="m" style="margin-top:8px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div>
@@ -1592,7 +1592,7 @@ function renderUsage() {
       ${g.windows?.length ? g.windows.map(winRow).join('') : '<div class="m" style="margin-top:4px;white-space:normal">额度还没读到：在它上面回复过一次后才有</div>'}</div>`).join('')
       : '<div class="m" style="white-space:normal">还没有。在电脑上运行 claude-multi new gpt，用 ChatGPT 登录后，就能在这里新开 GPT 对话。</div>'}</div>`;
 }
-// 额度's CPU and memory, a computer's where it's shown ([data-machine]: here, under 推荐账号), Claude Code's part first.
+// 额度's CPU and memory, a computer's where it's shown ([data-machine]: here, under 推荐账号; mac, in its card), Claude Code's part first.
 // Asked every 3 s while the panel is in sight (it's drawn again from the state every 5 s: these patch themselves in)
 let machines = null;
 function machineRows(id) {
