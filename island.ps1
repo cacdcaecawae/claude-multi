@@ -660,13 +660,23 @@ function Render {
     [void]$Rows.Children.Add($card)
   }
   # the Mac mini, when there is one: Claude on the Mac, in its folder there, run by the web service (claude-multi start
-  # mac: a tab joined to it, so the page and the phone have it too). Its usage isn't read here: its sign-in is on the Mac.
+  # mac: a tab joined to it, so the page and the phone have it too); its usage as read on the Mac, never recommended here
   if ($d.mac) {
-    $card = X ("<Border $ns Background='#0AFFFFFF' CornerRadius='14' Padding='14,11,14,12' Margin='0,0,0,6'><DockPanel>" +
-      "<Button x:Name='Go' DockPanel.Dock='Right' Content='&#xE768;' ToolTip='在 Mac 上启动 Claude' Margin='6,-6,-8,-6'/>" +
-      "<TextBlock DockPanel.Dock='Right' Text='$(Esc $d.mac.dir)' FontSize='12' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
-      "<TextBlock Text='$(Esc $d.mac.label)' FontSize='13' FontWeight='SemiBold' Foreground='#CCFFFFFF' Margin='0,0,12,0' VerticalAlignment='Center'/>" +
-      "</DockPanel></Border>")
+    $m = $d.mac
+    $lines = if ($m.err -or -not @($m.windows).Count) { "<TextBlock Text='$(Esc $(if ($m.err) { $m.err } else { '额度还没读到' }))' Margin='0,8,0,0' FontSize='11' Foreground='#8CFFFFFF' TextWrapping='Wrap'/>" } else {
+      foreach ($w in @($m.windows)) {
+        $nm = if ($names[$w.k]) { $names[$w.k] } else { $w.k }
+        $reset = if ($w.reset) { "$($w.reset)后重置" } else { '' }
+        "<StackPanel Orientation='Horizontal' Margin='0,8,0,0'><TextBlock Text='$(Esc $nm)' Width='64' FontSize='11' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
+        "$(Bar $w.pct 170 5 '0' 0.9)<TextBlock Text='$($w.pct)%' Width='46' TextAlignment='Right' FontSize='12' FontWeight='SemiBold' VerticalAlignment='Center'/>" +
+        "<TextBlock Text='$(Esc $reset)' Margin='14,0,0,0' FontSize='11' Foreground='#73FFFFFF' VerticalAlignment='Center'/></StackPanel>"
+      }
+    }
+    $card = X ("<Border $ns Background='#0AFFFFFF' CornerRadius='14' Padding='14,11,14,12' Margin='0,0,0,6'><StackPanel><DockPanel>" +
+      "<Button x:Name='Go' DockPanel.Dock='Right' Content='&#xE768;' ToolTip='在 Mac 上的 $(Esc $m.dir) 里启动 Claude' Margin='6,-6,-8,-6'/>" +
+      "<TextBlock DockPanel.Dock='Right' Text='$(Esc $m.plan)' FontSize='12' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
+      "<TextBlock Text='$(Esc $m.label)' FontSize='13' FontWeight='SemiBold' Foreground='#CCFFFFFF' Margin='0,0,12,0' VerticalAlignment='Center'/>" +
+      "</DockPanel>$($lines -join '')</StackPanel></Border>")
     $go = $card.FindName('Go'); $go.Style = $win.FindResource('Icon')
     $go.Add_Click({ Open-Terminal $env:USERPROFILE 'start mac'; Collapse })
     [void]$Rows.Children.Add($card)
@@ -1956,7 +1966,7 @@ function Add-Chat($s) {
     elseif ($s.pid) { "<Border Background='#2E30D158' CornerRadius='8' Padding='8,2'><TextBlock Text='运行中' FontSize='11' FontWeight='SemiBold' Foreground='#30D158'/></Border>" }
     else { "<TextBlock Text='$(Ago $s.at)' FontSize='12' Foreground='#66FFFFFF'/>" }
   # a GPT one (Codex): its own account always (G1, G2…), no switching nor renaming here; deleted is archived
-  $acctName = if ($s.mac) { $s.who } elseif ($s.gpt) { "GPT G$n" } else { "账号 $n" } # a Mac's: no account here, no switching, renaming or deleting
+  $acctName = if ($s.mac) { $s.who } elseif ($s.gpt) { "GPT G$n" } else { "账号 $n" } # a Mac's: no account here, no switching or renaming (deleted into the Mac's Trash)
   $act = if ($s.web) { '在电脑上打开' } elseif ($s.pid) { '切回窗口' } else { "继续 · $acctName" }
   $who = if (-not $script:data -or $s.mac) { '' } elseif ($s.gpt) { "（$(@($script:data.gpt)[$n - 1].label)）" } else { "（$($script:data.accounts[$n - 1].label)）" }
   $tip = if ($s.web) { '在网页上运行：点击开一个终端标签接上它，两边同步，关掉标签不会结束对话' } elseif ($s.pid) { '还开着，点击切回它的终端标签' } else { "用$acctName$who 在 $($s.cwd) 继续" }
@@ -1979,7 +1989,7 @@ function Add-Chat($s) {
     "<Button x:Name='Sure' Visibility='Collapsed' Cursor='Hand' VerticalAlignment='Center' Margin='0,0,8,0' ToolTip='$(if ($s.gpt) { '归档（Codex 自己的功能，codex unarchive 能找回）' } else { '放进回收站，Token 统计照常保留' })'>" +
     "<Button.Template><ControlTemplate TargetType='Button'><Border Background='#FF453A' CornerRadius='10' Padding='11,3'><ContentPresenter/></Border></ControlTemplate></Button.Template>" +
     "<TextBlock Text='$(if ($s.gpt) { '确认归档' } else { '确认删除' })' FontSize='12' FontWeight='SemiBold' Foreground='White'/></Button>" +
-    "$(if (-not $s.pid -and -not $s.mac) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Del' Content='&#xE74D;' ToolTip='$(if ($s.gpt) { '归档' } else { '删除' })'/></Border>" })" +
+    "$(if (-not $s.pid) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Del' Content='&#xE74D;' ToolTip='$(if ($s.gpt) { '归档' } else { '删除' })'/></Border>" })" +
     "$(if (-not $s.gpt -and -not $s.mac) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Sw' Content='&#xE8AB;' ToolTip='换账号继续'/></Border>" })" +
     "$(if (-not $s.gpt -and -not $s.mac) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,6,0'><Button x:Name='Ren' Content='&#xE70F;' ToolTip='改名'/></Border>" })<Grid VerticalAlignment='Center'>" +
     "<ContentControl Style='{DynamicResource OffHover}' HorizontalAlignment='Right' VerticalAlignment='Center'>$rest</ContentControl>" +

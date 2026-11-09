@@ -1554,6 +1554,10 @@ function renderUsage() {
       ${a.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(a.err)}</div>` : `
       <div class="m" style="margin-top:4px">可连续用 ${a.runway} 小时</div>
       ${a.windows.map(winRow).join('')}`}</div>`).join('')}
+    ${u.mac ? `<div class="card"><div class="cardHead">${mark(false, 0)}<b>${esc(u.mac.label)}</b><span class="m grow">${esc(u.mac.dir)}</span>${u.mac.plan ? `<span class="m">${esc(u.mac.plan)}</span>` : ''}</div>
+      ${u.mac.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(u.mac.err)}</div>` : `
+      ${u.mac.runway != null ? `<div class="m" style="margin-top:4px">可连续用 ${u.mac.runway} 小时 · 在 Mac 上读的，不参与推荐</div>` : ''}
+      ${u.mac.windows.map(winRow).join('')}`}</div>` : ''}
     <div class="btns"><button class="btn" data-refresh${usageBusy ? ' disabled' : ''}>${usageBusy === 'refresh' ? '刷新中…' : '刷新'}</button>
       <button class="btn" data-warm${usageBusy ? ' disabled' : ''}>${usageBusy === 'warm' ? '预热中…' : '预热'}</button></div>
     <div class="m" style="margin-top:8px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div>

@@ -401,10 +401,10 @@ const until = (t) => {
 // saved session. Running windows are skipped: a message there changes nothing.
 async function warmup() {
   const reg = load();
-  if (!reg.profiles.length) return console.log('没有已保存账号，请先运行 claude-multi new。');
+  if (!reg.profiles.length && !reg.mac) return console.log('没有已保存账号，请先运行 claude-multi new。');
   const running = (r) => r.u?.five_hour?.resets_at && new Date(r.u.five_hour.resets_at) > Date.now();
   const before = await Promise.all(reg.profiles.map(fetchUsage));
-  const lw = Math.max(...reg.profiles.map((p) => width(p.label)));
+  const lw = Math.max(...reg.profiles.map((p) => width(p.label)), reg.mac ? width(macLabel(reg)) : 0);
   console.log(`\n  ${c(1, '预热 5 小时窗口')}\n`);
   for (const [i, p] of reg.profiles.entries()) {
     const head = `  ${i + 1}. ${pad(p.label, lw)}  `;
@@ -426,6 +426,21 @@ async function warmup() {
       : r.status === 0 ? c(33, `已发送，但还没查到窗口开始计时（${after.err ?? '稍后用 usage 再看'}）`)
         : c(31, `失败：${why}`)}`);
     log('warmup', { profile_id: p.id, ok: r.status === 0 });
+  }
+  if (reg.mac) { // the Mac's account, the same way, there (in its /tmp: nothing kept)
+    const head = `  ${pad(macLabel(reg), lw + 3)}  `;
+    let after = await macUsage(reg);
+    if (running(after)) console.log(`${head}${c(2, `已在计时，${until(after.u.five_hour.resets_at)}后重置，跳过`)}`);
+    else {
+      process.stdout.write(`${head}发送中…`);
+      const r = await macRun(reg, `security unlock-keychain -p "$LC_MACKC" >/dev/null 2>&1; unset LC_MACKC; cd /tmp && ~/.local/bin/claude -p hi --model haiku --tools '' --setting-sources '' --strict-mcp-config --no-session-persistence`);
+      after = await macUsage(reg);
+      for (let k = 0; r.status === 0 && !running(after) && k < 5; k++) { await new Promise((ok) => setTimeout(ok, 3000)); after = await macUsage(reg); }
+      const why = (r.err || r.out).trim().split('\n').pop() || `退出码 ${r.status}`;
+      console.log(`\r${head}${r.status === 0 && running(after) ? c(32, `已预热，${until(after.u.five_hour.resets_at)}后重置`)
+        : r.status === 0 ? c(33, `已发送，但还没查到窗口开始计时（${after.err ?? '稍后用 usage 再看'}）`) : c(31, `失败：${why}`)}`);
+      log('warmup', { profile_id: 'mac', ok: r.status === 0 });
+    }
   }
   console.log();
 }
@@ -620,6 +635,40 @@ while True:
     if beat >= 15: out({'hb': 1}); beat = 0
     if not more: time.sleep(1)
 `;
+let macPw; // the Mac's password, read once (null: not saved)
+const macPassword = () => macPw !== undefined ? macPw : (macPw = !fs.existsSync(MAC_PW) ? null
+  : spawnSync('powershell.exe', ['-NoProfile', '-Command', `[Net.NetworkCredential]::new('', (Get-Content '${MAC_PW}' | ConvertTo-SecureString)).Password`],
+    { encoding: 'utf8', windowsHide: true }).stdout.replace(/\r?\n$/, '') || null);
+// The Mac account's usage, read there (python3 -): its sign-in never leaves the Mac. As fetchUsage's: {u} or {err, temp?}.
+const MAC_USAGE = String.raw`
+import json, os, subprocess, sys, time, urllib.request, urllib.error
+subprocess.run(['security', 'unlock-keychain', '-p', os.environ.pop('LC_MACKC', '')], capture_output=True)
+def out(o): print(json.dumps(o)); sys.exit()
+r = subprocess.run(['security', 'find-generic-password', '-s', 'Claude Code-credentials', '-w'], capture_output=True, text=True)
+try: c = json.loads(r.stdout)['claudeAiOauth']
+except Exception: out({'err': '未找到登录凭据'})
+if c.get('expiresAt') and c['expiresAt'] < time.time() * 1000: out({'err': 'token 已过期：在 Mac 上用一次 Claude 就会刷新'})
+q = urllib.request.Request('https://api.anthropic.com/api/oauth/usage', headers={'Authorization': 'Bearer ' + c['accessToken'], 'anthropic-beta': 'oauth-2025-04-20'})
+try: out({'u': json.load(urllib.request.urlopen(q, timeout=10)), 'sub': c.get('subscriptionType')})
+except urllib.error.HTTPError as e: out({'err': '用量接口返回 HTTP %d' % e.code, 'temp': e.code >= 500 or e.code == 429})
+except Exception as e: out({'err': '网络错误：%s' % e, 'temp': True})
+`;
+// a command on the Mac, its keychain unlocked first (sh: what runs; input: python3 - reads it), tried again when the
+// link to the server drops (ssh's 255); resolves to {status, out, err}
+function macRun(reg, cmd, input) {
+  const pw = macPassword();
+  if (!pw) return Promise.resolve({ status: 1, out: '', err: `还没保存 Mac 的密码（${MAC_PW}）` });
+  const once = () => new Promise((ok) => {
+    const p = require('child_process').execFile('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'SendEnv=LC_MACKC', reg.mac.host, cmd],
+      { env: { ...process.env, LC_MACKC: pw }, encoding: 'utf8', windowsHide: true, timeout: 150000 },
+      (e, out, err) => ok({ status: e ? (typeof e.code === 'number' ? e.code : 1) : 0, out: String(out ?? ''), err: String(err || e?.message || '') }));
+    p.stdin.on('error', () => {}); p.stdin.end(input ?? '');
+  });
+  return (async () => { let r; for (let k = 0; k < 3 && (!r || r.status === 255); k++) r = await once(); return r; })();
+}
+const macUsage = (reg) => macRun(reg, 'python3 -', MAC_USAGE).then((r) => {
+  try { return JSON.parse(r.out.trim().split('\n').pop()); } catch { return { err: `没连上 Mac：${r.err.trim().split('\n').pop()}`, temp: true }; }
+});
 
 // --- GPT: Codex (OpenAI's coding agent, signed in with a ChatGPT plan) as a second kind of conversation. Its accounts are
 // the registry's gpt list, apart from the Claude ones (profiles): nothing written for Claude meets them. Each has its own
@@ -1581,6 +1630,16 @@ function del(id) {
     return console.log(`已归档「${g.title}」，在 Codex 里用 codex unarchive 能找回。`);
   }
   if (s.pid) { console.log('这个对话正在运行，先关掉它的窗口再删。'); process.exit(1); }
+  if (s.mac) { // the Mac's: its record (and its folder, if any) into the Mac's Trash, over ssh (tried again on a drop); the copy here goes too
+    const folder = path.basename(path.dirname(s.file)), cmd = `d=~/.claude/projects/${folder}; t=~/.Trash/claude-${id}; `
+      + `mkdir -p "$t" && mv "$d/${id}.jsonl" "$t/" && { [ ! -d "$d/${id}" ] || mv "$d/${id}" "$t/"; }`;
+    let r;
+    for (let k = 0; k < 3 && r?.status !== 0; k++) r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', reg.mac.host, cmd], { encoding: 'utf8', windowsHide: true });
+    if (r.status !== 0) { console.log(`删除失败：${String(r.stderr || r.error?.message || '').trim().split('\n').pop()}`); process.exit(1); }
+    fs.rmSync(s.file, { force: true }); fs.rmSync(s.file.slice(0, -6), { recursive: true, force: true });
+    log('session_deleted', { session_id: id, mac: true });
+    return console.log(`已删除「${s.title}」，在 Mac 的废纸篓里能找回。`);
+  }
   tokenStats();
   const paths = reg.profiles.flatMap((p) => ls(path.join(p.configDir, 'projects')).flatMap((folder) =>
     [`${id}.jsonl`, id].map((n) => path.join(p.configDir, 'projects', folder, n)))).filter((f) => fs.existsSync(f));
@@ -1777,8 +1836,10 @@ const readyAt = (u) => Math.max(0, ...WINDOWS.map(([k]) => u[k])
 async function usageState(reg = load()) {
   let cache = {};
   try { cache = JSON.parse(fs.readFileSync(USAGE_CACHE, 'utf8')); } catch {}
-  const [got, states] = await Promise.all([Promise.all(reg.profiles.map(fetchUsage)), Promise.all(reg.profiles.map((p) => subState(p, cache)))]);
+  const [got, states, macGot] = await Promise.all([Promise.all(reg.profiles.map(fetchUsage)), Promise.all(reg.profiles.map((p) => subState(p, cache))),
+    reg.mac ? macUsage(reg) : null]);
   const res = keepLast(reg.profiles, got, cache);
+  const mac = macGot && keepLast([{ id: 'mac' }], [macGot], cache)[0]; // the Mac's, apart: none of the accounts here, never recommended
   // counted only with an account at its limit (the island's notice is all that needs it): listing costs a PowerShell
   const running = res.some((r) => WINDOWS.some(([k]) => Math.round(r.u?.[k]?.utilization) >= 100)) ? listSessions(reg).filter((s) => s.pid) : [];
   // whole or not at all: the island and the web service both write it, and a half-written one read would lose them all
@@ -1795,6 +1856,10 @@ async function usageState(reg = load()) {
       windows: cols.filter(([k]) => res[i].u?.[k]).map(([k]) => ({ k, pct: Math.round(res[i].u[k].utilization),
         reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })), sub: subscription(p, states[i]),
       running: running.filter((s) => s.acct === i).length })), // conversations running on it: the island's notice at its limit
+    mac: reg.mac ? { label: macLabel(reg), dir: reg.mac.dir, err: mac.err ?? null, plan: macGot.sub ? `Claude ${macGot.sub[0].toUpperCase()}${macGot.sub.slice(1)}` : null,
+      runway: mac.u ? Math.round(runway(mac.u) * 10) / 10 : null,
+      windows: WINDOWS.filter(([k]) => mac.u?.[k] && (!k.startsWith('seven_day_') || mac.u[k].utilization)).map(([k]) => ({ k, pct: Math.round(mac.u[k].utilization),
+        reset: mac.u[k].resets_at ? until(mac.u[k].resets_at) : '' })) } : null,
     projects: recentProjects(reg) };
   return { res, ok, open, rec, cols, json };
 }
@@ -1848,8 +1913,7 @@ async function usage(args) {
   };
   const { res, ok, open, rec, cols, json } = await usageState(reg);
   // same numbers as the table below; and each GPT account's usage, as its records last said it (the island's GPT cards)
-  if (args.includes('--json')) return console.log(JSON.stringify({ ...json, gpt: gptAccounts(reg).map((g) => ({ label: g.label, plan: g.plan, ...(gptUsage(g.home) ?? { windows: null }) })),
-    mac: reg.mac ? { label: macLabel(reg), dir: reg.mac.dir } : null })); // the island's Mac mini card
+  if (args.includes('--json')) return console.log(JSON.stringify({ ...json, gpt: gptAccounts(reg).map((g) => ({ label: g.label, plan: g.plan, ...(gptUsage(g.home) ?? { windows: null }) })) }));
   const lw = Math.max(...reg.profiles.map((p) => width(p.label)));
   const pw = Math.max(...reg.profiles.map((p) => width(p.subscriptionType ?? '')));
   const cell = (w) => (w ? `${bar(w.utilization)} ${String(Math.round(w.utilization)).padStart(3)}%  `
@@ -2418,10 +2482,6 @@ async function web() {
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
   const codex = codexCmd(); // GPT conversations: none started without it
   const sshExe = spawnSync('where', ['ssh'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || 'ssh'; // the Mac's
-  let macPw; // the Mac's password, read once (null: not saved)
-  const macPassword = () => macPw !== undefined ? macPw : (macPw = !fs.existsSync(MAC_PW) ? null
-    : spawnSync('powershell.exe', ['-NoProfile', '-Command', `[Net.NetworkCredential]::new('', (Get-Content '${MAC_PW}' | ConvertTo-SecureString)).Password`],
-      { encoding: 'utf8', windowsHide: true }).stdout.replace(/\r?\n$/, '') || null);
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
   // the quota as the page last got it, kept on disk: after a restart the page shows it at once (read again behind it)
   let usageCache = (() => { try { return JSON.parse(fs.readFileSync(WEB_USAGE, 'utf8')); } catch { return null; } })();
@@ -2996,7 +3056,6 @@ async function web() {
       return command('rename', id, name);
     },
     'POST /api/delete': async (q, b) => {
-      if (!b.oai && !b.gpt && sessions().find((x) => x.id === b.id)?.mac) throw new Error('Mac 上的对话暂时不能在这里删除');
       if (!b.oai) return b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''));
       const c = oaiRead(String(b.id ?? '')); // a GPT 聊天 one: an answer on its way stopped (not paid for), then its files to the Recycle Bin
       if (c.pending) await oaiApi(`responses/${c.pending}/cancel`, {}).catch(() => {});
@@ -3326,7 +3385,8 @@ async function web() {
 // tokens-cache.json keeps each file's replies and how far it was read: a run reads only what was appended.
 function tokenRoots(reg = load()) {
   return [...reg.profiles, ...(reg.removed ?? []).map((p) => ({ ...p, label: `${p.label}（已移除）` }))]
-    .map((p) => ({ id: p.id, label: p.label, dir: path.join(p.configDir, 'projects') }));
+    .map((p) => ({ id: p.id, label: p.label, dir: path.join(p.configDir, 'projects') }))
+    .concat(reg.mac ? [{ id: 'mac', label: macLabel(reg), dir: path.join(MAC, 'projects') }] : []); // the Mac's records, as copied here
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
 // input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5).
