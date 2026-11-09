@@ -1246,5 +1246,16 @@ console.log('tokens ok');
   const py = require('child_process').spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "watch", "exec")'],
     { input: `DIR = "~"\nHAVE = {}\n${MAC_WATCH}`, encoding: 'utf8' });
   if (py.error) console.log('(no python here: the Mac watcher not compiled)'); else assert.equal(py.status, 0, py.stderr);
+  // a Claude there in our tmux: new, continued (one running there joined first), or its session joined again
+  const { macCmd } = require('./claude-multi');
+  const script = (c) => Buffer.from(/echo (\S+) \| base64 -D/.exec(c)[1], 'base64').toString();
+  const fresh = script(macCmd({ into: 'cd ~/Desktop/mine', name: 'cm-p1', cols: 80, rows: 24 }));
+  assert.match(fresh, /new-session -d -s "\$S" -x 80 -y 24 -c "\$PWD" 'exec ~\/.local\/bin\/claude' \|\| exit/);
+  assert.ok(!fresh.includes('grep -l') && fresh.includes("S='cm-p1'") && fresh.indexOf('unset LC_MACKC') < fresh.indexOf('start-server'));
+  const again = script(macCmd({ into: 'cd x', resume: id, name: 'cm-p2' }));
+  assert.ok(again.includes(`grep -l '${id}' ~/.claude/sessions/*.json`) && again.includes(`'exec ~/.local/bin/claude --resume ${id}'`));
+  assert.equal(macCmd({ sess: 'cm-p1' }), "exec /opt/homebrew/bin/tmux -u -f /dev/null -L cm attach -t 'cm-p1'");
+  const sh = require('child_process').spawnSync('sh', ['-n'], { input: again, encoding: 'utf8' });
+  if (sh.error) console.log('(no sh here: the Mac script not parsed)'); else assert.equal(sh.status, 0, sh.stderr);
   console.log('mac mini ok');
 }

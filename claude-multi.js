@@ -671,6 +671,39 @@ try: out({'u': json.load(urllib.request.urlopen(q, timeout=10)), 'sub': c.get('s
 except urllib.error.HTTPError as e: out({'err': '用量接口返回 HTTP %d' % e.code, 'temp': e.code >= 500 or e.code == 429})
 except Exception as e: out({'err': '网络错误：%s' % e, 'temp': True})
 `;
+// A Claude on the Mac runs in a tmux of ours there (-L cm, apart from any of the Mac's own; no config of the Mac's): a
+// link dropped (this service restarted, the network, this PC asleep) leaves it working, and it's joined again. Run by sh
+// (the Mac's login shell is zsh): the keychain unlocked (a Claude that tmux starts later keeps the login of the one that
+// started it, its link gone or not), into its folder; resume: one running in that tmux joined (one in a terminal there
+// refused), else a new one; its pid and tmux session said in an OSC, then joined. {sess}: that session joined again.
+// ponytail: Homebrew's tmux on Apple silicon; on an Intel Mac it's /usr/local/bin/tmux
+const MAC_TMUX = '/opt/homebrew/bin/tmux';
+function macCmd({ into = '', resume = null, sess = null, name = '', cols = 100, rows = 30 }) {
+  const tm = `${MAC_TMUX} -u -f /dev/null -L cm`;
+  if (sess) return `exec ${tm} attach -t ${sq(sess)}`;
+  const sh = [
+    'security unlock-keychain -p "$LC_MACKC" >/dev/null 2>&1; unset LC_MACKC',
+    `${into} || exit`,
+    `[ -x ${MAC_TMUX} ] || { echo 'Mac 上没有 tmux：在 Mac 上运行 brew install tmux'; exit 3; }`,
+    `t() { ${tm} "$@"; }`,
+    'S= P=',
+    ...(resume ? [`for f in $(grep -l ${sq(resume)} ~/.claude/sessions/*.json 2>/dev/null); do`,
+      '  p=$(basename "$f" .json); kill -0 "$p" 2>/dev/null || continue',
+      `  S=$(t list-panes -a -F '#{pane_pid} #{session_name}' 2>/dev/null | awk -v p="$p" '$1==p{print $2; exit}')`,
+      '  [ -n "$S" ] && { P=$p; break; }',
+      "  echo '它在 Mac 上的终端里运行，不在网页里：在那边接着用'; exit 3",
+      'done'] : []),
+    'if [ -z "$S" ]; then',
+    `  S=${sq(name)}`,
+    '  t start-server \\; set -g default-terminal xterm-256color \\; set -g status off \\; set -g escape-time 0 \\; set -g set-clipboard on \\;'
+      + ` set -g allow-passthrough on \\; set -g window-size latest \\; new-session -d -s "$S" -x ${cols} -y ${rows} -c "$PWD"`
+      + ` ${sq(`exec ~/.local/bin/claude${resume ? ` --resume ${resume}` : ''}`)} || exit`,
+    `  P=$(t display -p -t "$S" '#{pane_pid}')`,
+    'fi',
+    `printf '\\033]1337;cmpid=%s;%s\\007' "$P" "$S"`,
+    `exec ${tm} attach -t "$S"`].join('\n');
+  return `exec /bin/sh -c "$(echo ${Buffer.from(sh).toString('base64')} | base64 -D)"`;
+}
 // a command on the Mac, its keychain unlocked first (sh: what runs; input: python3 - reads it), tried again when the
 // link to the server drops (ssh's 255); resolves to {status, out, err}
 function macRun(reg, cmd, input) {
@@ -2638,10 +2671,9 @@ async function web() {
     log('web_session', { profile_id: g.id, cwd, args: resume ? `resume ${resume}` : '' });
     return t;
   }
-  // A conversation on the Mac (resume: its id), started or continued here: ssh in a pseudo-terminal, the keychain
-  // unlocked, claude in the Mac's folder. Its pid (the shell's, which exec makes claude's) comes first, as an OSC
-  // that's taken out: the pid this one has is that one's, negative, as the list has it. The link to the server drops
-  // now and then before it gets there: tried again, three times in all; what the last try said is shown.
+  // A conversation on the Mac (resume: its id), started, continued or joined here: ssh in a pseudo-terminal, its Claude
+  // in a tmux there (macCmd). Its pid and tmux session come first, as an OSC that's taken out: the pid this one has is
+  // that one's, negative, as the list has it. What a last try that never got there said is shown.
   // ⏺, the Mac's reply mark, as ● (a Windows one's): this PC's fonts draw it as a blue emoji.
   // o: {resume, cwd} continues one in its folder there; {pc} starts one for a folder here, in a project folder of its own
   // there named after it (made the first time, with a CLAUDE.md saying where it is here); {} starts one in the Mac's folder
@@ -2660,23 +2692,26 @@ async function web() {
       into += ` && mkdir -p ${sq(name)} && cd ${sq(name)} && { [ -f CLAUDE.md ] || echo ${Buffer.from(md).toString('base64')} | base64 -D > CLAUDE.md; }`;
       macFolders({ [name]: o.pc });
     }
-    const cmd = `security unlock-keychain -p "$LC_MACKC" >/dev/null 2>&1; unset LC_MACKC; ${into} && printf '\\033]1337;cmpid=%s\\007' $$ && exec ~/.local/bin/claude${resume ? ` --resume ${resume}` : ''}`;
-    const t = { kind: 'pty', key, mac: true, macPid: 0, get pid() { return -this.macPid; }, clients: new Set(), buf: '', w: cols, h: rows, cwd: o.pc ?? o.cwd ?? m.dir, resume };
+    const cmd = macCmd({ into, resume, name: `cm-${key}`, cols, rows });
+    const t = { kind: 'pty', key, mac: true, macPid: 0, macSess: null, back: 0, get pid() { return -this.macPid; }, clients: new Set(), buf: '', w: cols, h: rows, cwd: o.pc ?? o.cwd ?? m.dir, resume };
     let tries = 0, pre = '';
     const go = () => {
-      const proc = t.proc = pty.spawn(sshExe, ['-tt', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'SendEnv=LC_MACKC', m.host, cmd],
-        { name: 'xterm-256color', cols: t.w, rows: t.h, env: { ...process.env, LC_MACKC: pw, TERM: 'xterm-256color' } });
+      const proc = t.proc = pty.spawn(sshExe, ['-tt', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'SendEnv=LC_MACKC', m.host,
+        t.macSess ? macCmd({ sess: t.macSess }) : cmd], { name: 'xterm-256color', cols: t.w, rows: t.h, env: { ...process.env, LC_MACKC: pw, TERM: 'xterm-256color' } });
       proc.onData((d) => {
         if (!t.macPid) {
-          const k = /\x1b\]1337;cmpid=(\d+)\x07/.exec(pre += d);
+          const k = /\x1b\]1337;cmpid=(\d+);([\w-]+)\x07/.exec(pre += d);
           if (!k) return;
-          t.macPid = +k[1]; d = pre.slice(k.index + k[0].length); pre = ''; saveTerms();
+          t.macPid = +k[1]; t.macSess = k[2]; d = pre.slice(k.index + k[0].length); pre = ''; saveTerms();
         }
+        t.back = 0; // joined (again): a next drop tried again afresh
         d = d.replace(/⏺/g, '●');
         t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
       });
-      proc.onExit(() => {
-        if (!t.macPid && ++tries < 3 && !t.closing) { pre = ''; return setTimeout(go, 1500); }
+      // ssh's 255: the link. Before it got there, tried again (3 times in all); once there, its Claude works on in its tmux,
+      // joined again every 5 s for 10 minutes. Anything else (Claude ended, so its tmux; a refusal said): it's gone.
+      proc.onExit(({ exitCode }) => {
+        if (exitCode === 255 && (t.macPid ? ++t.back <= 120 : ++tries < 3)) { pre = ''; return setTimeout(go, t.macPid ? 5000 : 1500); }
         if (!t.macPid && pre) { t.buf += pre; send(t, 'data', pre); } // why it never got there
         t.gone = true; saveTerms(); saveRun(); send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000);
       });
@@ -3140,11 +3175,12 @@ async function web() {
         sessCache = null;
         const s = sessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
-        if (s.mac) { // the Mac's: ours if it runs here, else continued here (one in a terminal on the Mac can't be shown)
+        // the Mac's: ours if it runs here; else joined in its tmux there (this service restarted meanwhile) or continued
+        // (one in a terminal on the Mac is refused there: it can't be shown)
+        if (s.mac) {
           const t = s.pid && where(s), r = resuming(s.id);
           if (t || r) return t ? { key: t.key, kind: t.kind } : opened(r);
-          if (s.pid) throw new Error('它在 Mac 上的终端里运行，不在网页里：在那边接着用');
-          if (b.live) throw new Error('这个对话已经不在运行了');
+          if (b.live && !s.pid) throw new Error('这个对话已经不在运行了');
           return opened(startMac({ resume: s.id, cwd: s.macCwd }, cols, rows));
         }
         if (s.pid) { const t = where(s) ?? mirror(s.pid, reg.profiles[s.acct].configDir); t.file = s.file; return { key: t.key, kind: t.kind }; }
@@ -3378,7 +3414,8 @@ async function web() {
   async function wakeUp() {
     const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
     for (const id of ranBefore) {
-      const s = all.find((x) => x.id === id), p = s && !s.pid && s !== me && (s.mac || reg.profiles[s.acct]);
+      // a Mac's still running in its tmux there is joined again (startMac finds it)
+      const s = all.find((x) => x.id === id), p = s && s !== me && (s.mac || (!s.pid && reg.profiles[s.acct]));
       if (p) try { if (s.mac) startMac({ resume: s.id, cwd: s.macCwd }); else startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
     }
     const open = readTickets().some((x) => !x.end), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
@@ -3621,7 +3658,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { listSessions, MAC_WATCH, macName, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { listSessions, MAC_WATCH, macName, macCmd, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
