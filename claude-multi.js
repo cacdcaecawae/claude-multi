@@ -473,6 +473,25 @@ const lastReq = (s) => {
   }
   return null;
 };
+// What set a conversation's latest turn going, in a transcript slice: the last thing typed into it (a message, or one sent
+// while Claude was at work), unwrapped, from before `before`. Not Claude Code's last-prompt line: that's written only now
+// and then (with its title, after a tool call), so a turn that only answered still had the prompt before it there (a
+// [系统通知] the 管家 answered in a line read as yours: noted, pushed). A background task's or a teammate's message, a
+// command, isn't typed: the one before counts. A picture alone: '[Image]'. null: none in the slice.
+function lastTyped(tail, before = Infinity) {
+  const ls = tail.split('\n');
+  for (let i = ls.length - 1; i >= 0; i--) {
+    const l = ls[i];
+    if ((!l.includes('"type":"user"') && !l.includes('"queued_command"')) || l.includes('"type":"tool_result"')) continue;
+    let j; try { j = JSON.parse(l); } catch { continue; }
+    if (j.isMeta || j.isSidechain || j.isCompactSummary || Date.parse(j.timestamp) > before) continue;
+    if (j.type !== 'user' && !(j.attachment?.type === 'queued_command' && j.attachment.origin?.kind === 'human')) continue;
+    const parts = said(j), t = parts.find((p) => p.type === 'text')?.text?.trim() || (parts.some((p) => p.type === 'image') ? '[Image]' : '');
+    if (!t || /^(?:Another Claude session sent a message|<(?:task-notification|teammate-message|local-command|command-|system-reminder))/.test(t)) continue;
+    return unwrapPaste(t);
+  }
+  return null;
+}
 
 // Start times (Windows FILETIME, as sessions/<pid>.json's procStart) of these pids; null if PowerShell failed.
 // The same pids within a minute: the last answer (PowerShell takes ~0.2 s, and the web service asks every few seconds).
@@ -1658,7 +1677,7 @@ function notify(kind) {
     fs.closeSync(fd);
   } catch {}
   if (kind === 'done' && helpersBusy(tail, started)) return; // it only paused to read a helper's message; the job goes on
-  if (kind === 'done' && String(field(tail, 'lastPrompt', true) ?? '').startsWith('[系统通知]')) return; // the service woke it: not your news
+  if (kind === 'done' && (lastTyped(tail) ?? '').startsWith('[系统通知]')) return; // the service woke it: not your news
   // the conversation's title, which its terminal tab shows: lets the island drop it once you look
   // (the 管家's is 管家, wherever it shows: the island, the page, the phone)
   const title = sameDir(home || j.cwd || '.', BUTLER) ? '管家' : field(tail, 'customTitle', true) ?? field(tail, 'aiTitle', true);
@@ -1912,8 +1931,8 @@ function notesInto(all, notes, words, quiet = () => false) {
   }
   return [...news];
 }
-// Who set a conversation's turn going: its last prompt (Claude Code's last-prompt line: the words typed, unwrapped, the
-// first 200 or so; a background task finishing doesn't change it) against what the 管家 typed there (its log, the first
+// Who set a conversation's turn going: what was last typed there (lastTyped: the words, unwrapped; a background task
+// finishing doesn't change it) against what the 管家 typed there (its log, the first
 // 40): 'butler' (those words, sent in the 6 hours before the turn ended), 'you' (anything else typed), null (none read).
 // Whoever set it going gets its end: the 管家 a notice, you a push.
 function turnBy(prompt, sent, at) {
@@ -2609,8 +2628,9 @@ async function web() {
     if (!f) { const g = gptSessions().find((x) => x.id === n.id); return g ? turnBy(gptLast(g.home, g.id, 'userMessage'), blogSent(n.id), n.at) : null; }
     let tail;
     try { const fd = fs.openSync(f, 'r'); try { tail = slice(fd, Math.max(0, fs.fstatSync(fd).size - 4194304), 4194304); } finally { fs.closeSync(fd); } } catch { return null; }
-    const p = field(tail, 'lastPrompt', true);
-    if (sameDir(s.cwd, BUTLER)) return p ? (unwrapPaste(p).startsWith('[系统通知]') ? 'notice' : 'you') : null;
+    // what was typed by the time the note came (5 s over it, for a clock a little off): one you type later is the next turn's
+    const p = lastTyped(tail, n.at + 5000);
+    if (sameDir(s.cwd, BUTLER)) return p ? (p.startsWith('[系统通知]') ? 'notice' : 'you') : null;
     return turnBy(p, blogSent(n.id), n.at);
   };
   setInterval(() => {
@@ -3328,7 +3348,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
