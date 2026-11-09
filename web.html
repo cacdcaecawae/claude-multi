@@ -33,7 +33,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* VS Code's Dark Modern colors; the account colors are the island's */
   :root { --bg: #1f1f1f; --bar: #181818; --border: #2b2b2b; --hover: #2a2d2e; --sel: #37373d; --input: #313131; --inputB: #3c3c3c;
     --fg: #cccccc; --fg2: #9d9d9d; --fg3: #6e7681; --accent: #0078d4; --link: #4daafc; --green: #3fb950; --orange: #e5a03a; --red: #f85149;
-    --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; --gpt: #19c37d; color-scheme: dark;
+    --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; --gpt: #19c37d; --apple: #f5f5f7; color-scheme: dark;
     --fgHi: #ffffff; --msg: #d4d4d4; --tint: rgba(255,255,255,.08); --btn: #313131; --btnH: #3c3c3c; --badge: #616161; --badgeFg: #f8f8f8;
     --pop: #252526; --popB: #454545; --accentH: #026ec1; --accentBg: rgba(0,120,212,.22); --errFg: #ffa198; --cellB: #3c3c3c;
     --split: #4a4a4a; --term: #1f1f1f; --act: #131313; --purple: #b180d7; --shadow: rgba(0,0,0,.5); --lift: rgba(0,0,0,.25); --frame: #111111; --cardB: #2b2b2b; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
@@ -44,7 +44,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     --inputB: #cecece; --fg: #3b3b3b; --fg2: #616161; --fg3: #6e6e6e; --fgHi: #1f1f1f; /* fg3 (times, paths): VS Code's #8b8b8b read 3.5:1 on white, this 5:1 */ --msg: #2b2b2b; --accent: #005fb8; --accentH: #0258a8;
     --accentBg: rgba(0,95,184,.1); --link: #005fb8; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.06);
     --btn: #e8e8e8; --btnH: #dadada; --badge: #cccccc; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #d4d4d4; --cellB: #d9d9d9;
-    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --gpt: #0b8a5c; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
+    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --gpt: #0b8a5c; --apple: #000; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 13px/1.4 var(--ui); }
   /* opened from the home screen, iOS 26 makes the page shorter than the screen by the status bar (WebKit bug 301108):
@@ -499,6 +499,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .who .took { font-weight: 400; color: var(--green); margin-left: 6px; }
   .who .spark { width: 16px; height: 16px; color: #d97757; }
   .who .gm { width: 15px; height: 15px; color: var(--gpt); } .who .gm svg { display: block; width: 100%; height: 100%; } /* a GPT one's replies: OpenAI's mark */
+  .who .am { width: 15px; height: 15px; color: var(--apple); } .who .am svg { display: block; width: 100%; height: 100%; } /* a Mac mini one's: Apple's */
   /* a turn: Claude's tool calls in a row folded into one line (tap to see each); the end of the answer marked */
   details.tools summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: var(--fg2);
     padding: 3px 10px 3px 4px; border-radius: 6px; background: var(--tint); }
@@ -817,7 +818,8 @@ const SPARK = `<svg class="spark" viewBox="-32 -32 64 64" fill="currentColor">${
   `<path transform="rotate(${k * 30 + 8 + TILT[k]})" d="M-4.7 0L-2.5 -${l}A2.5 2.5 0 0 1 2.5 -${l}L4.7 0z"/>`).join('')}<circle r="7.6"/></svg>`;
 // OpenAI's mark (Simple Icons), in currentColor; a conversation's mark: n its account, 1 on
 const OPENAI = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>`;
-const mark = (gpt, n) => `<i class="mk" style="color:${gpt ? 'var(--gpt)' : ACCT[(n - 1) % 4] ?? 'var(--fg3)'}" title="${gpt ? 'GPT' : 'Claude'}">${gpt ? OPENAI : SPARK}</i>`; // no account (the Mac's): grey
+const mark = (gpt, n, mac) => (mac ? '<i class="mk" style="color:var(--apple)" title="Mac mini">' + APPLE + '</i>' // a Mac mini one: Apple's mark
+  : `<i class="mk" style="color:${gpt ? 'var(--gpt)' : ACCT[(n - 1) % 4]}" title="${gpt ? 'GPT' : 'Claude'}">${gpt ? OPENAI : SPARK}</i>`);
 $('#act .logo').insertAdjacentHTML('afterbegin', `<span class="sp">${SPARK}<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" pathLength="100"/></svg></span>`);
 
 // --- the layout, as in VS Code: the activity bar picks what the side bar shows (对话, 额度, 用量); conversations open as
@@ -1026,7 +1028,7 @@ function drawHere() {
   const left = s?.req ? s.req + HOUR - Date.now() : null, min = Math.ceil(left / 60000);
   el.innerHTML = [
     w && `<span class="where ${w}" title="这个对话的 ${c.gpt ? 'Codex' : 'Claude'} 在哪里运行">${w === 'pc' ? (c.mac ? 'Mac 的终端' : '电脑窗口') : '网页服务'}</span>`,
-    c.mac && `<span title="在 Mac 上的 ${esc(state.mac?.dir ?? '')} 里运行，用 Mac 自己的账号"><i style="background:var(--fg3)"></i>${esc(state.mac?.label ?? 'Mac mini')}</span>`,
+    c.mac && `<span title="在 Mac 上的 ${esc(state.mac?.dir ?? '')} 里运行，用 Mac 自己的账号">${mark(false, 0, true)}${esc(state.mac?.label ?? 'Mac mini')}</span>`,
     c.acct && c.gpt && `<span title="${esc(g?.label ?? '')}"><i style="background:var(--gpt)"></i>GPT 账号 G${c.acct}${gw ? ` · ${winName(gw.k)} <b class="${tone(gw.pct)}">${gw.pct}%</b>` : ''}</span>`,
     c.acct && !c.gpt && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % 4]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
     line?.model && `<span title="模型 · 思考强度">${esc([line.model, line.effort].filter(Boolean).join(' · '))}</span>`,
@@ -1062,14 +1064,14 @@ const nd = (k) => (k ? `<i class="nd ${k}" title="${k === 'ask' ? '在等你' : 
 const chatEnd = (x) => `${nd(chatMark(x))}${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}${x.pid ? `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(x.at)}</span>`}
     <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
 const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1, '', x.gpt)}
-    <div class="main"><div class="t">${mark(x.gpt, x.acct + 1)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
+    <div class="main"><div class="t">${mark(x.gpt, x.acct + 1, x.mac)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
 function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
   const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run';
   // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
   const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', 'Claude'], ['gpt', 'GPT']].map(([k, l]) => `<button data-kind="${k}"${k === listKind ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : '';
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1, '', x.gpt)}
-    <div class="main t">${mark(x.gpt, x.acct + 1)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
+    <div class="main t">${mark(x.gpt, x.acct + 1, x.mac)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').html = `<button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
@@ -1423,7 +1425,7 @@ function drawDesk() {
   head('deskRun', '对话', [wait.length && `${wait.length} 个等你`, done.length && `${done.length} 个答完了`, n && `${n} 个在运行`].filter(Boolean).join(' · ')); // what's for you first: the rest may be cut short
   $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span>
     <span class="${done.length ? 'b' : ''}"><b>${done.length}</b>答完了</span><span><b>${idle.length}</b>空闲</span></div>
-    ${[...wait, ...busy, ...done, ...idle].map((x) => `<div class="item" data-open="${esc(x.id)}" tabindex="0" role="button" title="${esc(x.cwd)}">${mark(x.gpt, x.acct + 1)}<span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
+    ${[...wait, ...busy, ...done, ...idle].map((x) => `<div class="item" data-open="${esc(x.id)}" tabindex="0" role="button" title="${esc(x.cwd)}">${mark(x.gpt, x.acct + 1, x.mac)}<span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
   if (!tokensNow && Date.now() - tokensAt > 120000) {
     tokensAt = Date.now();
     tokensNow = getTokens().then((t) => { tokens = t; tokensErr = ''; setTimeout(drawDesk); return t; }).finally(() => { tokensNow = null; });
@@ -1536,6 +1538,7 @@ const PAY = {
   google_play_subscription: ['Google Play 订阅', 'M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z'],
   stripe_subscription: CARD, stripe_subscription_contracted: CARD,
 };
+const APPLE = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="${PAY.apple_subscription[1]}"/></svg>`; // the Mac mini's mark (its conversations, its card)
 const renew = (s) => {
   if (!s) return '';
   const [how, d] = PAY[s.billing] ?? [];
@@ -1554,7 +1557,7 @@ function renderUsage() {
       ${a.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(a.err)}</div>` : `
       <div class="m" style="margin-top:4px">可连续用 ${a.runway} 小时</div>
       ${a.windows.map(winRow).join('')}`}</div>`).join('')}
-    ${u.mac ? `<div class="card"><div class="cardHead">${mark(false, 0)}<b>${esc(u.mac.label)}</b><span class="m grow">${esc(u.mac.dir)}</span>${u.mac.plan ? `<span class="m">${esc(u.mac.plan)}</span>` : ''}</div>
+    ${u.mac ? `<div class="card"><div class="cardHead">${mark(false, 0, true)}<b>${esc(u.mac.label)}</b><span class="m grow">${esc(u.mac.dir)}</span>${u.mac.plan ? `<span class="m">${esc(u.mac.plan)}</span>` : ''}</div>
       ${u.mac.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(u.mac.err)}</div>` : `
       ${u.mac.runway != null ? `<div class="m" style="margin-top:4px">可连续用 ${u.mac.runway} 小时 · 在 Mac 上读的，不参与推荐</div>` : ''}
       ${u.mac.windows.map(winRow).join('')}`}</div>` : ''}
@@ -1759,7 +1762,7 @@ function drawTabs(g) {
     const turning = c.ended ? false : c === g.active && c.started ? c.live === 'busy' : busy.has(c.id);
     const dot = c.live === 'ask' || note.get(c.id) === 'ask' ? ' ask' : note.has(c.id) ? ' done' : '';
     return `<div class="tab${c === g.active ? ' on' : ''}${c.ended ? ' gone' : ''}" data-i="${i}" tabindex="0" role="tab" aria-selected="${c === g.active}" draggable="${FINE}" title="${esc(c.title)}">
-      ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct, '', c.gpt)}<span class="tt">${mark(c.gpt, c.acct)}${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
+      ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct, '', c.gpt)}<span class="tt">${mark(c.gpt, c.acct, c.mac)}${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
   }).join('') || '<span class="brand">Claude 多账号</span>';
   g.el.classList.toggle('blank', !g.tabs.length);
 }
@@ -2216,7 +2219,7 @@ function makeConv(body, title) {
       histEnd = r.end;
       if (r.items.length) {
         const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
-        addItems($p('.hNew'), r.items, c.gpt);
+        addItems($p('.hNew'), r.items, c.gpt || (c.mac && 'mac'));
         const flat = (s) => s.replace(/\s+/g, ' '); // a paste's new lines may come back as \r\n
         // the record's message, or one with it inside (typed on after text left in Claude's input box): no longer waiting
         const took = (s, m) => flat(s.text) === flat(m.text) || (s.text && flat(m.text).includes(flat(s.text)));
@@ -2242,7 +2245,7 @@ function makeConv(body, title) {
       const r = await histGet(`&end=${histOldest}`);
       if (g !== histGen || !$p('.hOld')) return;
       const h = hist.scrollHeight, tmp = document.createElement('div');
-      addItems(tmp, r.items, c.gpt); $p('.hOld').prepend(...tmp.childNodes);
+      addItems(tmp, r.items, c.gpt || (c.mac && 'mac')); $p('.hOld').prepend(...tmp.childNodes);
       histOldest = r.start; topNote();
       hist.scrollTop += hist.scrollHeight - h; // what you were reading stays where it was
     } catch { olderAfter = Date.now() + 5000; } finally { histBusy = false; }
@@ -2733,11 +2736,12 @@ function userHtml(m, mark) {
   return `<div class="hm user${cls ? ' ' + cls : ''}${long ? ' long' : ''}"${mark}>${lab ? `<span class="lab">${lab}</span>` : ''}${long
     ? `<div class="clip">${md(words)}</div><button class="more" data-more></button>` : md(words)}</div>`;
 }
-function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies headed GPT
+function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies headed GPT; 'mac': a Mac mini one's, headed with Apple's mark
   for (const m of items) {
     // Claude's answer begins (its words or its first tool call right after your message): marked as Claude's
     if ((m.role === 'claude' || m.role === 'tool') && box.lastElementChild?.matches('.hm.user, .hm.img'))
-      box.insertAdjacentHTML('beforeend', gpt ? `<div class="who"><i class="gm">${OPENAI}</i>GPT</div>` : `<div class="who">${SPARK}Claude</div>`);
+      box.insertAdjacentHTML('beforeend', gpt === 'mac' ? `<div class="who"><i class="am">${APPLE}</i>Claude</div>`
+        : gpt ? `<div class="who"><i class="gm">${OPENAI}</i>GPT</div>` : `<div class="who">${SPARK}Claude</div>`);
     // a message of yours on the line an earlier one hung on, nothing answering that one: it was stopped and taken back
     // (the record keeps it, Claude doesn't), so it goes (the service leaves such out of what it reads at once)
     const mark = m.u ? ` data-p="${esc(m.p)}" data-u="${esc(m.u)}"` : '';

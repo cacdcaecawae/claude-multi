@@ -675,6 +675,7 @@ function Render {
     $card = X ("<Border $ns Background='#0AFFFFFF' CornerRadius='14' Padding='14,11,14,12' Margin='0,0,0,6'><StackPanel><DockPanel>" +
       "<Button x:Name='Go' DockPanel.Dock='Right' Content='&#xE768;' ToolTip='在 Mac 上的 $(Esc $m.dir) 里启动 Claude' Margin='6,-6,-8,-6'/>" +
       "<TextBlock DockPanel.Dock='Right' Text='$(Esc $m.plan)' FontSize='12' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
+      "<Path Data='$($PAY.apple_subscription[1])' Fill='#E6FFFFFF' Width='14' Height='14' Stretch='Uniform' Margin='0,-2,8,0' VerticalAlignment='Center'/>" + # Apple's mark, white on the dark panel
       "<TextBlock Text='$(Esc $m.label)' FontSize='13' FontWeight='SemiBold' Foreground='#CCFFFFFF' Margin='0,0,12,0' VerticalAlignment='Center'/>" +
       "</DockPanel>$($lines -join '')</StackPanel></Border>")
     $go = $card.FindName('Go'); $go.Style = $win.FindResource('Icon')
