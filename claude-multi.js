@@ -2706,7 +2706,7 @@ async function web() {
     }
     return { cpu: cpuPct, mem: os.totalmem() - os.freemem(), memAll: os.totalmem() };
   };
-  // 额度's 电脑: this one's, Claude Code's part in it (read with PowerShell every 3 s at most, whoever asks: the newest
+  // 额度's CPU and memory (id here: this one's, under 推荐账号), Claude Code's part in it (read with PowerShell every 3 s at most, whoever asks: the newest
   // sample given at once, the next read meanwhile). A read that failed starts over (no CPU till the next one).
   const UNREAD = { cpu: null, mem: null, n: null, prev: null };
   let share = { ...UNREAD, at: 0 }, sharing = false;
@@ -2719,7 +2719,7 @@ async function web() {
       });
     }
     const pc = pcNow(), within = (x, all) => (x == null || all == null ? x : Math.min(x, all)); // its CPU over its own 2 s, Claude's over 3
-    return [{ name: os.hostname(), cpu: pc.cpu, mem: pc.mem, memAll: pc.memAll, n: share.n, cpuClaude: within(share.cpu, pc.cpu), memClaude: within(share.mem, pc.mem) }];
+    return [{ id: 'here', name: os.hostname(), cpu: pc.cpu, mem: pc.mem, memAll: pc.memAll, n: share.n, cpuClaude: within(share.cpu, pc.cpu), memClaude: within(share.mem, pc.mem) }];
   };
   // its tickets, as the 操作台 shows them: the open ones, what waits on you first, then the last 5 ended. Only this service
   // writes them (written whole, then swapped in: a crash mid-write leaves the old file)
