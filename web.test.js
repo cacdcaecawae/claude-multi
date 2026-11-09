@@ -7,7 +7,7 @@ const browser = process.env.BROWSER_EXE || [
 ].find((f) => fs.existsSync(f));
 if (!browser) throw Error('Set BROWSER_EXE to a Chromium browser executable');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-browser-test-'));
-const state = { me: 'isolated test', sessions: [{ id: 'A', title: 'Test conversation', acct: 0, cwd: 'C:/test', at: Date.now(), pid: 123 }],
+const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title: 'Test conversation', acct: 0, cwd: 'C:/test', at: Date.now(), pid: 123 }],
   notes: [], gpt: [], oai: true, tickets: [], waits: [], usage: { accounts: [{ label: 'test', windows: [], runway: 2 }], rec: 0, open: true, projects: [] } };
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
@@ -65,7 +65,8 @@ const press = async (key, shift = false) => {
 };
 (async () => {
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
-  proc = spawn(browser, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
+  // a mouse and keyboard, as the page's FINE wants: on a touch screen, or with no desktop (over SSH), it'd be taken for a phone
+  proc = spawn(browser, ['--headless=new', '--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
     '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   const ws = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(Error('Browser startup timeout')), 15000); let log = '';
@@ -142,6 +143,8 @@ const press = async (key, shift = false) => {
   await evaluate("readNote('M')");
   assert.equal((await bdot())[0], false);
   await evaluate("state.sessions.pop(); state.butler=null; document.querySelector('#toast').style.display='none'");
+  // switched off in 设置: its spark gone, out of its mode, and not gone into again
+  assert.deepEqual(await evaluate("(()=>{setButler(true);const r=[butler];state.butlerOn=false;butlerShown();r.push(butler,getComputedStyle(document.querySelector('#act .logo')).display);setButler(true);r.push(butler);state.butlerOn=true;butlerShown();return r})()"), [true, false, 'none', false]);
   console.log('browser 管家 desk 答完了 ok');
 
   // The settings dialog cycles focus, makes the background inert, and returns focus to its opener on Escape.

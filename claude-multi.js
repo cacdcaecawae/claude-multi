@@ -19,6 +19,9 @@ const ISLAND = path.join(ROOT, 'island.ps1');
 // only starts the web service), and nothing put in its inbox. The web pages and phones get their notes as ever.
 const ISLAND_OFF = path.join(ROOT, 'island-off');
 const islandOff = () => fs.existsSync(ISLAND_OFF);
+// the 管家, a 开发功能: off till it's switched on in the page's settings (then this file is there)
+const BUTLER_ON = path.join(ROOT, 'butler-on');
+const butlerOn = () => fs.existsSync(BUTLER_ON), BUTLER_SHUT = '管家没有开启：在设置的「开发功能」里打开';
 const CLAUDE = 'claude';
 
 const SHARED_FILES = ['settings.json', 'CLAUDE.md', 'keybindings.json'];
@@ -488,6 +491,25 @@ const lastReq = (s) => {
   }
   return null;
 };
+// What set a conversation's latest turn going, in a transcript slice: the last thing typed into it (a message, or one sent
+// while Claude was at work), unwrapped, from before `before`. Not Claude Code's last-prompt line: that's written only now
+// and then (with its title, after a tool call), so a turn that only answered still had the prompt before it there (a
+// [系统通知] the 管家 answered in a line read as yours: noted, pushed). A background task's or a teammate's message, a
+// command, isn't typed: the one before counts. A picture alone: '[Image]'. null: none in the slice.
+function lastTyped(tail, before = Infinity) {
+  const ls = tail.split('\n');
+  for (let i = ls.length - 1; i >= 0; i--) {
+    const l = ls[i];
+    if ((!l.includes('"type":"user"') && !l.includes('"queued_command"')) || l.includes('"type":"tool_result"')) continue;
+    let j; try { j = JSON.parse(l); } catch { continue; }
+    if (j.isMeta || j.isSidechain || j.isCompactSummary || Date.parse(j.timestamp) > before) continue;
+    if (j.type !== 'user' && !(j.attachment?.type === 'queued_command' && j.attachment.origin?.kind === 'human')) continue;
+    const parts = said(j), t = parts.find((p) => p.type === 'text')?.text?.trim() || (parts.some((p) => p.type === 'image') ? '[Image]' : '');
+    if (!t || /^(?:Another Claude session sent a message|<(?:task-notification|teammate-message|local-command|command-|system-reminder))/.test(t)) continue;
+    return unwrapPaste(t);
+  }
+  return null;
+}
 
 // Start times (Windows FILETIME, as sessions/<pid>.json's procStart) of these pids; null if PowerShell failed.
 // The same pids within a minute: the last answer (PowerShell takes ~0.2 s, and the web service asks every few seconds).
@@ -985,7 +1007,7 @@ function gptUsage(home) {
   const name = (w) => (w.window_minutes === 300 ? 'five_hour' : w.window_minutes === 10080 ? 'seven_day' : `${Math.round(w.window_minutes / 60)} 小时`);
   for (const f of paths) {
     let tail = '';
-    try { const fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size; tail = slice(fd, Math.max(0, size - 1048576), 1048576); fs.closeSync(fd); } catch { continue; }
+    try { const fd = fs.openSync(f, 'r'); try { tail = slice(fd, Math.max(0, fs.fstatSync(fd).size - 1048576), 1048576); } finally { fs.closeSync(fd); } } catch { continue; }
     const line = tail.split('\n').reverse().find((l) => l.includes('"rate_limits":{'));
     if (line) try {
       const r = JSON.parse(line).payload.rate_limits;
@@ -1220,7 +1242,7 @@ function resume(id, n) {
     return runGpt(gptAccounts(reg)[g.acct], ['resume', id]);
   }
   if (s.mac) return attach(id); // the Mac's: continued there by the web service, this tab joined to it
-  if (s.pid) { console.log(`这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
+  if (s.pid) { console.log(s.web ? '这个对话正在网页服务里运行：用 claude-multi attach 接上它。' : `这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
   const p = reg.profiles[Number(n) - 1] ?? reg.profiles[s.acct];
   if (!p) { console.log('请指定账号编号：claude-multi resume <对话 id> <账号编号>'); process.exit(1); }
   copyTo(s, p);
@@ -1844,7 +1866,7 @@ function notify(kind) {
     fs.closeSync(fd);
   } catch {}
   if (kind === 'done' && helpersBusy(tail, started)) return; // it only paused to read a helper's message; the job goes on
-  if (kind === 'done' && String(field(tail, 'lastPrompt', true) ?? '').startsWith('[系统通知]')) return; // the service woke it: not your news
+  if (kind === 'done' && (lastTyped(tail) ?? '').startsWith('[系统通知]')) return; // the service woke it: not your news
   // the conversation's title, which its terminal tab shows: lets the island drop it once you look
   // (the 管家's is 管家, wherever it shows: the island, the page, the phone)
   const title = sameDir(home || j.cwd || '.', BUTLER) ? '管家' : field(tail, 'customTitle', true) ?? field(tail, 'aiTitle', true);
@@ -2104,8 +2126,8 @@ function notesInto(all, notes, words, quiet = () => false) {
   }
   return [...news];
 }
-// Who set a conversation's turn going: its last prompt (Claude Code's last-prompt line: the words typed, unwrapped, the
-// first 200 or so; a background task finishing doesn't change it) against what the 管家 typed there (its log, the first
+// Who set a conversation's turn going: what was last typed there (lastTyped: the words, unwrapped; a background task
+// finishing doesn't change it) against what the 管家 typed there (its log, the first
 // 40): 'butler' (those words, sent in the 6 hours before the turn ended), 'you' (anything else typed), null (none read).
 // Whoever set it going gets its end: the 管家 a notice, you a push.
 function turnBy(prompt, sent, at) {
@@ -2912,8 +2934,9 @@ async function web() {
     if (!f) { const g = gptSessions().find((x) => x.id === n.id); return g ? turnBy(gptLast(g.home, g.id, 'userMessage'), blogSent(n.id), n.at) : null; }
     let tail;
     try { const fd = fs.openSync(f, 'r'); try { tail = slice(fd, Math.max(0, fs.fstatSync(fd).size - 4194304), 4194304); } finally { fs.closeSync(fd); } } catch { return null; }
-    const p = field(tail, 'lastPrompt', true);
-    if (sameDir(s.cwd, BUTLER)) return p ? (unwrapPaste(p).startsWith('[系统通知]') ? 'notice' : 'you') : null;
+    // what was typed by the time the note came (5 s over it, for a clock a little off): one you type later is the next turn's
+    const p = lastTyped(tail, n.at + 5000);
+    if (sameDir(s.cwd, BUTLER)) return p ? (p.startsWith('[系统通知]') ? 'notice' : 'you') : null;
     return turnBy(p, blogSent(n.id), n.at);
   };
   setInterval(() => {
@@ -3039,7 +3062,7 @@ async function web() {
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
       list.sort((a, b) => b.at - a.at);
       const m = load().mac; // the Mac mini, if there is one: 新对话 offers it
-      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), mac: m ? { label: macLabel(load()), dir: m.dir } : null, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), mac: m ? { label: macLabel(load()), dir: m.dir } : null, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow() };
     },
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
@@ -3056,6 +3079,13 @@ async function web() {
     },
     // the island, from the page's settings: off closes it (the web service it started at login runs on its own) and
     // clears its inbox; on starts it
+    // off: the 管家 running here stops too (its record kept: switched on again, 接着聊 takes it up)
+    'POST /api/butler': (q, b) => {
+      if (b.on) { fs.writeFileSync(BUTLER_ON, ''); return { on: true }; }
+      try { fs.unlinkSync(BUTLER_ON); } catch {}
+      for (const t of terms.values()) if (t.kind === 'pty' && !t.gone && sameDir(t.cwd, BUTLER)) t.proc.kill();
+      return { on: false };
+    },
     'GET /api/island': () => ({ on: !islandOff() }),
     'POST /api/island': (q, b) => {
       if (b.on) { try { fs.unlinkSync(ISLAND_OFF); } catch {} island(); return { on: true }; }
@@ -3153,6 +3183,7 @@ async function web() {
         return { key: t.key, kind: 'pty', pid: t.pid };
       };
       const reg = load(), cols = Math.max(40, Math.min(300, b.cols | 0 || 100)), rows = Math.max(10, Math.min(200, b.rows | 0 || 30));
+      if (b.dir != null) b.dir = String(b.dir).trim().replace(/^"(.*)"$/, '$1'); // a typed path, maybe as Explorer's 复制为路径 quotes it
       if (b.gpt) { // a GPT one: {id} its Codex here, or continued here on its own account (a GPT one changes none); {dir, acct}
         if (!b.id) {
           if (!b.dir || !fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
@@ -3188,13 +3219,15 @@ async function web() {
         if (r) return opened(r);
         if (b.live) throw new Error('这个对话已经不在运行了'); // the page reconnecting: an ended one isn't started anew
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
+        if (sameDir(s.cwd, BUTLER) && !butlerOn()) throw new Error(BUTLER_SHUT);
         const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
         copyTo(s, p);
         return opened(startPty(p, s.cwd, ['--resume', s.id], cols, rows));
       }
+      if (b.dir && sameDir(b.dir, BUTLER) && !butlerOn()) throw new Error(BUTLER_SHUT);
       const p = reg.profiles[b.acct - 1];
       if (!p) throw new Error('没有这个账号');
-      if (!b.dir || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
+      if (!b.dir || !fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
       // the 管家 is one: two screens starting it at once (it isn't listed before its first message) get the same
       const one = sameDir(b.dir, BUTLER) && [...terms.values()].find((t) => t.kind === 'pty' && !t.gone && sameDir(t.cwd, BUTLER));
       if (one) return opened(one);
@@ -3409,7 +3442,7 @@ async function web() {
     } finally { telling = false; }
   }, 3000);
   // After a restart each one that ran here is continued on its account, back idle (one cut mid-answer isn't told to go
-  // on: the 管家 is, for those it watches). The 管家 also when it has tickets open; then told to look at them all again,
+  // on: the 管家 is, for those it watches). The 管家 also (switched on) when it has tickets open; then told to look at them all again,
   // and to set again the reminders that ended. (A Claude ended with its terminal takes its session file.)
   async function wakeUp() {
     const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
@@ -3418,7 +3451,7 @@ async function web() {
       const s = all.find((x) => x.id === id), p = s && s !== me && (s.mac || (!s.pid && reg.profiles[s.acct]));
       if (p) try { if (s.mac) startMac({ resume: s.id, cwd: s.macCwd }); else startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
     }
-    const open = readTickets().some((x) => !x.end), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
+    const open = readTickets().some((x) => !x.end), p = butlerOn() && me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
     if (!p) return;
     const t = startPty(p, me.cwd, ['--resume', me.id]);
     if (!open && !lost.length) return log('butler_woken', { session_id: me.id }); // nothing it was watching: back, waiting for you
@@ -3524,7 +3557,8 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   const sidOf = (ri, f) => path.relative(roots[ri].dir, f).split(path.sep)[1]?.replace(/\.jsonl$/, '');
   roots.forEach((r, ri) => {
     for (const f of walk(r.dir)) {
-      const st = fs.statSync(f), size = st.size;
+      let st; try { st = fs.statSync(f); } catch { continue; } // gone since the walk (Claude's cleanup, a delete): its cached replies stay, below
+      const size = st.size;
       let c = cache.files[f] ?? { size: 0, recs: [] };
       c.born ??= st.birthtimeMs;
       if (size < c.size) c.size = 0; // rewritten shorter: read it all again, keeping what it had
@@ -3658,7 +3692,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { listSessions, MAC_WATCH, macName, macCmd, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { lastTyped, listSessions, MAC_WATCH, macName, macCmd, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
