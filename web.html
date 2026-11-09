@@ -1609,6 +1609,8 @@ async function renderTokens() {
   const days = [...Array(14)].map((_, k) => { const dt = new Date(); dt.setDate(dt.getDate() - 13 + k); return { dt, d: map[key(dt)] }; });
   const week = days.slice(-7), sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
+  t.accounts.forEach((a, i) => { a.mac = !!state.mac && i === n - 1; }); // the server lists the Mac's records last
+  const col = (i) => (t.accounts[i]?.mac ? 'var(--apple)' : ACCT[i % 4]); // the Mac mini's share in Apple's black (white on dark)
   $('#view').html = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
     <div class="tiles">
       <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">约 ${usd(t.usd)}</div></div>
@@ -1617,11 +1619,11 @@ async function renderTokens() {
       <div class="tile"><div class="k">日均</div><div class="v">${fmtTok(t.total / active)}</div><div class="u">约 ${usd(t.usd / active)}</div></div>
     </div>
     <h3>近 14 天</h3><div class="card"><div class="bars">${days.map((x) => `<div title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
-      ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${ACCT[i % 4]}"></i>` : '').join('')}</div>`).join('')}</div>
+      ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${col(i)}"></i>` : '').join('')}</div>`).join('')}</div>
       <div class="ticks"><span>${days[0].dt.getMonth() + 1}/${days[0].dt.getDate()}</span><span>今天</span></div>
-      <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${ACCT[i % 4]}"></i>账号 ${i + 1}</span>`).join('')}</div></div>
-    <h3>按账号</h3>${t.accounts.map((a, i) => `<div class="card cardHead">${ac(i + 1)}<div class="grow"><b>账号 ${i + 1}</b>
-      <div class="m">${esc(a.label)}</div></div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">约 ${usd(a.usd)}</div></div></div>`).join('')}</div>`;
+      <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${col(i)}"></i>${a.mac ? esc(a.label) : `账号 ${i + 1}`}</span>`).join('')}</div></div>
+    <h3>按账号</h3>${t.accounts.map((a, i) => `<div class="card cardHead">${a.mac ? mark(false, 0, true) : ac(i + 1)}<div class="grow"><b>${a.mac ? esc(a.label) : `账号 ${i + 1}`}</b>
+      ${a.mac ? '' : `<div class="m">${esc(a.label)}</div>`}</div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">约 ${usd(a.usd)}</div></div></div>`).join('')}</div>`;
 }
 
 function newSheet() {

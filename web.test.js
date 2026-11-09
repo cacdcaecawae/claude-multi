@@ -190,6 +190,12 @@ const press = async (key, shift = false) => {
   if (process.env.CM_TEST_SCREENSHOT) fs.writeFileSync(process.env.CM_TEST_SCREENSHOT, Buffer.from((await call('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
   assert.deepEqual(errors, []);
   console.log('browser mobile targets, light theme and page width ok');
+  // 用量: the Mac mini's records (listed last) under its name and Apple's mark, not as one more 账号 n
+  assert.equal(await evaluate(`(() => { state.mac = { label: 'Mac mini' };
+    tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0 }], days: [], total: 2, usd: 0 }; renderTokens();
+    const h = [...document.querySelectorAll('#view .cardHead')]; return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg') ? '+apple' : '')).join(' | '); })()`),
+    '账号 1 | Mac mini+apple');
+  console.log('browser 用量 Mac mini ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }
