@@ -830,7 +830,7 @@ function gptUsage(home) {
   const name = (w) => (w.window_minutes === 300 ? 'five_hour' : w.window_minutes === 10080 ? 'seven_day' : `${Math.round(w.window_minutes / 60)} 小时`);
   for (const f of paths) {
     let tail = '';
-    try { const fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size; tail = slice(fd, Math.max(0, size - 1048576), 1048576); fs.closeSync(fd); } catch { continue; }
+    try { const fd = fs.openSync(f, 'r'); try { tail = slice(fd, Math.max(0, fs.fstatSync(fd).size - 1048576), 1048576); } finally { fs.closeSync(fd); } } catch { continue; }
     const line = tail.split('\n').reverse().find((l) => l.includes('"rate_limits":{'));
     if (line) try {
       const r = JSON.parse(line).payload.rate_limits;
@@ -1064,7 +1064,7 @@ function resume(id, n) {
     process.chdir(g.cwd);
     return runGpt(gptAccounts(reg)[g.acct], ['resume', id]);
   }
-  if (s.pid) { console.log(`这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
+  if (s.pid) { console.log(s.web ? '这个对话正在网页服务里运行：用 claude-multi attach 接上它。' : `这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
   const p = reg.profiles[Number(n) - 1] ?? reg.profiles[s.acct];
   if (!p) { console.log('请指定账号编号：claude-multi resume <对话 id> <账号编号>'); process.exit(1); }
   copyTo(s, p);
@@ -2868,6 +2868,7 @@ async function web() {
         return { key: t.key, kind: 'pty', pid: t.pid };
       };
       const reg = load(), cols = Math.max(40, Math.min(300, b.cols | 0 || 100)), rows = Math.max(10, Math.min(200, b.rows | 0 || 30));
+      if (b.dir != null) b.dir = String(b.dir).trim().replace(/^"(.*)"$/, '$1'); // a typed path, maybe as Explorer's 复制为路径 quotes it
       if (b.gpt) { // a GPT one: {id} its Codex here, or continued here on its own account (a GPT one changes none); {dir, acct}
         if (!b.id) {
           if (!b.dir || !fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
@@ -2897,7 +2898,7 @@ async function web() {
       }
       const p = reg.profiles[b.acct - 1];
       if (!p) throw new Error('没有这个账号');
-      if (!b.dir || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
+      if (!b.dir || !fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
       // the 管家 is one: two screens starting it at once (it isn't listed before its first message) get the same
       const one = sameDir(b.dir, BUTLER) && [...terms.values()].find((t) => t.kind === 'pty' && !t.gone && sameDir(t.cwd, BUTLER));
       if (one) return opened(one);
@@ -3222,7 +3223,8 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   const sidOf = (ri, f) => path.relative(roots[ri].dir, f).split(path.sep)[1]?.replace(/\.jsonl$/, '');
   roots.forEach((r, ri) => {
     for (const f of walk(r.dir)) {
-      const st = fs.statSync(f), size = st.size;
+      let st; try { st = fs.statSync(f); } catch { continue; } // gone since the walk (Claude's cleanup, a delete): its cached replies stay, below
+      const size = st.size;
       let c = cache.files[f] ?? { size: 0, recs: [] };
       c.born ??= st.birthtimeMs;
       if (size < c.size) c.size = 0; // rewritten shorter: read it all again, keeping what it had
