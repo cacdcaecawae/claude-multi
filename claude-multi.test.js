@@ -981,6 +981,13 @@ console.log('tokens ok');
   assert.equal(lastTyped(more({ type: 'user', message: { content: [{ type: 'image', source: {} }] } })), '[Image]');
   assert.equal(lastTyped('{"type":"user" cut off\n'), null);
   console.log('turn owner ok');
+  // 额度's 电脑: Claude Code's part, from two reads of its processes
+  const { claudeShare } = require('./claude-multi');
+  const r1 = claudeShare('10 1000 100\r\n11 500 50 C:\\Users\\me\\.local\\bin\\claude.exe\r\n12 9000 900 C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1\\claude.exe\r\n', null, 0, 4);
+  assert.deepEqual([r1.cpu, r1.mem, r1.n], [null, 150, 2]); // the first: no CPU yet; the desktop app left out
+  const r2 = claudeShare('10 3000 100\n13 1000 70\n', r1.prev, 2000, 4); // 10: 2 s more; 11 ended; 13 new: all its 1 s
+  assert.deepEqual([r2.cpu, r2.mem, r2.n], [38, 170, 2]); // 3 s of CPU over 2 s on 4 cores
+  console.log('machines ok');
 }
 
 // What the 管家 costs, by what set it going: you, a [系统通知], a background task (a tool's result in between keeps

@@ -228,6 +228,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .win b { width: 36px; text-align: right; color: var(--fg); font-weight: 600; }
   .win span:first-child { width: 40px; }
   .win span:last-child { width: 76px; text-align: right; color: var(--fg3); }
+  /* 额度's CPU and memory: a meter in two parts, Claude Code's (its orange) and the rest in use (grey) */
+  .meter.two { display: flex; } .meter.two > i:first-child { background: #d97757; } .meter.two > i + i { background: var(--fg3); }
+  .win.mach span:last-child { width: auto; min-width: 76px; } /* as the quota rows (the bars line up), wider only for a long one */
   .renew { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--fg3); white-space: nowrap; }
   .renew svg { width: 11px; height: 11px; margin-top: -2px; }
   .renew.end { color: var(--orange); } /* renewal turned off: the day it ends */
@@ -1555,6 +1558,7 @@ function renderUsage() {
   const u = state.usage, gp = state.gpt ?? [];
   $('#sideActs').html = `<button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   $('#view').html = `<div class="panel"><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : esc(shut(u))}</div>
+    <div data-machine="here">${machineRows('here')}</div>
     ${u.accounts.map((a, i) => `<div class="card"><div class="cardHead">${ac(i + 1)}<b>账号 ${i + 1}</b>
       <span class="m grow">${esc(a.label)}</span>${renew(a.sub)}${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
       ${a.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(a.err)}</div>` : `
@@ -1567,6 +1571,24 @@ function renderUsage() {
       ${g.windows?.length ? g.windows.map(winRow).join('') : '<div class="m" style="margin-top:4px;white-space:normal">额度还没读到：在它上面回复过一次后才有</div>'}</div>`).join('')
       : '<div class="m" style="white-space:normal">还没有。在电脑上运行 claude-multi new gpt，用 ChatGPT 登录后，就能在这里新开 GPT 对话。</div>'}</div>`;
 }
+// 额度's CPU and memory, a computer's where it's shown ([data-machine]: here, under 推荐账号), Claude Code's part first.
+// Asked every 3 s while the panel is in sight (it's drawn again from the state every 5 s: these patch themselves in)
+let machines = null;
+function machineRows(id) {
+  const m = Array.isArray(machines) ? machines.find((x) => x.id === id) : null;
+  if (m?.err) return `<div class="m" style="margin-top:6px">${esc(m.err)}</div>`;
+  const gb = (b) => (b / 1073741824).toFixed(1), pct = (x, all) => (all > 0 ? Math.max(0, Math.min(100, (100 * x) / all)) : 0), no = (x) => x == null;
+  const row = (k, claude, used, all, said, mine, tip) => `<div class="win mach" title="${tip}"><span>${k}</span><div class="meter two"><i style="width:${pct(claude ?? 0, all)}%"></i><i style="width:${pct((used ?? 0) - (claude ?? 0), all)}%"></i></div><b>${said}</b><span>Claude ${mine}</span></div>`;
+  const tip = `${m?.name ? esc(m.name) + '：' : ''}橙色是 Claude Code${m?.n != null ? `（${m.n} 个）` : ''}，灰色是其他程序`;
+  return row('CPU', m?.cpuClaude, m?.cpu, 100, no(m?.cpu) ? '…' : `${m.cpu}%`, no(m?.cpuClaude) ? '…' : `${m.cpuClaude}%`, tip)
+    + row('内存', m?.memClaude, m?.mem, m?.memAll, no(m?.mem) ? '…' : `${Math.round(pct(m.mem, m.memAll))}%`, no(m?.memClaude) ? '…' : `${gb(m.memClaude)} GB`,
+      no(m?.mem) ? tip : `${tip}；共用 ${gb(m.mem)} / ${gb(m.memAll)} GB`);
+}
+setInterval(async () => {
+  if (document.visibilityState !== 'visible' || side !== 'usage' || !sideOn || !state) return;
+  try { const r = await (await fetch('/api/machines')).json(); machines = Array.isArray(r) ? r : null; } catch { return; }
+  document.querySelectorAll('[data-machine]').forEach((el) => (el.html = machineRows(el.dataset.machine)));
+}, 3000);
 // 刷新 and 预热 under 额度: the button says it's at work while it is (the panel is drawn again every 5 s meanwhile),
 // a bubble says how it went
 let usageBusy = ''; // 'refresh' or 'warm' while one runs
