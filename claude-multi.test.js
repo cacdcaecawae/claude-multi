@@ -132,6 +132,16 @@ const old = require('path').join(tmp, 'old.json');
 fs.writeFileSync(old, JSON.stringify({ v: 2, files: { [require('path').join(tmp, 'a', 'p', 'gone.jsonl')]: { size: 9, recs: [['msg_9:r', '2026-09-29', 1, 0, 0, 1, 0, 'claude-opus-5-5', 0]] } } }));
 t = tokenStats(roots, old);
 assert.equal(t.total, 2); near(t.usd, (1 + 1 * 2) * 4 / 1e6);
+// the advisor's calls ride in a reply's usage.iterations: counted too, at its model's price (Fable 5.1), once though repeated
+{
+  const C = require('path').join(tmp, 'adv', 'p'); fs.mkdirSync(C, { recursive: true });
+  const u = { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 2, iterations: [
+    { type: 'message', input_tokens: 1, output_tokens: 2 }, { type: 'advisor_message', model: 'claude-fable-5-1', input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 0 }] };
+  const line = JSON.stringify({ message: { model: 'claude-opus-5-5', id: 'msg_a', usage: u }, requestId: 'req_a', type: 'assistant', timestamp: atH(14) }) + '\n';
+  fs.writeFileSync(require('path').join(C, 's.jsonl'), line + line);
+  const ta = tokenStats([{ label: 'adv', dir: require('path').join(tmp, 'adv') }], require('path').join(tmp, 'adv.json'));
+  assert.equal(ta.total, 113); near(ta.usd, (1 * 4 + 2 * 20) / 1e6 + (100 * 10 + 10 * 50) / 1e6);
+}
 // switched to b and back to a: a's file is the older one and holds every reply, yet b's stay b's (by the switch log)
 {
   const sid = '0cca25c9-be24-456d-a34c-fa807b945adb', log = require('path').join(tmp, 'events.jsonl');

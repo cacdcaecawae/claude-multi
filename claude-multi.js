@@ -3445,12 +3445,13 @@ function replyCost([, , i, o, w5, w1, r, model, fast]) {
   return ((i + w5 * 1.25 + w1 * 2) * pi + o * po + r * pr) / 1e6 * (fast ? 2 : 1);
 }
 function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-cache.json'), logFile = LOG) {
-  let cache = { v: 3, files: {} };
+  let cache = { v: 4, files: {} };
   try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch (e) {
     if (e.code !== 'ENOENT') try { fs.copyFileSync(cacheFile, `${cacheFile}.bad`); } catch {} // unreadable: keep it for a hand rescue
   }
-  // replies now carry their time (who made one goes by it): the records read again; deleted ones keep theirs, without
-  if (cache.v !== 3) cache = { v: 3, files: Object.fromEntries(Object.entries(cache.files ?? {}).filter(([f]) => !fs.existsSync(f))) };
+  // replies now carry their time (who made one goes by it), then the advisor's calls (v4): the records read again;
+  // deleted ones keep theirs, without
+  if (cache.v !== 4) cache = { v: 4, files: Object.fromEntries(Object.entries(cache.files ?? {}).filter(([f]) => !fs.existsSync(f))) };
   const num = (s, k) => +(s.match(new RegExp(`"${k}":(\\d+)`))?.[1] ?? 0);
   const two = (n) => String(n).padStart(2, '0');
   const day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; };
@@ -3506,8 +3507,16 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
             const u = l.slice(l.indexOf('"usage":')), w = num(u, 'cache_creation_input_tokens'), w1 = Math.min(w, num(u, 'ephemeral_1h_input_tokens'));
             const x = [`${id}:${l.match(/"requestId":"([^"]+)"/)?.[1] ?? ''}`, day(ts), num(u, 'input_tokens'), num(u, 'output_tokens'),
               w - w1, w1, num(u, 'cache_read_input_tokens'), l.match(/"model":"([^"]+)"/)?.[1] ?? '', +/"speed":"fast"/.test(u), Date.parse(ts)];
-            const i = at.get(x[0]);
-            if (i === undefined) { at.set(x[0], c.recs.length); c.recs.push(x); } else if (sum(x) > sum(c.recs[i])) c.recs[i] = x;
+            // the advisor's calls (Fable, at its price) ride in the reply's usage.iterations, apart from its own tokens
+            const its = u.includes('"advisor_message"') ? (() => { try { return JSON.parse(l).message.usage.iterations ?? []; } catch { return []; } })() : [];
+            const xs = [x, ...its.filter((t) => t.type !== 'message' && t.model).map((t, k) => [`${x[0]}:${k}`, x[1], t.input_tokens ?? 0, t.output_tokens ?? 0,
+              t.cache_creation?.ephemeral_5m_input_tokens ?? 0, t.cache_creation?.ephemeral_1h_input_tokens ?? 0, t.cache_read_input_tokens ?? 0, t.model, 0, x[9]])];
+            // kept as fresh strings: a match is a slice holding its whole 32 MB piece alive (V8), and a first read of
+            // every record (no cache yet, or a new version) ran out of memory with them
+            for (const y of xs.map((z) => JSON.parse(JSON.stringify(z)))) {
+              const i = at.get(y[0]);
+              if (i === undefined) { at.set(y[0], c.recs.length); c.recs.push(y); } else if (sum(y) > sum(c.recs[i])) c.recs[i] = y;
+            }
           }
           c.size += end;
         }
@@ -3528,7 +3537,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // whole or not at all: this cache is the only record left of deleted transcripts, so a cut-off write must
   // never replace it (two runs at once: the later rename wins, each file whole)
   const tmp = `${cacheFile}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ v: 3, files: next }));
+  fs.writeFileSync(tmp, JSON.stringify({ v: 4, files: next }));
   try { fs.renameSync(tmp, cacheFile); } catch { fs.rmSync(tmp, { force: true }); } // held open by another run: it saves
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 });
