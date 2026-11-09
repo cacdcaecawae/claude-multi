@@ -19,6 +19,9 @@ const ISLAND = path.join(ROOT, 'island.ps1');
 // only starts the web service), and nothing put in its inbox. The web pages and phones get their notes as ever.
 const ISLAND_OFF = path.join(ROOT, 'island-off');
 const islandOff = () => fs.existsSync(ISLAND_OFF);
+// the 管家, a 开发功能: off till it's switched on in the page's settings (then this file is there)
+const BUTLER_ON = path.join(ROOT, 'butler-on');
+const butlerOn = () => fs.existsSync(BUTLER_ON), BUTLER_SHUT = '管家没有开启：在设置的「开发功能」里打开';
 const CLAUDE = 'claude';
 
 const SHARED_FILES = ['settings.json', 'CLAUDE.md', 'keybindings.json'];
@@ -2735,7 +2738,7 @@ async function web() {
       for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
       list.sort((a, b) => b.at - a.at);
-      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow() };
     },
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
@@ -2752,6 +2755,13 @@ async function web() {
     },
     // the island, from the page's settings: off closes it (the web service it started at login runs on its own) and
     // clears its inbox; on starts it
+    // off: the 管家 running here stops too (its record kept: switched on again, 接着聊 takes it up)
+    'POST /api/butler': (q, b) => {
+      if (b.on) { fs.writeFileSync(BUTLER_ON, ''); return { on: true }; }
+      try { fs.unlinkSync(BUTLER_ON); } catch {}
+      for (const t of terms.values()) if (t.kind === 'pty' && !t.gone && sameDir(t.cwd, BUTLER)) t.proc.kill();
+      return { on: false };
+    },
     'GET /api/island': () => ({ on: !islandOff() }),
     'POST /api/island': (q, b) => {
       if (b.on) { try { fs.unlinkSync(ISLAND_OFF); } catch {} island(); return { on: true }; }
@@ -2871,10 +2881,12 @@ async function web() {
         if (r) return opened(r);
         if (b.live) throw new Error('这个对话已经不在运行了'); // the page reconnecting: an ended one isn't started anew
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
+        if (sameDir(s.cwd, BUTLER) && !butlerOn()) throw new Error(BUTLER_SHUT);
         const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
         copyTo(s, p);
         return opened(startPty(p, s.cwd, ['--resume', s.id], cols, rows));
       }
+      if (b.dir && sameDir(b.dir, BUTLER) && !butlerOn()) throw new Error(BUTLER_SHUT);
       const p = reg.profiles[b.acct - 1];
       if (!p) throw new Error('没有这个账号');
       if (!b.dir || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
@@ -3090,7 +3102,7 @@ async function web() {
     } finally { telling = false; }
   }, 3000);
   // After a restart each one that ran here is continued on its account, back idle (one cut mid-answer isn't told to go
-  // on: the 管家 is, for those it watches). The 管家 also when it has tickets open; then told to look at them all again,
+  // on: the 管家 is, for those it watches). The 管家 also (switched on) when it has tickets open; then told to look at them all again,
   // and to set again the reminders that ended. (A Claude ended with its terminal takes its session file.)
   async function wakeUp() {
     const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
@@ -3098,7 +3110,7 @@ async function web() {
       const s = all.find((x) => x.id === id), p = s && !s.pid && s !== me && reg.profiles[s.acct];
       if (p) try { startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
     }
-    const open = readTickets().some((x) => !x.end), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
+    const open = readTickets().some((x) => !x.end), p = butlerOn() && me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
     if (!p) return;
     const t = startPty(p, me.cwd, ['--resume', me.id]);
     if (!open && !lost.length) return log('butler_woken', { session_id: me.id }); // nothing it was watching: back, waiting for you

@@ -64,6 +64,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #act { width: 48px; flex: none; display: flex; flex-direction: column; align-items: center; border-right: 1px solid var(--border); background: var(--act); }
   #act .logo { margin: 6px 0 4px; color: #d97757 !important; } /* 管家: in and out of it */
   #act .logo .spark { width: 24px; height: 24px; }
+  #app.noButler #act .logo { display: none; } /* the 管家 switched off in 设置 (开发功能) */
   #app.butler #act .logo { background: var(--tint); }
   #app.butler #act button[data-side] { visibility: hidden; } /* a place of its own: out of it only by the spark (their places kept: the spark stays put) */
   /* held to go in or out: a ring fills round the spark (let go early and it empties) */
@@ -707,7 +708,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 </style>
 </head>
 <body>
-<div id="app" class="side">
+<div id="app" class="side noButler">
   <nav id="act">
     <button class="logo" title="管家"><span class="label">管家</span></button>
     <button data-side="chats" title="对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4z"/></svg><span class="label">对话</span><b id="badge" hidden></b></button>
@@ -962,6 +963,7 @@ async function load(fresh) {
     return e.message;
   }
   if (!restored) restore();
+  butlerShown();
   if (openAsked) { const id = openAsked; openAsked = null; openSession(id); } // a notification tapped
   for (const c of allConvs()) c.sync();
   bConv?.sync(); peek?.sync();
@@ -985,7 +987,7 @@ let notesSeen = null;
 function newNotes() {
   const key = (n) => `${n.id}|${n.at}`, first = !notesSeen, shown = new Set(shownConvs().map((c) => c.id)), b = butlerIds();
   notesSeen ??= new Set();
-  const fresh = (state.notes ?? []).filter((n) => !notesSeen.has(key(n)) && !shown.has(n.id) && forYou(n, b) && (butler || b.has(n.id)));
+  const fresh = (state.notes ?? []).filter((n) => !notesSeen.has(key(n)) && !shown.has(n.id) && forYou(n, b) && (butler || (state.butlerOn && b.has(n.id))));
   for (const n of state.notes ?? []) notesSeen.add(key(n));
   drawBDot();
   if (first || !fresh.length) return;
@@ -1207,8 +1209,10 @@ const norm = (p) => String(p ?? '').replace(/[\\/]+/g, '/').replace(/\/$/, '').t
 const isButler = (s) => !!state?.butler && norm(s.cwd) === norm(state.butler);
 const butlerIds = () => new Set((state?.sessions ?? []).filter(isButler).map((s) => s.id)); // a note has no folder: by its conversation
 const notesOut = () => { const b = butlerIds(); return (state?.notes ?? []).filter((n) => !b.has(n.id)); };
+// switched off in 设置 (a 开发功能, off till it's on): its spark gone, out of its mode, not gone into again
+function butlerShown() { $('#app').classList.toggle('noButler', !state.butlerOn); if (!state.butlerOn) setButler(false); }
 function setButler(on) {
-  if (butler === on) return;
+  if (butler === on || (on && !state?.butlerOn)) return;
   if (!on) { unpeek(); deskOn(false); }
   butler = on; $('#app').classList.toggle('butler', on);
   $('#act .logo .label').textContent = on ? '退出管家' : '管家'; $('#act .logo').title = on ? '长按退出管家' : '长按进入管家';
@@ -1507,7 +1511,10 @@ function openSettings() {
       <div class="setting"><span>通知</span><button class="switch${pushOn ? ' on' : ''}" data-push title="${pushOn ? '关闭' : '开启'}"></button></div>
       ${pushOn ? '<div class="setting"><span>测试通知</span><button class="btn" data-pushtest>发送</button></div>' : ''}
       <h3>电脑</h3>
-      <div class="setting"><span>桌面灵动岛</span>${island == null ? '<span class="m">读取中…</span>' : `<button class="switch${island ? ' on' : ''}" data-island title="${island ? '关闭：电脑桌面上不再显示和弹提示，网页和手机不受影响' : '打开'}"></button>`}</div>`;
+      <div class="setting"><span>桌面灵动岛</span>${island == null ? '<span class="m">读取中…</span>' : `<button class="switch${island ? ' on' : ''}" data-island title="${island ? '关闭：电脑桌面上不再显示和弹提示，网页和手机不受影响' : '打开'}"></button>`}</div>
+      <h3>开发功能</h3>
+      <div class="setting"><span>管家</span><button class="switch${state?.butlerOn ? ' on' : ''}" data-butler title="${state?.butlerOn ? '关闭：正在运行的管家会停下，菊花图标收起' : '打开'}"></button></div>
+      <div class="m" style="white-space:normal">还在开发中：替你看着所有对话、给它们派工单。打开后长按菊花图标进入。</div>`;
   };
   fetch('/api/island').then((r) => r.json()).then((j) => { island = j.on; draw(); }).catch(() => {});
   $('#sheetIn').onclick = (e) => {
@@ -1521,6 +1528,7 @@ function openSettings() {
     if (b.matches('[data-push]')) return (pushOn ? pushDisable() : pushEnable()).then(draw); // enabling asks the permission: straight from this tap
     if (b.matches('[data-pushtest]')) return pushTest();
     if (b.matches('[data-island]')) return post('/api/island', { on: !island }).then((j) => { island = j.on; draw(); }).catch((err) => toast(`没改成：${err.message}`));
+    if (b.matches('[data-butler]')) return post('/api/butler', { on: !state?.butlerOn }).then((j) => { state.butlerOn = j.on; butlerShown(); draw(); }).catch((err) => toast(`没改成：${err.message}`));
   };
   draw(); $('#sheet').classList.add('on', 'mid');
 }

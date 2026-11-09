@@ -1199,5 +1199,14 @@ console.log('tokens ok');
   h = harness(); h.run('let release; q=new Promise(r=>release=r);');
   const queued = h.run("input('old message')"); h.run("nextId='B';"); await h.run('loadHist()'); h.run('release();');
   assert.equal(await queued, false); assert.equal(h.run('writes.length'), 0);
+  // 设置's 管家 switch: on, its file there; off, gone, and the 管家 running here stopped (no other conversation)
+  let marked = null; const stopped = [];
+  const butlerSwitch = vm.runInNewContext('(' + part(js, "'POST /api/butler': ", "\n    'GET /api/island'").replace(/^.*?: /, '').replace(/,\s*$/, '') + ')', {
+    BUTLER_ON: 'on', BUTLER: 'C:/b', sameDir: (a, b) => a === b,
+    fs: { writeFileSync: (f) => (marked = f), unlinkSync: (f) => { if (marked !== f) throw new Error('ENOENT'); marked = null; } },
+    terms: new Map(['C:/b', 'C:/w'].map((cwd, i) => [i, { kind: 'pty', cwd, proc: { kill: () => stopped.push(cwd) } }])) });
+  assert.deepEqual(butlerSwitch(null, { on: true }), { on: true }); assert.equal(marked, 'on'); assert.deepEqual(stopped, []);
+  assert.deepEqual(butlerSwitch(null, { on: false }), { on: false }); assert.equal(marked, null); assert.deepEqual(stopped, ['C:/b']);
+  assert.deepEqual(butlerSwitch(null, {}), { on: false }); // off again: no file to remove is fine
   console.log('review follow-up ok (binding, desktop history, async writes, quick input, session drafts and queued sends)');
 })().catch((e) => { console.error(e); process.exitCode = 1; });
