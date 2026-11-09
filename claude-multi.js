@@ -621,10 +621,11 @@ const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // a word for sh, as 
 // Run on the Mac (python3 -, after DIR and HAVE: the folder, the record sizes copied here): one JSON line per change, for
 // that folder and each one in it (a project's: mine/demo-sim), a record named by its project folder (folder/id.jsonl).
 // A record's bytes past what's here, 512 KB a line ({f, at, d}: at 0 and nothing, rewritten); a /rename title ({t, d});
-// one gone ({gone}); the Claudes running in them ({live}) when that changes; a beat every 15 s.
+// one gone ({gone}); the Claudes running in them ({live}) when that changes; a beat every 15 s. Every 5 s, the Mac's CPU and
+// memory in use and Claude Code's part ({sys}: its claude processes; CPU as ps has it, an average of late, for both).
 // ponytail: a folder named like it (mine-old beside mine) is taken as one in it; Claude's own folder names can't tell them apart
 const MAC_WATCH = String.raw`
-import base64, json, os, re, time
+import base64, json, os, re, subprocess, time
 cwd = os.path.realpath(os.path.expanduser(DIR))
 base = re.sub(r'[^a-zA-Z0-9]', '-', cwd)
 root = os.path.join(os.path.expanduser('~'), '.claude', 'projects')
@@ -633,7 +634,23 @@ def out(o): print(json.dumps(o), flush=True)
 def names(d):
     try: return os.listdir(d)
     except OSError: return []
-seen, live_was, beat = dict(HAVE), None, 0
+seen, live_was, beat, sys_at = dict(HAVE), None, 0, 0
+def run(*a): return subprocess.run(a, capture_output=True, text=True).stdout
+def sysnow():
+    k, cpu, mine, mem_mine, n = os.cpu_count() or 1, 0.0, 0.0, 0, 0
+    for l in run('ps', '-A', '-o', '%cpu=,rss=,comm=').splitlines():
+        f = l.split(None, 2)
+        if len(f) < 3: continue
+        c = float(f[0].replace(',', '.')); cpu += c
+        if os.path.basename(f[2]) == 'claude': mine += c; mem_mine += int(f[1]) * 1024; n += 1
+    vm = run('vm_stat')
+    def g(name):
+        m = re.search(name + r':\s+(\d+)', vm)
+        return int(m.group(1)) if m else 0
+    page = int(re.search(r'page size of (\d+)', vm).group(1))
+    # as Activity Monitor's Memory Used: app memory, wired, compressed
+    used = ((g('Anonymous pages') or g('Pages active')) - g('Pages purgeable') + g('Pages wired down') + g('Pages occupied by compressor')) * page
+    return {'cpu': round(min(100, cpu / k)), 'cpuClaude': round(min(100, mine / k)), 'mem': used, 'memClaude': mem_mine, 'memAll': int(run('sysctl', '-n', 'hw.memsize')), 'n': n}
 while True:
     more, now = False, set()
     for g in [x for x in names(root) if x == base or x.startswith(base + '-')]:
@@ -673,6 +690,10 @@ while True:
     if live != live_was: out({'live': live}); live_was = live
     beat += 1
     if beat >= 15: out({'hb': 1}); beat = 0
+    if time.time() - sys_at >= 5:
+        sys_at = time.time()
+        try: out({'sys': sysnow()})
+        except Exception: pass
     if not more: time.sleep(1)
 `;
 let macPw; // the Mac's password, read once (null: not saved)
@@ -2762,7 +2783,7 @@ async function web() {
   // The copy here of the Mac's records and of which of its conversations run (MAC_WATCH there, one ssh connection
   // kept up: again 2 s after a drop, waiting longer, to a minute, while each try fails at once). One of yours there that
   // stops answering, or asks, is a note, as a hook's here.
-  let macW = null, macWait = 2000;
+  let macW = null, macWait = 2000, macSys = null; // macSys: the Mac's newest {sys}, and when it came
   function macWatch() {
     const m = load().mac;
     if (!m || macW) return;
@@ -2803,6 +2824,8 @@ async function web() {
       fs.writeFileSync(path.join(macPath(o.t), 'custom-title.json'), Buffer.from(o.d, 'base64'));
     } else if (o.gone) {
       fs.rmSync(o.gone.endsWith('/') ? path.join(macPath(o.gone), 'custom-title.json') : macPath(o.gone), { force: true });
+    } else if (o.sys) {
+      macSys = { ...o.sys, at: Date.now() };
     } else if (o.live) {
       const was = new Map(macLive().map((j) => [j.sessionId, j.status])), going = (st) => st === 'busy' || st === 'shell';
       fs.writeFileSync(path.join(MAC, 'live.json.tmp'), JSON.stringify(o.live));
@@ -3022,7 +3045,8 @@ async function web() {
       });
     }
     const pc = pcNow(), within = (x, all) => (x == null || all == null ? x : Math.min(x, all)); // its CPU over its own 2 s, Claude's over 3
-    return [{ name: os.hostname(), cpu: pc.cpu, mem: pc.mem, memAll: pc.memAll, n: share.n, cpuClaude: within(share.cpu, pc.cpu), memClaude: within(share.mem, pc.mem) }];
+    const reg = load(), mac = !reg.mac ? [] : [{ name: macLabel(reg), ...(macSys && Date.now() - macSys.at < 30000 ? macSys : { err: '读不到：还没连上 Mac' }) }];
+    return [{ name: os.hostname(), cpu: pc.cpu, mem: pc.mem, memAll: pc.memAll, n: share.n, cpuClaude: within(share.cpu, pc.cpu), memClaude: within(share.mem, pc.mem) }, ...mac];
   };
   // its tickets, as the 操作台 shows them: the open ones, what waits on you first, then the last 5 ended. Only this service
   // writes them (written whole, then swapped in: a crash mid-write leaves the old file)
