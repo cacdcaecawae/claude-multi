@@ -684,6 +684,15 @@ function macRun(reg, cmd, input) {
   });
   return (async () => { let r; for (let k = 0; k < 3 && (!r || r.status === 255); k++) r = await once(); return r; })();
 }
+// An upload for a conversation on the Mac: copied there (its folder's .uploads, a week kept as here), its path there what
+// Claude is given: one here it can't open
+async function macPut(file, reg = load()) {
+  if (!reg.mac) throw new Error('还没设置 Mac mini');
+  const name = sq(path.basename(file));
+  const r = await macRun(reg, `cd ${reg.mac.dir} && mkdir -p .uploads && { find .uploads -type f -mtime +7 -delete; cat > .uploads/${name}; } && printf %s "$PWD/.uploads/"${name}`, fs.readFileSync(file));
+  if (r.status || !r.out) throw new Error(`没传到 Mac 上：${r.err.trim().split('\n').pop() || r.status}`);
+  return r.out;
+}
 const macUsage = (reg) => macRun(reg, 'python3 -', MAC_USAGE).then((r) => {
   try { return JSON.parse(r.out.trim().split('\n').pop()); } catch { return { err: `没连上 Mac：${r.err.trim().split('\n').pop()}`, temp: true }; }
 });
@@ -3312,7 +3321,8 @@ async function web() {
         if (!ext && !name) return out(415, { err: '只能发图片或文件' });
         const parts = []; let size = 0;
         for await (const ch of req) { if ((size += ch.length) > 20 << 20) return out(413, { err: `${name ? '文件' : '图片'}太大了（最大 20 MB）` }); parts.push(ch); }
-        return out(200, { path: saveUpload(Buffer.concat(parts), ext, UPLOADS, name) });
+        const saved = saveUpload(Buffer.concat(parts), ext, UPLOADS, name);
+        return out(200, { path: req.headers['x-mac'] ? await macPut(saved) : saved }); // x-mac: for a conversation on the Mac
       }
       const fn = api[`${req.method} ${url.pathname}`];
       if (!fn) return out(404, { err: '没有这个地址' });

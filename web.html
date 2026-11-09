@@ -2007,7 +2007,7 @@ function makeConv(body, title) {
       const pic = /^image\//.test(f.type) && !c.gpt;
       if (!pic && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
       const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name };
-      a.up = a.file ? sendFile(f) : shrink(f).then(upload, () => { a.file = true; a.name = f.name; drawAtts(); return sendFile(f); });
+      a.up = a.file ? sendFile(f, c.mac) : shrink(f).then((b) => upload(b, c.mac), () => { a.file = true; a.name = f.name; drawAtts(); return sendFile(f, c.mac); });
       a.up.catch((e) => { a.failed = true; toast(`${a.file ? '文件' : '图片'}没传上去：${e.message}`, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
       atts.push(a);
     }
@@ -2821,14 +2821,15 @@ async function shrink(f) {
   const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(b, 0, 0, cv.width, cv.height);
   return new Promise((ok) => cv.toBlob(ok, 'image/jpeg', 0.9));
 }
-async function sendFile(f) { // a file as it is, its name kept (Claude reads it by its path): where it was saved
-  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-name': encodeURIComponent(f.name) }, body: f });
+// mac: for a conversation on the Mac mini, copied on there: its path there
+async function sendFile(f, mac) { // a file as it is, its name kept (Claude reads it by its path): where it was saved
+  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-name': encodeURIComponent(f.name), ...(mac && { 'x-mac': '1' }) }, body: f });
   const j = await r.json().catch(() => ({ err: r.status === 413 ? '文件太大了（最大 20 MB）' : `出错了（${r.status}）` }));
   if (!r.ok) throw new Error(j.err || r.status);
   return j.path;
 }
-async function upload(blob) { // to the computer: where it was saved there
-  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': blob.type }, body: blob });
+async function upload(blob, mac) { // to the computer: where it was saved there
+  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': blob.type, ...(mac && { 'x-mac': '1' }) }, body: blob });
   const j = await r.json().catch(() => ({ err: r.status === 413 ? '图片太大了' : `出错了（${r.status}）` }));
   if (!r.ok) throw new Error(j.err || r.status);
   return j.path;
