@@ -1207,7 +1207,7 @@ console.log('tokens ok');
 // watcher that runs on the Mac is valid Python.
 {
   const fs = require('fs'), path = require('path');
-  const { listSessions, MAC_WATCH } = require('./claude-multi');
+  const { listSessions, MAC_WATCH, macName } = require('./claude-multi');
   const id = '0f1e2d3c-4b5a-4968-8776-655443322110', dir = path.join(TEST_HOME, '.claude-multi', 'accounts', 'mac');
   fs.mkdirSync(path.join(dir, 'projects', '-Users-me-Desktop-mine'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'projects', '-Users-me-Desktop-mine', `${id}.jsonl`),
@@ -1219,6 +1219,18 @@ console.log('tokens ok');
   assert.ok(s, 'the Mac one listed');
   assert.deepEqual([s.mac, s.acct, s.pid, s.busy, s.who, s.title], [true, -1, -4321, true, 'Mac mini', '在 Mac 上改文件']);
   assert.equal(listSessions({ profiles: [] }).some((x) => x.id === id), false); // no Mac set up: not listed
+  // one in a project's folder there (mine/demo-sim): shown in the folder here it's for (folders.json), running where it runs
+  const id2 = '1f1e2d3c-4b5a-4968-8776-655443322110', sub = path.join(dir, 'projects', '-Users-me-Desktop-mine-demo-sim');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(sub, `${id2}.jsonl`), JSON.stringify({ type: 'user', cwd: '/Users/me/Desktop/mine/demo-sim', message: { role: 'user', content: '改一下' } }) + String.fromCharCode(10)
+    + JSON.stringify({ type: 'ai-title', aiTitle: '改 demo-sim' }) + String.fromCharCode(10));
+  fs.writeFileSync(path.join(dir, 'folders.json'), JSON.stringify({ 'demo-sim': String.raw`F:\demo-sim` }));
+  const s2 = listSessions(reg).find((x) => x.id === id2);
+  assert.deepEqual([s2.mac, s2.cwd, s2.macCwd], [true, String.raw`F:\demo-sim`, '/Users/me/Desktop/mine/demo-sim']);
+  assert.equal(listSessions(reg).find((x) => x.id === id).cwd, '/Users/me/Desktop/mine'); // the Mac's own folder: as it is
+  // a folder here's name there: its last part, a drive's root its letter, nothing sh or a path would take otherwise
+  assert.deepEqual([String.raw`F:\demo-sim`, 'F:/', String.raw`D:\a\my proj's`, String.raw`D:\-x`, String.raw`D:\论文 返修`].map(macName),
+    ['demo-sim', 'F', 'my-proj-s', 'x', '论文-返修']);
   fs.writeFileSync(path.join(dir, 'live.json'), '[]');
   assert.equal(listSessions(reg).find((x) => x.id === id).pid, null); // ended there
   const py = require('child_process').spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "watch", "exec")'],

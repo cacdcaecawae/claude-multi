@@ -678,7 +678,7 @@ function Render {
       "<TextBlock Text='$(Esc $m.label)' FontSize='13' FontWeight='SemiBold' Foreground='#CCFFFFFF' Margin='0,0,12,0' VerticalAlignment='Center'/>" +
       "</DockPanel>$($lines -join '')</StackPanel></Border>")
     $go = $card.FindName('Go'); $go.Style = $win.FindResource('Icon')
-    $go.Add_Click({ Open-Terminal $env:USERPROFILE 'start mac'; Collapse })
+    $go.Tag = 'mac'; $go.Add_Click({ param($s) Show-Projects $s.Tag }) # a folder here first: its project folder there
     [void]$Rows.Children.Add($card)
   }
   # last: a new account, logged in in a terminal window (claude-multi new); the island reads the accounts again once it's saved
@@ -718,8 +718,8 @@ function Render-Gpt($gs, $names) {
 }
 
 # --- launching ----------------------------------------------------------------------------------
-function Show-Projects([string]$n) { # n: an account's number, or a GPT one's G1 (Codex then)
-  $who = if ($n -like 'G*') { "GPT $n · $(@($script:data.gpt)[[int]$n.Substring(1) - 1].label)" } else { $script:data.accounts[[int]$n - 1].label }
+function Show-Projects([string]$n) { # n: an account's number, a GPT one's G1 (Codex then), or mac (the Mac mini)
+  $who = if ($n -eq 'mac') { $script:data.mac.label } elseif ($n -like 'G*') { "GPT $n · $(@($script:data.gpt)[[int]$n.Substring(1) - 1].label)" } else { $script:data.accounts[[int]$n - 1].label }
   $ProjTitle.Text = "用 $($who.Split('@')[0]) 启动到："
   $ProjList.Children.Clear()
   foreach ($p in @($script:data.projects) + '') {
