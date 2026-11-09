@@ -1201,3 +1201,28 @@ console.log('tokens ok');
   assert.equal(await queued, false); assert.equal(h.run('writes.length'), 0);
   console.log('review follow-up ok (binding, desktop history, async writes, quick input, session drafts and queued sends)');
 })().catch((e) => { console.error(e); process.exitCode = 1; });
+
+// The Mac mini's conversations, from the copy the web service keeps (accounts\mac): listed though their folder is the
+// Mac's, as running (busy) by live.json, the Mac's pid negative (never one of this PC's), under its label. And the
+// watcher that runs on the Mac is valid Python.
+{
+  const fs = require('fs'), path = require('path');
+  const { listSessions, MAC_WATCH } = require('./claude-multi');
+  const id = '0f1e2d3c-4b5a-4968-8776-655443322110', dir = path.join(TEST_HOME, '.claude-multi', 'accounts', 'mac');
+  fs.mkdirSync(path.join(dir, 'projects', '-Users-me-Desktop-mine'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'projects', '-Users-me-Desktop-mine', `${id}.jsonl`),
+    JSON.stringify({ type: 'user', cwd: '/Users/me/Desktop/mine', message: { role: 'user', content: 'hi' } }) + '\n'
+    + JSON.stringify({ type: 'ai-title', aiTitle: '在 Mac 上改文件' }) + '\n');
+  fs.writeFileSync(path.join(dir, 'live.json'), JSON.stringify([{ pid: 4321, sessionId: id, status: 'busy', kind: 'interactive' }]));
+  const reg = { profiles: [], mac: { host: 'mini', dir: '~/Desktop/mine' } };
+  const s = listSessions(reg).find((x) => x.id === id);
+  assert.ok(s, 'the Mac one listed');
+  assert.deepEqual([s.mac, s.acct, s.pid, s.busy, s.who, s.title], [true, -1, -4321, true, 'Mac mini', '在 Mac 上改文件']);
+  assert.equal(listSessions({ profiles: [] }).some((x) => x.id === id), false); // no Mac set up: not listed
+  fs.writeFileSync(path.join(dir, 'live.json'), '[]');
+  assert.equal(listSessions(reg).find((x) => x.id === id).pid, null); // ended there
+  const py = require('child_process').spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "watch", "exec")'],
+    { input: `DIR = "~"\nHAVE = {}\n${MAC_WATCH}`, encoding: 'utf8' });
+  if (py.error) console.log('(no python here: the Mac watcher not compiled)'); else assert.equal(py.status, 0, py.stderr);
+  console.log('mac mini ok');
+}

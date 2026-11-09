@@ -511,18 +511,20 @@ const stillClaude = (js) => { const starts = procStarts(js.map((j) => j.pid)); r
 const runsOn = (dir) => stillClaude(sessionFiles(dir)).length > 0;
 function listSessions(reg) {
   const live = new Map(), found = new Map(), alive = [];
-  for (const [acct, dir] of reg.profiles.map((p, i) => [i, p.configDir])) {
-    alive.push(...sessionFiles(dir));
+  // and the Mac's, as the web service copies them here (acct -1: none of this PC's accounts)
+  for (const [acct, dir] of [...reg.profiles.map((p, i) => [i, p.configDir]), ...(reg.mac ? [[-1, MAC]] : [])]) {
+    if (acct >= 0) alive.push(...sessionFiles(dir));
     for (const folder of ls(path.join(dir, 'projects'))) {
       for (const name of ls(path.join(dir, 'projects', folder))) {
         if (!/^[0-9a-f-]{36}\.jsonl$/.test(name)) continue;
         const file = path.join(dir, 'projects', folder, name), id = name.slice(0, -6);
         let at; try { at = fs.statSync(file).mtimeMs; } catch { continue; } // deleted (or moved to the Recycle Bin) since the folder was read
-        if ((found.get(id)?.at ?? -1) < at) found.set(id, { id, acct, file, at });
+        if ((found.get(id)?.at ?? -1) < at) found.set(id, { id, acct, file, at, ...(acct < 0 && { mac: true }) });
       }
     }
   }
   for (const j of stillClaude(alive)) live.set(j.sessionId, j);
+  for (const j of reg.mac ? macLive() : []) live.set(j.sessionId, { ...j, pid: -j.pid }); // a Mac's pid negative: never one of this PC's
   let webPids = new Set(); // the Claudes the web service runs (web-terms.json, written by it)
   try { webPids = new Set(JSON.parse(fs.readFileSync(WEB_TERMS, 'utf8'))); } catch {}
   const tmp = os.tmpdir().toLowerCase(), out = [];
@@ -547,14 +549,77 @@ function listSessions(reg) {
       readHeads.set(s.file, r);
     }
     const { cwd, title, prompt, req } = r;
-    if (!cwd || !title || cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)) continue; // nothing to go back to
+    if (!cwd || !title || (!s.mac && (cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)))) continue; // nothing to go back to (a Mac's folder is there)
     const pid = live.get(s.id)?.pid ?? null, st = live.get(s.id)?.status;
     // busy: answering or running a command (its session file's status), for 换账号继续's 答完再换; wait: on a question for you
     out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell', wait: st === 'waiting',
-      who: reg.profiles[s.acct].label.split('@')[0] });
+      who: s.mac ? macLabel(reg) : reg.profiles[s.acct].label.split('@')[0] });
   }
   return out.sort((a, b) => b.at - a.at);
 }
+
+// --- Mac mini: Claude Code on a Mac (signed in there, its own account), over ssh: the registry's mac {host, dir,
+// label?}. Its conversations run there, in one folder (dir). The web service keeps a copy of their records and of which
+// of them run (accounts\mac: projects\<folder>\ as a config dir's, live.json), so the list, the record and the notes
+// read them as an account's here. The Mac's password, saved encrypted (DPAPI, this Windows user) in mac-password.dpapi,
+// unlocks its keychain, where its sign-in is, in each ssh connection: an ssh session finds it locked. It goes as LC_MACKC
+// (the Mac's sshd takes LC_*), never on a command line.
+const MAC = path.join(ACCOUNTS, 'mac'), MAC_PW = path.join(ROOT, 'mac-password.dpapi');
+const macLabel = (reg) => reg.mac?.label || 'Mac mini';
+const macLive = () => { try { return JSON.parse(fs.readFileSync(path.join(MAC, 'live.json'), 'utf8')); } catch { return []; } };
+// Run on the Mac (python3 -, after DIR and HAVE: the folder, the record sizes copied here): one JSON line per change.
+// A record's bytes past what's here, 512 KB a line ({f, at, d}: at 0 and nothing, rewritten); a /rename title ({t, d});
+// one gone ({gone}); the Claudes running in that folder ({live}) when that changes; a beat every 15 s.
+const MAC_WATCH = String.raw`
+import base64, json, os, re, time
+cwd = os.path.realpath(os.path.expanduser(DIR))
+proj = os.path.join(os.path.expanduser('~'), '.claude', 'projects', re.sub(r'[^a-zA-Z0-9]', '-', cwd))
+sess = os.path.join(os.path.expanduser('~'), '.claude', 'sessions')
+def out(o): print(json.dumps(o), flush=True)
+def names(d):
+    try: return os.listdir(d)
+    except OSError: return []
+out({'hello': os.path.basename(proj)})
+seen, live_was, beat = dict(HAVE), None, 0
+while True:
+    more, now = False, set()
+    for n in names(proj):
+        p = os.path.join(proj, n)
+        if n.endswith('.jsonl'):
+            try: size = os.path.getsize(p)
+            except OSError: continue
+            now.add(n)
+            k = seen.get(n, 0)
+            if size < k: out({'f': n, 'at': 0, 'd': ''}); k = 0
+            if size > k:
+                with open(p, 'rb') as fh: fh.seek(k); d = fh.read(min(size - k, 524288))
+                out({'f': n, 'at': k, 'd': base64.b64encode(d).decode()})
+                k += len(d); more = more or k < size
+            seen[n] = k
+        elif os.path.isdir(p):
+            t = os.path.join(p, 'custom-title.json')
+            try: m = os.path.getmtime(t)
+            except OSError: continue
+            now.add(n + '/')
+            if seen.get(n + '/') != m:
+                with open(t, 'rb') as fh: out({'t': n, 'd': base64.b64encode(fh.read()).decode()})
+                seen[n + '/'] = m
+    for n in [x for x in seen if x not in now]:
+        out({'gone': n}); del seen[n]
+    live = []
+    for n in names(sess):
+        try:
+            with open(os.path.join(sess, n)) as fh: j = json.load(fh)
+            if os.path.realpath(j.get('cwd', '')) != cwd: continue
+            os.kill(j['pid'], 0)
+            live.append({k: j.get(k) for k in ('pid', 'sessionId', 'status', 'kind')})
+        except Exception: pass
+    live.sort(key=lambda j: j['pid'])
+    if live != live_was: out({'live': live}); live_was = live
+    beat += 1
+    if beat >= 15: out({'hb': 1}); beat = 0
+    if not more: time.sleep(1)
+`;
 
 // --- GPT: Codex (OpenAI's coding agent, signed in with a ChatGPT plan) as a second kind of conversation. Its accounts are
 // the registry's gpt list, apart from the Claude ones (profiles): nothing written for Claude meets them. Each has its own
@@ -1045,6 +1110,7 @@ function resume(id, n) {
     process.chdir(g.cwd);
     return runGpt(gptAccounts(reg)[g.acct], ['resume', id]);
   }
+  if (s.mac) return attach(id); // the Mac's: continued there by the web service, this tab joined to it
   if (s.pid) { console.log(`这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
   const p = reg.profiles[Number(n) - 1] ?? reg.profiles[s.acct];
   if (!p) { console.log('请指定账号编号：claude-multi resume <对话 id> <账号编号>'); process.exit(1); }
@@ -1127,7 +1193,8 @@ async function switchChat(id, n, now) {
 // attach ID: this terminal joins a conversation running in the web service (one started or continued from
 // the web page): the same screen on both sides, either one types. The size follows the side you type on;
 // the other side scales to it. Closing this tab leaves the conversation running there.
-async function attach(id) {
+// (start: one to start there and join, as /api/open takes it: {mac: true} for one on the Mac)
+async function attach(id, start) {
   const base = `http://127.0.0.1:${WEB_PORT}`;
   // on this computer: unpacked (the service gzips for the phone)
   const headers = { cookie: `cm=${webKey()}`, 'content-type': 'application/json', 'accept-encoding': 'identity' };
@@ -1140,7 +1207,7 @@ async function attach(id) {
   const size = () => ({ cols: process.stdout.columns || 100, rows: process.stdout.rows || 30 });
   let key;
   try {
-    const r = await post('/api/open', { id, gpt: listGpt().some((x) => x.id === id), ...size() });
+    const r = await post('/api/open', start ? { ...start, ...size() } : { id, gpt: listGpt().some((x) => x.id === id), ...size() });
     if (r.kind !== 'pty') throw new Error('它在电脑的终端窗口里运行，直接切过去就行');
     key = r.key;
   } catch (e) { console.log(`接不上这个对话：${e.message}`); process.exit(1); }
@@ -1781,7 +1848,8 @@ async function usage(args) {
   };
   const { res, ok, open, rec, cols, json } = await usageState(reg);
   // same numbers as the table below; and each GPT account's usage, as its records last said it (the island's GPT cards)
-  if (args.includes('--json')) return console.log(JSON.stringify({ ...json, gpt: gptAccounts(reg).map((g) => ({ label: g.label, plan: g.plan, ...(gptUsage(g.home) ?? { windows: null }) })) }));
+  if (args.includes('--json')) return console.log(JSON.stringify({ ...json, gpt: gptAccounts(reg).map((g) => ({ label: g.label, plan: g.plan, ...(gptUsage(g.home) ?? { windows: null }) })),
+    mac: reg.mac ? { label: macLabel(reg), dir: reg.mac.dir } : null })); // the island's Mac mini card
   const lw = Math.max(...reg.profiles.map((p) => width(p.label)));
   const pw = Math.max(...reg.profiles.map((p) => width(p.subscriptionType ?? '')));
   const cell = (w) => (w ? `${bar(w.utilization)} ${String(Math.round(w.utilization)).padStart(3)}%  `
@@ -2349,6 +2417,11 @@ async function web() {
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
   const codex = codexCmd(); // GPT conversations: none started without it
+  const sshExe = spawnSync('where', ['ssh'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || 'ssh'; // the Mac's
+  let macPw; // the Mac's password, read once (null: not saved)
+  const macPassword = () => macPw !== undefined ? macPw : (macPw = !fs.existsSync(MAC_PW) ? null
+    : spawnSync('powershell.exe', ['-NoProfile', '-Command', `[Net.NetworkCredential]::new('', (Get-Content '${MAC_PW}' | ConvertTo-SecureString)).Password`],
+      { encoding: 'utf8', windowsHide: true }).stdout.replace(/\r?\n$/, '') || null);
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
   // the quota as the page last got it, kept on disk: after a restart the page shows it at once (read again behind it)
   let usageCache = (() => { try { return JSON.parse(fs.readFileSync(WEB_USAGE, 'utf8')); } catch { return null; } })();
@@ -2410,7 +2483,8 @@ async function web() {
   let ptys = 0;
   // only till its Claude has written its session file (then it's listed with its pid): after a /clear or /resume there,
   // it runs another conversation, and this one, tapped, would open that
-  const resuming = (id) => [...terms.values()].find((t) => t.resume === id && !t.gone && !(t.pid && fs.existsSync(path.join(t.dir, 'sessions', `${t.pid}.json`))));
+  const resuming = (id) => [...terms.values()].find((t) => t.resume === id && !t.gone
+    && !(t.pid && (t.mac ? macLive().some((j) => -j.pid === t.pid) : fs.existsSync(path.join(t.dir, 'sessions', `${t.pid}.json`)))));
   // `claude-multi <cmd> <id> …` for a conversation, apart from this process: what it printed, or that as the error
   const command = (what, id, ...more) => {
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error('没有这个对话');
@@ -2476,6 +2550,100 @@ async function web() {
     terms.set(key, t); gptCache = null;
     log('web_session', { profile_id: g.id, cwd, args: resume ? `resume ${resume}` : '' });
     return t;
+  }
+  // A conversation on the Mac (resume: its id), started or continued here: ssh in a pseudo-terminal, the keychain
+  // unlocked, claude in the Mac's folder. Its pid (the shell's, which exec makes claude's) comes first, as an OSC
+  // that's taken out: the pid this one has is that one's, negative, as the list has it. The link to the server drops
+  // now and then before it gets there: tried again, three times in all; what the last try said is shown.
+  // ⏺, the Mac's reply mark, as ● (a Windows one's): this PC's fonts draw it as a blue emoji.
+  function startMac(resume, cols = 100, rows = 30) {
+    const m = load().mac;
+    if (!m) throw new Error('还没设置 Mac mini');
+    const pw = macPassword();
+    if (!pw) throw new Error(`还没保存 Mac 的密码（${MAC_PW}）`);
+    const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`;
+    const cmd = `security unlock-keychain -p "$LC_MACKC" >/dev/null 2>&1; unset LC_MACKC; cd ${m.dir} && printf '\\033]1337;cmpid=%s\\007' $$ && exec ~/.local/bin/claude${resume ? ` --resume ${resume}` : ''}`;
+    const t = { kind: 'pty', key, mac: true, macPid: 0, get pid() { return -this.macPid; }, clients: new Set(), buf: '', w: cols, h: rows, cwd: m.dir, resume: resume ?? null };
+    let tries = 0, pre = '';
+    const go = () => {
+      const proc = t.proc = pty.spawn(sshExe, ['-tt', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'SendEnv=LC_MACKC', m.host, cmd],
+        { name: 'xterm-256color', cols: t.w, rows: t.h, env: { ...process.env, LC_MACKC: pw, TERM: 'xterm-256color' } });
+      proc.onData((d) => {
+        if (!t.macPid) {
+          const k = /\x1b\]1337;cmpid=(\d+)\x07/.exec(pre += d);
+          if (!k) return;
+          t.macPid = +k[1]; d = pre.slice(k.index + k[0].length); pre = ''; saveTerms();
+        }
+        d = d.replace(/⏺/g, '●');
+        t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
+      });
+      proc.onExit(() => {
+        if (!t.macPid && ++tries < 3 && !t.closing) { pre = ''; return setTimeout(go, 1500); }
+        if (!t.macPid && pre) { t.buf += pre; send(t, 'data', pre); } // why it never got there
+        t.gone = true; saveTerms(); saveRun(); send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000);
+      });
+    };
+    go();
+    terms.set(key, t);
+    log('web_session', { profile_id: 'mac', cwd: m.dir, args: resume ? `--resume ${resume}` : '' });
+    return t;
+  }
+  // The copy here of the Mac's records and of which of its conversations run (MAC_WATCH there, one ssh connection
+  // kept up: again 2 s after a drop, waiting longer, to a minute, while each try fails at once). One of yours there that
+  // stops answering, or asks, is a note, as a hook's here.
+  let macW = null, macWait = 2000;
+  function macWatch() {
+    const m = load().mac;
+    if (!m || macW) return;
+    const have = {}, since = Date.now();
+    for (const d of ls(path.join(MAC, 'projects'))) for (const n of ls(path.join(MAC, 'projects', d))) {
+      if (n.endsWith('.jsonl')) try { have[n] = fs.statSync(path.join(MAC, 'projects', d, n)).size; } catch {}
+    }
+    const proc = macW = require('child_process').spawn(sshExe, ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15',
+      '-o', 'ServerAliveCountMax=3', m.host, 'python3', '-u', '-'], { windowsHide: true });
+    proc.stdin.on('error', () => {});
+    proc.stdin.end(`DIR = ${JSON.stringify(m.dir)}\nHAVE = ${JSON.stringify(have)}\n${MAC_WATCH}`);
+    let dir = null, line = '';
+    proc.stdout.setEncoding('utf8');
+    proc.stdout.on('data', (d) => {
+      line += d;
+      for (let k; (k = line.indexOf('\n')) >= 0; line = line.slice(k + 1)) {
+        let o; try { o = JSON.parse(line.slice(0, k)); } catch { continue; }
+        try { if (o.hello) fs.mkdirSync(dir = path.join(MAC, 'projects', o.hello), { recursive: true }); else if (dir) macCopy(dir, o, proc); }
+        catch (e) { log('mac_copy_fail', { err: e.message }); }
+      }
+    });
+    proc.on('exit', () => {
+      macW = null;
+      macWait = Date.now() - since > 60000 ? 2000 : Math.min(60000, macWait * 2);
+      setTimeout(macWatch, macWait);
+    });
+  }
+  function macCopy(dir, o, proc) {
+    if (o.f) {
+      const f = path.join(dir, o.f), size = fs.existsSync(f) ? fs.statSync(f).size : 0;
+      if (o.at > size) return proc.kill(); // a gap (this copy cut short meanwhile): the next connection sends from what's here
+      if (o.at < size) fs.truncateSync(f, o.at);
+      fs.appendFileSync(f, Buffer.from(o.d, 'base64'));
+    } else if (o.t) {
+      fs.mkdirSync(path.join(dir, o.t), { recursive: true });
+      fs.writeFileSync(path.join(dir, o.t, 'custom-title.json'), Buffer.from(o.d, 'base64'));
+    } else if (o.gone) {
+      fs.rmSync(path.join(dir, o.gone.endsWith('/') ? path.join(o.gone, 'custom-title.json') : o.gone), { force: true });
+    } else if (o.live) {
+      const was = new Map(macLive().map((j) => [j.sessionId, j.status])), going = (st) => st === 'busy' || st === 'shell';
+      fs.writeFileSync(path.join(MAC, 'live.json.tmp'), JSON.stringify(o.live));
+      fs.renameSync(path.join(MAC, 'live.json.tmp'), path.join(MAC, 'live.json'));
+      sessCache = null;
+      for (const j of o.live) {
+        if (j.kind && j.kind !== 'interactive') continue; // a claude -p's is for whoever ran it
+        const before = was.get(j.sessionId), kind = going(before) && !going(j.status) && j.status !== 'waiting' ? 'done'
+          : j.status === 'waiting' && before && before !== 'waiting' ? 'ask' : null;
+        if (!kind) continue;
+        const s = sessions().find((x) => x.id === j.sessionId);
+        dropNote({ kind, project: path.posix.basename(load().mac.dir), msg: kind === 'done' ? '任务完成，等你下一步指示' : '需要你确认一下', title: s?.title ?? null, id: j.sessionId });
+      }
+    }
   }
   // a conversation open in a terminal window here: its screen through the console bridge, while anyone watches
   function mirror(pid, dir) {
@@ -2566,7 +2734,7 @@ async function web() {
         for (const d of ls(path.join(t.dir, 'projects'))) if (fs.existsSync(path.join(t.dir, 'projects', d, `${id}.jsonl`))) t.file = path.join(t.dir, 'projects', d, `${id}.jsonl`);
       }
     } catch {} // caught mid-write: as it was
-    else if (t?.kind === 'pc' && t.pid) { const s = sessions().find((x) => x.pid === t.pid); if (s) t.file = s.file; }
+    else if ((t?.kind === 'pc' || t?.mac) && t.pid) { const s = sessions().find((x) => x.pid === t.pid); if (s) t.file = s.file; } // a window's, a Mac's: by the list
     return { t, file: t?.file === undefined ? sessions().find((x) => x.id === q.get('id'))?.file : t.file };
   }
 
@@ -2735,7 +2903,8 @@ async function web() {
       for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
       list.sort((a, b) => b.at - a.at);
-      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      const m = load().mac; // the Mac mini, if there is one: 新对话 offers it
+      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), mac: m ? { label: macLabel(load()), dir: m.dir } : null, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow() };
     },
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
@@ -2823,9 +2992,11 @@ async function web() {
       if (!name) throw new Error('名字不能是空的');
       if (b.oai) { const c = oaiRead(id); c.title = name; oaiSave(c); return { said: `已改名：${name}` }; }
       if (b.gpt) throw new Error('GPT 对话暂时不能在这里改名');
+      if (sessions().find((x) => x.id === id)?.mac) throw new Error('Mac 上的对话暂时不能在这里改名'); // its record there, not here
       return command('rename', id, name);
     },
     'POST /api/delete': async (q, b) => {
+      if (!b.oai && !b.gpt && sessions().find((x) => x.id === b.id)?.mac) throw new Error('Mac 上的对话暂时不能在这里删除');
       if (!b.oai) return b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''));
       const c = oaiRead(String(b.id ?? '')); // a GPT 聊天 one: an answer on its way stopped (not paid for), then its files to the Recycle Bin
       if (c.pending) await oaiApi(`responses/${c.pending}/cancel`, {}).catch(() => {});
@@ -2843,7 +3014,7 @@ async function web() {
     // its Claude by that, not by its folder (two started in one folder at once got each other's)
     'POST /api/open': async (q, b) => {
       const opened = async (t) => {
-        for (let k = 0; k < 50 && !t.pid && !t.gone; k++) await sleep(100);
+        for (let k = 0; k < (t.mac ? 450 : 50) && !t.pid && !t.gone; k++) await sleep(100); // a Mac's: ssh first, tried again on a drop
         if (t.gone || !t.pid) throw new Error('终端尚未就绪或已结束，未取得 PID；请先确认启动状态再重试');
         return { key: t.key, kind: 'pty', pid: t.pid };
       };
@@ -2862,10 +3033,18 @@ async function web() {
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         return { key: startGpt(s.acct + 1, s.cwd, s.id, cols, rows).key, kind: 'pty' };
       }
+      if (b.mac && !b.id) return opened(startMac(null, cols, rows)); // {mac: true}: one started on the Mac
       if (b.id) {
         sessCache = null;
         const s = sessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
+        if (s.mac) { // the Mac's: ours if it runs here, else continued here (one in a terminal on the Mac can't be shown)
+          const t = s.pid && where(s), r = resuming(s.id);
+          if (t || r) return t ? { key: t.key, kind: t.kind } : opened(r);
+          if (s.pid) throw new Error('它在 Mac 上的终端里运行，不在网页里：在那边接着用');
+          if (b.live) throw new Error('这个对话已经不在运行了');
+          return opened(startMac(s.id, cols, rows));
+        }
         if (s.pid) { const t = where(s) ?? mirror(s.pid, reg.profiles[s.acct].configDir); t.file = s.file; return { key: t.key, kind: t.kind }; }
         const r = resuming(s.id);
         if (r) return opened(r);
@@ -2893,6 +3072,7 @@ async function web() {
       sessCache = null;
       const reg = load(), s = sessions().find((x) => x.id === b.id), p = reg.profiles[b.acct - 1];
       if (!s) throw new Error('找不到这个对话');
+      if (s.mac) throw new Error('Mac 上的对话用的是 Mac 自己的账号，换不了');
       if (!p) throw new Error('没有这个账号');
       const args = ['--resume', s.id];
       if (!s.pid && resuming(s.id)) throw new Error('这个对话还在启动，等它起来再换'); // a second Claude on the record, or the page told it switched
@@ -3095,8 +3275,8 @@ async function web() {
   async function wakeUp() {
     const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
     for (const id of ranBefore) {
-      const s = all.find((x) => x.id === id), p = s && !s.pid && s !== me && reg.profiles[s.acct];
-      if (p) try { startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
+      const s = all.find((x) => x.id === id), p = s && !s.pid && s !== me && (s.mac || reg.profiles[s.acct]);
+      if (p) try { if (s.mac) startMac(s.id); else startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
     }
     const open = readTickets().some((x) => !x.end), p = me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
     if (!p) return;
@@ -3110,7 +3290,7 @@ async function web() {
       return log('butler_woken', { session_id: me.id, reminders: lost.length });
     }
   }
-  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); setTimeout(() => wakeUp().catch((e) => log('wake_fail', { err: e.message })), 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
+  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); macWatch(); setTimeout(() => wakeUp().catch((e) => log('wake_fail', { err: e.message })), 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
   // the way in from outside, kept up: dialed again 5 s after a drop, waiting longer (up to a minute) while each try
   // fails at once (the server or the network down). A connection the network swallowed (a proxy's TUN switched on or
   // off moves it to another interface) is found dead within 15 s, by either side. On the server its end is a socket
@@ -3328,7 +3508,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { listSessions, MAC_WATCH, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -3369,6 +3549,7 @@ if (require.main === module) {
     else for (const s of all) console.log(`${s.pid ? '●' : ' '} ${new Date(s.at).toLocaleString('zh-CN', { hour12: false })}  ${pad(s.who, 16)} ${s.id}  ${path.basename(s.cwd)} · ${s.title}`);
   }
   else if (cmd === 'start') { // start N [claude args]: no menu, used by the island; start Gn: Codex on GPT account n
+    if (process.argv[3] === 'mac') return attach(null, { mac: true }); // start mac: one on the Mac, in the web service, this tab joined to it
     const g = gptByName(process.argv[3]);
     if (/^g/i.test(process.argv[3] ?? '')) { if (!g) { console.log('没有这个 GPT 账号：用 claude-multi list 看编号（G1、G2…）'); process.exit(1); } return runGpt(g, process.argv.slice(4)); }
     const p = load().profiles[Number(process.argv[3]) - 1];

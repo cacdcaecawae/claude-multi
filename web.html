@@ -817,7 +817,7 @@ const SPARK = `<svg class="spark" viewBox="-32 -32 64 64" fill="currentColor">${
   `<path transform="rotate(${k * 30 + 8 + TILT[k]})" d="M-4.7 0L-2.5 -${l}A2.5 2.5 0 0 1 2.5 -${l}L4.7 0z"/>`).join('')}<circle r="7.6"/></svg>`;
 // OpenAI's mark (Simple Icons), in currentColor; a conversation's mark: n its account, 1 on
 const OPENAI = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>`;
-const mark = (gpt, n) => `<i class="mk" style="color:${gpt ? 'var(--gpt)' : ACCT[(n - 1) % 4]}" title="${gpt ? 'GPT' : 'Claude'}">${gpt ? OPENAI : SPARK}</i>`;
+const mark = (gpt, n) => `<i class="mk" style="color:${gpt ? 'var(--gpt)' : ACCT[(n - 1) % 4] ?? 'var(--fg3)'}" title="${gpt ? 'GPT' : 'Claude'}">${gpt ? OPENAI : SPARK}</i>`; // no account (the Mac's): grey
 $('#act .logo').insertAdjacentHTML('afterbegin', `<span class="sp">${SPARK}<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" pathLength="100"/></svg></span>`);
 
 // --- the layout, as in VS Code: the activity bar picks what the side bar shows (对话, 额度, 用量); conversations open as
@@ -1025,7 +1025,8 @@ function drawHere() {
   const g = c.gpt ? state.gpt?.[c.acct - 1] : null, gw = g?.windows?.length ? g.windows.reduce((x, y) => (y.pct > x.pct ? y : x)) : null; // a GPT one's: its most used window
   const left = s?.req ? s.req + HOUR - Date.now() : null, min = Math.ceil(left / 60000);
   el.innerHTML = [
-    w && `<span class="where ${w}" title="这个对话的 ${c.gpt ? 'Codex' : 'Claude'} 在哪里运行">${w === 'pc' ? '电脑窗口' : '网页服务'}</span>`,
+    w && `<span class="where ${w}" title="这个对话的 ${c.gpt ? 'Codex' : 'Claude'} 在哪里运行">${w === 'pc' ? (c.mac ? 'Mac 的终端' : '电脑窗口') : '网页服务'}</span>`,
+    c.mac && `<span title="在 Mac 上的 ${esc(state.mac?.dir ?? '')} 里运行，用 Mac 自己的账号"><i style="background:var(--fg3)"></i>${esc(state.mac?.label ?? 'Mac mini')}</span>`,
     c.acct && c.gpt && `<span title="${esc(g?.label ?? '')}"><i style="background:var(--gpt)"></i>GPT 账号 G${c.acct}${gw ? ` · ${winName(gw.k)} <b class="${tone(gw.pct)}">${gw.pct}%</b>` : ''}</span>`,
     c.acct && !c.gpt && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % 4]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
     line?.model && `<span title="模型 · 思考强度">${esc([line.model, line.effort].filter(Boolean).join(' · '))}</span>`,
@@ -1166,6 +1167,7 @@ $('#side').onclick = (e) => {
   if (b.matches('[data-kind]')) { listKind = b.dataset.kind; save(); return renderChats(); }
   if (b.matches('[data-newin]')) { // a folder's ＋ (not its fold): started there at once, on the recommended account
     e.preventDefault();
+    if (b.dataset.newin.startsWith('/')) return addConv(focusG, makeConv({ mac: true, open: true }, state.mac?.label ?? 'Mac mini')); // the Mac's folder: one there
     return addConv(focusG, makeConv({ dir: b.dataset.newin, acct: (state.usage.rec ?? 0) + 1 }, base(b.dataset.newin) || '新对话'));
   }
   if (b.matches('[data-newoai]')) { e.preventDefault(); return addConv(focusG, makeOai(null, '新对话')); }
@@ -1622,9 +1624,12 @@ function newSheet() {
   // account nor folder), whichever there are
   let gptOn = false, chat = !gp.length, acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? '';
   const draw = () => {
-    const gpt = gptOn && !chat, oai = gptOn && chat, accts = gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
-      : u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
-        账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`);
+    // the Mac mini last among Claude's accounts: its own folder there, no folder to pick here
+    const gpt = gptOn && !chat, oai = gptOn && chat, mac = !gptOn && acct === 'mac';
+    const accts = gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
+      : [...u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
+        账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`),
+        ...(state.mac ? [`<button class="opt ${mac ? 'on' : ''}" data-a="mac">${esc(state.mac.label)}</button>`] : [])];
     $('#sheetIn').innerHTML = `<div class="stitle">新对话</div>
       ${gp.length || state.oai ? `<div class="seg kind">${[['', 'Claude'], ['1', 'GPT']].map(([v, l]) => `<button data-g="${v}"${!!v === gptOn ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : ''}
       ${gptOn && gp.length && state.oai ? `<div class="opts" style="margin-top:12px">${[['', 'Codex：在文件夹里写代码'], ['1', '聊天：用 API key，按量计费']]
@@ -1632,17 +1637,21 @@ function newSheet() {
       ${oai ? `<div class="m" style="margin-top:12px;white-space:normal">直接和 GPT-6 Astra 聊天，能联网、看图片和文件。输入框旁边可以选模式（普通，或 ChatGPT 的 GPT-6 Pro 那种 Pro）和思考强度。
         用你的 OpenAI key 按用量计费，Pro 难的问题一次要想几分钟，答好了会通知你。</div>`
       : `<div class="m" style="margin-top:12px">账号</div><div class="opts">${accts.join('')}</div>
-      <div class="m">文件夹</div><div class="opts">${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
-      <input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径">`}
+      ${mac ? `<div class="m" style="white-space:normal">在 Mac 上的 ${esc(state.mac.dir)} 里运行，用 Mac 自己的账号。改你电脑上的文件，它会通过 ssh 连回来改。</div>`
+      : `<div class="m">文件夹</div><div class="opts">${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
+      <input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径">`}`}
       <div class="btns" style="margin-top:14px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="start" style="flex:2">开始</button></div>`;
     const kindTo = () => { acct = gptOn && !chat ? 1 : (u.rec ?? 0) + 1; draw(); }; // the first account of the kind picked
     document.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { gptOn = !!b.dataset.g; kindTo(); }));
     document.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => { chat = !!b.dataset.chat; kindTo(); }));
-    document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
+    document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = b.dataset.a === 'mac' ? 'mac' : +b.dataset.a; draw(); }));
     document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { dir = b.dataset.d; draw(); }));
-    if (!oai) $('#dirIn').oninput = (e) => (dir = e.target.value.trim());
+    if (!oai && !mac) $('#dirIn').oninput = (e) => (dir = e.target.value.trim());
     $('#cancel').onclick = sheetOff;
-    $('#start').onclick = () => { sheetOff(); addConv(focusG, oai ? makeOai(null, '新对话') : makeConv({ dir, acct, gpt }, base(dir) || '新对话')); };
+    $('#start').onclick = () => {
+      sheetOff();
+      addConv(focusG, oai ? makeOai(null, '新对话') : mac ? makeConv({ mac: true, open: true }, state.mac.label) : makeConv({ dir, acct, gpt }, base(dir) || '新对话'));
+    };
   };
   draw(); $('#sheet').classList.add('on');
 }
@@ -1843,10 +1852,10 @@ async function openSession(id, where) {
   const s = state?.sessions.find((x) => x.id === id), have = convOf(id);
   if (s && s === state.sessions.find(isButler)) return butler ? unpeek() : setButler(true); // the 管家 itself: its mode, not a second pane of it
   if (!s) return toast('这个对话已经不在列表里了');
-  if (butler) { const acct = s.pid || s.oai ? s.acct + 1 : await pickAcct(s); if (acct || s.oai) peekAt(s, acct); return; } // in 管家 mode it stays: the conversation in the 管家's place
+  if (butler) { const acct = s.pid || s.oai || s.mac ? s.acct + 1 : await pickAcct(s); if (acct || s.oai || s.mac) peekAt(s, acct); return; } // in 管家 mode it stays: the conversation in the 管家's place
   if (have) return where && where !== 'aside' && where !== have.g ? moveConv(have, where) : activate(have.g, have); // open already: that tab
-  const acct = s.pid || s.oai ? s.acct + 1 : await pickAcct(s); // a running one stays where it runs (a GPT 聊天 one has no account)
-  if ((!acct && !s.oai) || convOf(id)) return;
+  const acct = s.pid || s.oai || s.mac ? s.acct + 1 : await pickAcct(s); // a running one stays where it runs (a GPT 聊天 one, a Mac's: no account here)
+  if ((!acct && !s.oai && !s.mac) || convOf(id)) return;
   const g = where === 'aside' ? sideGroup() : where ?? focusG;
   if (groups.includes(g)) addConv(g, convFor(s, acct));
 }
@@ -1886,11 +1895,13 @@ const KEYS = [['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z'], ['↑', '\x1
 const SEND_BOX = () => `<div class="send"><button class="toEnd" hidden></button><div class="box"><div class="atts"></div><div class="bar"><button class="ico pic" title="发图片或文件（也可以粘贴、拖进来）">${svg(I.clip)}</button><input type="file" multiple hidden>
       <textarea placeholder="${FINE ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入消息'}" enterkeyhint="send" rows="1"></textarea><button class="btn primary go" title="发送">${svg(I.send, 2)}</button></div></div></div>`;
 // a listed conversation's pane: a GPT 聊天 one's, or one with a terminal behind it
-const convFor = (s, acct) => (s.oai ? makeOai(s.id, s.title) : makeConv({ id: s.id, acct, gpt: s.gpt }, s.title));
+// (a Mac's has no account here: open, when you opened it, as an account given means for one of this PC's; a tab back
+// after a reload has none, and only attaches to it if it runs)
+const convFor = (s, acct) => (s.oai ? makeOai(s.id, s.title) : makeConv({ id: s.id, acct: s.mac ? null : acct, gpt: s.gpt, mac: s.mac, open: s.mac && acct !== undefined }, s.title));
 // body: {id, acct?} continues one, {dir, acct} starts one, {id} alone (a tab back after a reload) only attaches to it
 // if it runs. started: /api/open asked; ended: its Claude is gone (or couldn't start).
 function makeConv(body, title) {
-  const c = { id: body.id ?? null, title, acct: body.acct ?? null, gpt: !!body.gpt, g: null, started: false, ended: false, closed: false, live: '' }; // gpt: a GPT one (Codex)
+  const c = { id: body.id ?? null, title, acct: body.acct ?? null, gpt: !!body.gpt, mac: !!body.mac, g: null, started: false, ended: false, closed: false, live: '' }; // gpt: a GPT one (Codex); mac: on the Mac mini
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
@@ -2475,9 +2486,9 @@ function makeConv(body, title) {
   async function resume() { // 接着聊: like opening it from the list
     const s = state?.sessions.find((x) => x.id === c.id);
     if (!s) return toast('这个对话已经不在列表里了');
-    const acct = s.pid ? s.acct + 1 : await pickAcct(s);
-    if (!acct || c.closed) return;
-    body = { id: s.id, acct, gpt: c.gpt }; c.acct = acct; start();
+    const acct = s.pid || s.mac ? s.acct + 1 : await pickAcct(s);
+    if ((!acct && !s.mac) || c.closed) return;
+    body = { id: s.id, acct, gpt: c.gpt, mac: c.mac }; c.acct = s.mac ? null : acct; start();
   }
   // The live stream, while the tab is shown. It is opened again when it goes quiet (a computer waking up, a phone back
   // from the background, a network change: a browser never notices a dead connection itself; the server pings every
@@ -2534,14 +2545,15 @@ function makeConv(body, title) {
     const cwd = s?.cwd ?? body.dir ?? '', parts = cwd.split(/[\\/]/).filter(Boolean);
     const dir = isButler({ cwd }) ? ['管家'] : parts.length > 3 ? ['…', ...parts.slice(-2)] : parts;
     const where = c.ended ? '已结束' : key ? (kind === 'pc' ? '在电脑窗口里运行' : '在网页上运行') : c.started ? '连接中…' : '没有在运行';
-    $p('.path').innerHTML = dir.map((p, i) => i === dir.length - 1 ? `<b>${esc(p)}</b>` : esc(p)).join(' › ') + ` <span class="dim">· ${c.gpt ? 'GPT 账号 G' : '账号 '}${c.acct ?? '?'} · ${where}</span>`;
+    $p('.path').innerHTML = dir.map((p, i) => i === dir.length - 1 ? `<b>${esc(p)}</b>` : esc(p)).join(' › ')
+      + ` <span class="dim">· ${c.mac ? esc(state?.mac?.label ?? 'Mac mini') : `${c.gpt ? 'GPT 账号 G' : '账号 '}${c.acct ?? '?'}`} · ${where}</span>`;
     $p('.path').title = cwd;
   };
   c.wake = () => { // shown: started if it should be, its stream and record going again
     shown = true; el.classList.add('on'); readNote(c.id);
     if (!c.started) {
       const s = c.id && state?.sessions.find((x) => x.id === c.id);
-      if (body.acct || s?.pid) { if (!body.acct) body = { id: c.id, acct: s.acct + 1, gpt: c.gpt }; return start(); }
+      if (body.acct || body.open || s?.pid) { if (!body.acct && !body.open) body = { id: c.id, acct: s.acct + 1, gpt: c.gpt }; return start(); }
       notice('idle', '这个对话没有在运行'); c.sync();
     } else if (!c.ended && !es && key) connect();
     setView(view);
