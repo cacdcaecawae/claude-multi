@@ -957,6 +957,29 @@ console.log('tokens ok');
   assert.ok(r.startsWith('[系统通知] 「rag检索」回复了你发的消息：初赛材料的上传截止时间是 11 月 5 日 24:00') && r.includes('告诉用户') && !r.includes('工单有动静'), r);
   const both = butlerNotice([{ t: { id: 2, name: '层析' }, st: ['停下了', 'idle', ''] }], [{ title: 'rag检索', kind: 'ask' }]);
   assert.ok(both.includes('#2「层析」停下了') && both.includes('「rag检索」在你发消息后停在一个确认上'), both);
+  // what set the turn going: the last thing typed, from the record's own lines. Claude Code's last-prompt line lags (it
+  // came with a tool call): a [系统通知] the 管家 only answered still had 「对」 there, and was noted and pushed as yours
+  const { lastTyped } = require('./claude-multi');
+  const L = (o) => JSON.stringify(o), at = (s) => `2026-11-04T08:${s}Z`;
+  const rec = [
+    L({ type: 'user', timestamp: at('24:00'), message: { role: 'user', content: '对' } }),
+    L({ type: 'assistant', timestamp: at('24:10'), message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } }),
+    L({ type: 'user', timestamp: at('24:22'), message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } }),
+    L({ type: 'last-prompt', lastPrompt: '对' }),
+    L({ type: 'assistant', timestamp: at('24:42'), message: { content: [{ type: 'text', text: '两个工单都派出去了' }] } }),
+    L({ type: 'user', timestamp: at('24:43'), message: { content: '[系统通知] 工单有动静：#1 停下了' } }),
+    L({ type: 'assistant', timestamp: at('24:46'), message: { content: [{ type: 'text', text: '不插手。' }] } }),
+  ].join('\n') + '\n';
+  assert.ok(lastTyped(rec).startsWith('[系统通知]'), lastTyped(rec));
+  assert.equal(lastTyped(rec, Date.parse(at('24:30'))), '对'); // what was typed by then
+  // not typed: a background task's news, a reminder; a paste unwrapped; one sent while it worked; a picture alone
+  const more = (o) => rec + L({ timestamp: at('25:00'), ...o }) + '\n';
+  assert.ok(lastTyped(more({ type: 'user', message: { content: '<task-notification><summary>x</summary></task-notification>' } })).startsWith('[系统通知]'));
+  assert.ok(lastTyped(more({ type: 'user', isMeta: true, message: { content: 'Caveat: …' } })).startsWith('[系统通知]'));
+  assert.equal(lastTyped(more({ type: 'user', message: { content: [{ type: 'text', text: '<pasted_content id="1">\n继续做第三部分\n</pasted_content id="1">' }] } })), '继续做第三部分');
+  assert.equal(lastTyped(more({ type: 'attachment', attachment: { type: 'queued_command', prompt: '顺便看一下图 5', origin: { kind: 'human' } } })), '顺便看一下图 5');
+  assert.equal(lastTyped(more({ type: 'user', message: { content: [{ type: 'image', source: {} }] } })), '[Image]');
+  assert.equal(lastTyped('{"type":"user" cut off\n'), null);
   console.log('turn owner ok');
 }
 

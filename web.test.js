@@ -61,7 +61,8 @@ const press = async (key, shift = false) => {
 };
 (async () => {
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
-  proc = spawn(browser, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
+  // a mouse and keyboard, as the page's FINE wants: on a touch screen, or with no desktop (over SSH), it'd be taken for a phone
+  proc = spawn(browser, ['--headless=new', '--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
     '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   const ws = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(Error('Browser startup timeout')), 15000); let log = '';

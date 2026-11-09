@@ -1640,7 +1640,7 @@ function newSheet() {
     document.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => { chat = !!b.dataset.chat; kindTo(); }));
     document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
     document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { dir = b.dataset.d; draw(); }));
-    if (!oai) $('#dirIn').oninput = (e) => (dir = e.target.value.trim());
+    if (!oai) $('#dirIn').oninput = (e) => (dir = e.target.value.trim().replace(/^"(.*)"$/, '$1'));
     $('#cancel').onclick = sheetOff;
     $('#start').onclick = () => { sheetOff(); addConv(focusG, oai ? makeOai(null, '新对话') : makeConv({ dir, acct, gpt }, base(dir) || '新对话')); };
   };
@@ -2113,7 +2113,7 @@ function makeConv(body, title) {
     }
   }
   line.onkeydown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim()) go.click(); } // only sends; Shift+Enter: a new line
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim() || atts.length) go.click(); } // only sends (pictures alone too); Shift+Enter: a new line
     if (e.key === 'Escape' && busyNow) stop(); // as in Claude: Esc stops it
     // a question up and nothing typed: an option's number picks it, as in Claude's terminal (not while writing in 「Type something」)
     if (menuNow && !typeNow && !line.value && /^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing) {
@@ -2602,7 +2602,7 @@ function makeOai(id, title) {
   };
   if (c.id) try { line.value = localStorage.getItem('cm-draft:' + c.id) ?? ''; } catch {}
   line.addEventListener('input', () => { goMode(); grow(); });
-  line.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim()) go.click(); } };
+  line.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim() || atts.length) go.click(); } };
   // a picture goes as one (a big one made smaller, as for Claude), any other file as it is: each uploaded at once
   c.attach = (files) => {
     for (const f of files) {
