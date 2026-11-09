@@ -3643,7 +3643,8 @@ if (require.main === module) {
     else for (const s of all) console.log(`${s.pid ? '●' : ' '} ${new Date(s.at).toLocaleString('zh-CN', { hour12: false })}  ${pad(s.who, 16)} ${s.id}  ${path.basename(s.cwd)} · ${s.title}`);
   }
   else if (cmd === 'start') { // start N [claude args]: no menu, used by the island; start Gn: Codex on GPT account n
-    if (process.argv[3] === 'mac') return attach(null, { mac: true, dir: process.cwd() }); // start mac: one on the Mac for this folder, in the web service, this tab joined to it
+    // start mac: one on the Mac for this folder (start mac -: in the Mac's own folder), in the web service, this tab joined to it
+    if (process.argv[3] === 'mac') return attach(null, { mac: true, ...(process.argv[4] !== '-' && { dir: process.cwd() }) });
     const g = gptByName(process.argv[3]);
     if (/^g/i.test(process.argv[3] ?? '')) { if (!g) { console.log('没有这个 GPT 账号：用 claude-multi list 看编号（G1、G2…）'); process.exit(1); } return runGpt(g, process.argv.slice(4)); }
     const p = load().profiles[Number(process.argv[3]) - 1];

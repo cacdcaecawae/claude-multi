@@ -723,16 +723,21 @@ function Show-Projects([string]$n) { # n: an account's number, a GPT one's G1 (C
   $who = if ($n -eq 'mac') { $script:data.mac.label } elseif ($n -like 'G*') { "GPT $n · $(@($script:data.gpt)[[int]$n.Substring(1) - 1].label)" } else { $script:data.accounts[[int]$n - 1].label }
   $ProjTitle.Text = "用 $($who.Split('@')[0]) 启动到："
   $ProjList.Children.Clear()
-  foreach ($p in @($script:data.projects) + '') {
+  $list = @($script:data.projects) + ''
+  if ($n -eq 'mac') { $list = @('mac:') + $list } # the Mac's own folder first, for no folder here
+  foreach ($p in $list) {
     $b = New-Object Windows.Controls.Button
     $b.Style = $win.FindResource('Item')
     $b.Tag = @($n, $p)
-    $b.Content = if ($p) {
+    $b.Content = if ($p -eq 'mac:') {
+      X "<StackPanel $ns Orientation='Horizontal'><TextBlock Text='$(Esc (Split-Path $script:data.mac.dir -Leaf))' FontSize='13' FontWeight='SemiBold' MinWidth='120'/><TextBlock Text='就在 Mac 上，不对应这里的文件夹' FontSize='11' Foreground='#8CFFFFFF' Margin='14,1,0,0' VerticalAlignment='Center'/></StackPanel>"
+    } elseif ($p) {
       X "<StackPanel $ns Orientation='Horizontal'><TextBlock Text='$(Esc (Split-Path $p -Leaf))' FontSize='13' FontWeight='SemiBold' MinWidth='120'/><TextBlock Text='$(Esc $p)' FontSize='11' Foreground='#8CFFFFFF' Margin='14,1,0,0' MaxWidth='330' TextTrimming='CharacterEllipsis' VerticalAlignment='Center'/></StackPanel>"
     } else { X "<TextBlock $ns Text='其他文件夹…' FontSize='13' Foreground='#B3FFFFFF'/>" }
     $b.Add_Click({
       param($s)
       $dir = $s.Tag[1]
+      if ($dir -eq 'mac:') { Open-Terminal $HOME 'start mac -'; Collapse; return }
       if (-not $dir) {
         $dlg = New-Object Windows.Forms.FolderBrowserDialog
         if ($dlg.ShowDialog() -ne 'OK') { return }

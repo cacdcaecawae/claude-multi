@@ -1658,14 +1658,19 @@ function newSheet() {
       ${oai ? `<div class="m" style="margin-top:12px;white-space:normal">直接和 GPT-6 Astra 聊天，能联网、看图片和文件。输入框旁边可以选模式（普通，或 ChatGPT 的 GPT-6 Pro 那种 Pro）和思考强度。
         用你的 OpenAI key 按用量计费，Pro 难的问题一次要想几分钟，答好了会通知你。</div>`
       : `<div class="m" style="margin-top:12px">账号</div><div class="opts">${accts.join('')}</div>
-      <div class="m">文件夹</div><div class="opts">${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
+      <div class="m">文件夹</div><div class="opts">${mac ? `<button class="opt ${dir ? '' : 'on'}" data-d="" title="不对应你电脑上的文件夹">${esc(base(state.mac.dir))}</button>` : ''}${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
       <input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径">
-      ${mac ? `<div class="m" style="margin-top:8px;white-space:normal">在 Mac 上的 ${esc(state.mac.dir)}/${esc(base(dir) || '…')} 里运行，用 Mac 自己的账号，通过 ssh 改你电脑上这个文件夹里的文件。</div>` : ''}`}
+      ${mac ? `<div class="m" style="margin-top:8px;white-space:normal">${dir ? `在 Mac 上的 ${esc(state.mac.dir)}/${esc(base(dir))} 里运行，用 Mac 自己的账号，通过 ssh 改你电脑上这个文件夹里的文件。`
+        : `直接在 Mac 上的 ${esc(state.mac.dir)} 里运行，用 Mac 自己的账号，不对应你电脑上的文件夹。`}</div>` : ''}`}
       <div class="btns" style="margin-top:14px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="start" style="flex:2">开始</button></div>`;
     const kindTo = () => { acct = gptOn && !chat ? 1 : (u.rec ?? 0) + 1; draw(); }; // the first account of the kind picked
     document.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { gptOn = !!b.dataset.g; kindTo(); }));
     document.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => { chat = !!b.dataset.chat; kindTo(); }));
-    document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = b.dataset.a === 'mac' ? 'mac' : +b.dataset.a; draw(); }));
+    // the Mac mini: its own folder there unless one here is picked; back to an account here, a folder here again
+    document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => {
+      if (b.dataset.a === 'mac') { if (acct !== 'mac') dir = ''; acct = 'mac'; } else { acct = +b.dataset.a; dir ||= dirs[0] ?? ''; }
+      draw();
+    }));
     document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { dir = b.dataset.d; draw(); }));
     if (!oai) $('#dirIn').oninput = (e) => (dir = e.target.value.trim());
     $('#cancel').onclick = sheetOff;

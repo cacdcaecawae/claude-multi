@@ -197,6 +197,14 @@ const press = async (key, shift = false) => {
   if (process.env.CM_TEST_SCREENSHOT) fs.writeFileSync(process.env.CM_TEST_SCREENSHOT, Buffer.from((await call('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
   assert.deepEqual(errors, []);
   console.log('browser mobile targets, light theme and page width ok');
+  // 新对话 on the Mac mini: its own folder there (no folder here) unless one is picked; back to an account here, a folder here
+  assert.equal(await evaluate(`(() => { state.mac = { label: 'Mac mini', dir: '~/Desktop/mine' }; state.usage.projects = ['F:/proj'];
+    const on = () => document.querySelector('#sheetIn [data-d].on')?.dataset.d ?? 'none';
+    newSheet(); const a = on(); document.querySelector('#sheetIn [data-a="mac"]').click(); const b = on();
+    const said = document.querySelector('#sheetIn').textContent.includes('直接在 Mac 上的 ~/Desktop/mine 里运行');
+    document.querySelector('#sheetIn [data-a="1"]').click(); const c = on(); sheetOff(); state.usage.projects = [];
+    return [a, b, said, c].join(' | '); })()`), 'F:/proj |  | true | F:/proj');
+  console.log('browser 新对话 Mac mini in mine ok');
   // 用量: the Mac mini's records (listed last) under its name and Apple's mark, not as one more 账号 n
   assert.equal(await evaluate(`(() => { state.mac = { label: 'Mac mini' };
     tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0 }], days: [], total: 2, usd: 0 }; renderTokens();
