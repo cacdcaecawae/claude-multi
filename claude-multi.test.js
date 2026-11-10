@@ -1300,6 +1300,12 @@ console.log('tokens ok');
   const s2 = listSessions(reg).find((x) => x.id === id2);
   assert.deepEqual([s2.mac, s2.cwd, s2.macCwd], [true, String.raw`F:\demo-sim`, '/Users/me/Desktop/mine/demo-sim']);
   assert.equal(listSessions(reg).find((x) => x.id === id).cwd, '/Users/me/Desktop/mine'); // the Mac's own folder: as it is
+  // one in a subfolder of a project there that has another project's name: not that project's
+  const id3 = '2f1e2d3c-4b5a-4968-8776-655443322110', sub3 = path.join(dir, 'projects', '-Users-me-Desktop-mine-x-demo-sim');
+  fs.mkdirSync(sub3, { recursive: true });
+  fs.writeFileSync(path.join(sub3, `${id3}.jsonl`), JSON.stringify({ type: 'user', cwd: '/Users/me/Desktop/mine/x/demo-sim', message: { role: 'user', content: '改一下' } }) + String.fromCharCode(10)
+    + JSON.stringify({ type: 'ai-title', aiTitle: '改 x 里的' }) + String.fromCharCode(10));
+  assert.equal(listSessions(reg).find((x) => x.id === id3).cwd, '/Users/me/Desktop/mine/x/demo-sim');
   // a folder here's name there: its last part, a drive's root its letter, nothing sh or a path would take otherwise
   assert.deepEqual([String.raw`F:\demo-sim`, 'F:/', String.raw`D:\a\my proj's`, String.raw`D:\-x`, String.raw`D:\论文 返修`].map(macName),
     ['demo-sim', 'F', 'my-proj-s', 'x', '论文-返修']);
@@ -1308,6 +1314,38 @@ console.log('tokens ok');
   const py = require('child_process').spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "watch", "exec")'],
     { input: `DIR = "~"\nHAVE = {}\n${MAC_WATCH}`, encoding: 'utf8' });
   if (py.error) console.log('(no python here: the Mac watcher not compiled)'); else assert.equal(py.status, 0, py.stderr);
+  // and run (this PC's python, in a home of its own; async: the timing tests run meanwhile): a record of ours, one of its
+  // subagents', each sent as it is; and one of another folder there, of which only each reply's id, model, time and usage
+  // go out, nothing said
+  if (!py.error) {
+    const H = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cm-mw-')), mine = path.join(H, 'Desktop', 'mine'), P = path.join(H, '.claude', 'projects');
+    fs.mkdirSync(mine, { recursive: true });
+    const base = fs.realpathSync.native(mine).replace(/[^a-zA-Z0-9]/g, '-'), nl = String.fromCharCode(10);
+    const rec = JSON.stringify({ type: 'user', message: { content: '我的话' } }) + nl, usage = { input_tokens: 1, output_tokens: 2 };
+    fs.mkdirSync(path.join(P, base, 'c1', 'subagents'), { recursive: true }); fs.mkdirSync(path.join(P, '-other'), { recursive: true });
+    fs.writeFileSync(path.join(P, base, 'c1.jsonl'), rec);
+    fs.writeFileSync(path.join(P, base, 'c1', 'subagents', 'agent-a.jsonl'), rec);
+    const other = path.join(P, '-other', 'c2.jsonl');
+    fs.writeFileSync(other, JSON.stringify({ type: 'user', message: { content: '别人的话' } }) + nl + JSON.stringify({ type: 'assistant', timestamp: '2099-01-01T00:00:00.000Z',
+      requestId: 'req_1', message: { id: 'msg_1', model: 'claude-opus-5-5', content: [{ type: 'text', text: '别人的回答' }], usage } }) + nl);
+    const w = require('child_process').spawn('python', ['-u', '-'], { env: { ...process.env, USERPROFILE: H, HOME: H } });
+    let out = '', err = '';
+    const stop = setTimeout(() => w.kill(), 5000); // it runs till killed: once the other folder's line is out, or by then
+    w.stdout.on('data', (d) => { out += d; if (/"o": "-other\/c2\.jsonl".*\n/.test(out)) w.kill(); });
+    w.stderr.on('data', (d) => { err += d; });
+    w.stdin.end(`DIR = ${JSON.stringify(mine)}${nl}HAVE = {}${nl}OTHER = {}${nl}${MAC_WATCH}`);
+    w.on('exit', () => {
+      clearTimeout(stop);
+      const got = out.split(nl).filter(Boolean).map((l) => JSON.parse(l)), sent = (k) => Buffer.from(got.find((o) => o.f === k)?.d ?? '', 'base64').toString();
+      assert.equal(sent(`${base}/c1.jsonl`), rec, err);
+      assert.equal(sent(`${base}/c1/subagents/agent-a.jsonl`), rec);
+      const o = got.find((x) => x.o === '-other/c2.jsonl'), d = Buffer.from(o.d, 'base64').toString();
+      assert.deepEqual([o.at, o.to], [0, fs.statSync(other).size]);
+      assert.deepEqual(JSON.parse(d), { type: 'assistant', timestamp: '2099-01-01T00:00:00.000Z', requestId: 'req_1', message: { id: 'msg_1', model: 'claude-opus-5-5', usage } });
+      fs.rmSync(H, { recursive: true, force: true });
+      console.log('mac watcher run ok');
+    });
+  }
   // the names taken from the Mac: a record, a conversation's folder, a record of its subagents; nothing leading out
   {
     const src = /const macPath = .*/.exec(fs.readFileSync(path.join(__dirname, 'claude-multi.js'), 'utf8'))[0];

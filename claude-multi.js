@@ -592,7 +592,7 @@ function listSessions(reg) {
     const pid = live.get(s.id)?.pid ?? null, st = live.get(s.id)?.status;
     // busy: answering or running a command (its session file's status), for 换账号继续's 答完再换; wait: on a question for you
     // a Mac one: shown in the folder here its project folder is for (macCwd: where it runs there)
-    out.push({ ...s, cwd: (s.mac && macTo[path.posix.basename(cwd)]) || cwd, ...(s.mac && { macCwd: cwd }), title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell', wait: st === 'waiting',
+    out.push({ ...s, cwd: (s.mac && macPcOf(cwd, reg.mac, macTo)) || cwd, ...(s.mac && { macCwd: cwd }), title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell', wait: st === 'waiting',
       who: s.mac ? macLabel(reg) : reg.profiles[s.acct].label.split('@')[0] });
   }
   return out.sort((a, b) => b.at - a.at);
@@ -618,6 +618,9 @@ function macFolders(add) {
   if (add && Object.entries(add).some(([k, v]) => o[k] !== v)) { o = { ...o, ...add }; fs.mkdirSync(MAC, { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 1)); }
   return o;
 }
+// the folder here a Mac one's folder there is for: by its name, when it's right in the Mac's folder (one in a project's
+// subfolder isn't another project's that has the subfolder's name)
+const macPcOf = (cwd, m, to = macFolders()) => path.posix.dirname(cwd).endsWith(m.dir.replace(/^~|\/+$/g, '')) ? to[path.posix.basename(cwd)] : undefined;
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // a word for sh, as it is
 // Run on the Mac (python3 -, after DIR and HAVE: the folder, the record sizes copied here): one JSON line per change, for
 // that folder and each one in it (a project's: mine/demo-sim), a record named by its project folder (folder/id.jsonl).
@@ -736,10 +739,11 @@ while True:
         except Exception: pass
     if not more: time.sleep(1)
 `;
-let macPw; // the Mac's password, read once (null: not saved)
-const macPassword = () => macPw !== undefined ? macPw : (macPw = !fs.existsSync(MAC_PW) ? null
+let macPw; // the Mac's password, read once it reads (null: not saved, or not read this time: tried again the next)
+const macPassword = () => macPw || (macPw = !fs.existsSync(MAC_PW) ? null
   : spawnSync('powershell.exe', ['-NoProfile', '-Command', `[Net.NetworkCredential]::new('', (Get-Content '${MAC_PW}' | ConvertTo-SecureString)).Password`],
-    { encoding: 'utf8', windowsHide: true }).stdout.replace(/\r?\n$/, '') || null);
+    { encoding: 'utf8', windowsHide: true }).stdout?.replace(/\r?\n$/, '') || null);
+const macNoPw = () => fs.existsSync(MAC_PW) ? `没读出 Mac 的密码（${MAC_PW}），再试一次` : `还没保存 Mac 的密码（${MAC_PW}）`;
 // The Mac account's usage, read there (python3 -): its sign-in never leaves the Mac. As fetchUsage's: {u} or {err, temp?}.
 const MAC_USAGE = String.raw`
 import json, os, subprocess, sys, time, urllib.request, urllib.error
@@ -802,7 +806,7 @@ function macRules(pc) {
 // link to the server drops (ssh's 255); resolves to {status, out, err}
 function macRun(reg, cmd, input) {
   const pw = macPassword();
-  if (!pw) return Promise.resolve({ status: 1, out: '', err: `还没保存 Mac 的密码（${MAC_PW}）` });
+  if (!pw) return Promise.resolve({ status: 1, out: '', err: macNoPw() });
   const once = () => new Promise((ok) => {
     const p = require('child_process').execFile('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'SendEnv=LC_MACKC', reg.mac.host, cmd],
       { env: { ...process.env, LC_MACKC: pw }, encoding: 'utf8', windowsHide: true, timeout: 150000 },
@@ -2794,10 +2798,10 @@ async function web() {
     const m = load().mac;
     if (!m) throw new Error('还没设置 Mac mini');
     const pw = macPassword();
-    if (!pw) throw new Error(`还没保存 Mac 的密码（${MAC_PW}）`);
+    if (!pw) throw new Error(macNoPw());
     const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`, resume = o.resume ?? null;
     let into = `cd ${m.dir}`;
-    if (o.resume) { const pc = o.cwd && macFolders()[path.posix.basename(o.cwd)]; into = `cd ${sq(o.cwd)}${pc ? ` && ${macRules(pc)}` : ''}`; }
+    if (o.resume) { const pc = o.cwd && macPcOf(o.cwd, m); into = `cd ${sq(o.cwd)}${pc ? ` && ${macRules(pc)}` : ''}`; }
     else if (o.pc) {
       const name = macName(o.pc), at = o.pc.replace(/\\/g, '/');
       const md = `# 项目：${name}\n\n这个项目在用户 Windows 电脑上的 \`${at}\`，不在这台 Mac 上；这个文件夹只是它在 Mac 上启动的地方（怎么连那台电脑，见上一层的 CLAUDE.md）。\n\n`
@@ -2879,6 +2883,7 @@ async function web() {
       fs.appendFileSync(f, Buffer.from(o.d, 'base64'));
     } else if (o.o) { // a record of another folder there, its replies' usage only: kept apart (others\), counted as its own row
       const f = macPath(o.o, 'others');
+      if (o.at && o.at !== (macOther[o.o] ?? 0)) return proc.kill(); // a piece missed (a write failed): sent again from here's
       fs.mkdirSync(path.dirname(f), { recursive: true });
       if (!o.at) fs.rmSync(f, { force: true }); // from its start (the first of it, or rewritten there)
       fs.appendFileSync(f, Buffer.from(o.d, 'base64'));
