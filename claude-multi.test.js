@@ -1315,6 +1315,7 @@ console.log('tokens ok');
     assert.equal(macPath('p/a.jsonl'), '/m/projects/p/a.jsonl');
     assert.equal(macPath('p/id/'), '/m/projects/p/id');
     assert.equal(macPath('p/id/subagents/agent-1.jsonl'), '/m/projects/p/id/subagents/agent-1.jsonl');
+    assert.equal(macPath('p/a.jsonl', 'others'), '/m/others/p/a.jsonl');
     for (const bad of ['../x', 'p/../x', 'p/id/other/a.jsonl', 'p/id/subagents/../../../x', 'p/id/subagents/a/b', '/p/a']) assert.throws(() => macPath(bad), /不认识的名字/, bad);
   }
   // a Claude there in our tmux: new, continued (one running there joined first), or its session joined again
@@ -1334,13 +1335,22 @@ console.log('tokens ok');
     fs.mkdirSync(pc, { recursive: true });
     assert.ok(!macRules(pc).includes('gunzip') && macRules(pc).includes("awk '/^<!-- cm-pc-rules/{exit}{print}'"));
     fs.writeFileSync(path.join(pc, 'CLAUDE.md'), '\uFEFF# 规矩\n\n- 先跑测试\n');
-    const put = /echo (\S+) \| base64 -D \| gunzip >> CLAUDE.md.cm && mv CLAUDE.md.cm CLAUDE.md \|\| true; }$/.exec(macRules(pc));
+    const put = /^{ T=CLAUDE\.md\.cm\.\$\$; .* && echo (\S+) \| base64 -D \| gunzip >> \$T && mv \$T CLAUDE.md \|\| rm -f \$T; }$/.exec(macRules(pc));
     const text = require('zlib').gunzipSync(Buffer.from(put[1], 'base64')).toString();
     assert.match(text, /^<!-- cm-pc-rules: [^\n]*pc-proj\/CLAUDE.md[^\n]* -->\n\n# 规矩\n\n- 先跑测试\n$/);
     fs.writeFileSync(path.join(pc, 'CLAUDE.md'), require('crypto').randomBytes(20000).toString('hex'));
     assert.ok(!macRules(pc).includes('gunzip'));
     const sh2 = require('child_process').spawnSync('sh', ['-n'], { input: macRules(pc), encoding: 'utf8' });
     if (!sh2.error) assert.equal(sh2.status, 0, sh2.stderr);
+  }
+  // a reply of the Mac's other folders as the watcher sends it (its usage only): counted like a record's, in a row of its own
+  {
+    const { tokenStats } = require('./claude-multi'), od = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cm-oth-'));
+    fs.mkdirSync(path.join(od, 'others', 'p'), { recursive: true });
+    fs.writeFileSync(path.join(od, 'others', 'p', 's.jsonl'), '{"type":"assistant","timestamp":"2026-11-09T11:18:30.593Z","requestId":"req_1","message":{"id":"msg_1","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":3,"output_tokens":4}}}\n');
+    const ts = tokenStats([{ id: 'mac-other', label: 'M', dir: path.join(od, 'others'), mac: true, other: true }], path.join(od, 'c.json'), path.join(od, 'no.log'));
+    assert.deepEqual([ts.total, ts.accounts[0].total, ts.accounts[0].mac, ts.accounts[0].other, ts.usd > 0], [19, 19, true, true, true]);
+    fs.rmSync(od, { recursive: true, force: true });
   }
   console.log('mac mini ok');
 }

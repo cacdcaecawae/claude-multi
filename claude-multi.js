@@ -648,6 +648,34 @@ def feed(p, key, now): # a record's bytes past what's there; True: more of it le
         k += len(d)
     seen[key] = k
     return k < size
+# The Mac's other folders (not ours: whoever else uses Claude Code there): what their replies cost, from when our folder
+# was made, and nothing said in them: of each reply only its id, model, time and token counts go out
+OSEEN, _st = dict(OTHER), os.stat(cwd)
+SINCE = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(getattr(_st, 'st_birthtime', _st.st_ctime)))
+def lean(p, key):
+    try: size = os.path.getsize(p)
+    except OSError: return False
+    k = OSEEN.get(key, 0)
+    if size < k: k = 0
+    if size > k:
+        rows, n = [], 0
+        with open(p, 'rb') as fh:
+            fh.seek(k)
+            for l in fh:
+                if not l.endswith(b'\n'): break # still being written
+                n += len(l)
+                if b'"type":"assistant"' in l and b'"usage":' in l:
+                    try:
+                        j = json.loads(l); m = j['message']
+                        if j['timestamp'] >= SINCE: rows.append(json.dumps({'type': 'assistant', 'timestamp': j['timestamp'], 'requestId': j.get('requestId') or '',
+                            'message': {'id': m['id'], 'model': m.get('model') or '', 'usage': m['usage']}}, separators=(',', ':')))
+                    except Exception: pass
+                if n >= 8 << 20: break
+        if not n: return False
+        out({'o': key, 'at': k, 'to': k + n, 'd': base64.b64encode(('\n'.join(rows) + '\n').encode() if rows else b'').decode()})
+        k += n
+    OSEEN[key] = k
+    return k < size
 def run(*a): return subprocess.run(a, capture_output=True, text=True).stdout
 def sysnow():
     k, cpu, mine, mem_mine, n = os.cpu_count() or 1, 0.0, 0.0, 0, 0
@@ -680,6 +708,13 @@ while True:
                 if seen.get(key + '/') != m:
                     with open(t, 'rb') as fh: out({'t': key, 'd': base64.b64encode(fh.read()).decode()})
                     seen[key + '/'] = m
+    for g in [x for x in names(root) if not (x == base or x.startswith(base + '-'))]:
+        for n in names(os.path.join(root, g)):
+            p, key = os.path.join(root, g, n), g + '/' + n
+            if n.endswith('.jsonl'): more = lean(p, key) or more
+            else:
+                for a in names(os.path.join(p, 'subagents')):
+                    if a.endswith('.jsonl'): more = lean(os.path.join(p, 'subagents', a), key + '/subagents/' + a) or more
     for n in [x for x in seen if x not in now]:
         out({'gone': n}); del seen[n]
     live = []
@@ -760,7 +795,8 @@ function macRules(pc) {
   let md = '';
   try { md = fs.readFileSync(path.join(pc, 'CLAUDE.md'), 'utf8').replace(/^\uFEFF/, '').trim(); } catch {}
   const b = md && require('zlib').gzipSync(`<!-- cm-pc-rules: 以下是电脑上 ${pc.replace(/\\/g, '/')}/CLAUDE.md 的内容，每次从网页开这个对话时更新；要改去电脑上改 -->\n\n${md}\n`).toString('base64');
-  return `{ [ -f CLAUDE.md ] && awk '/^<!-- cm-pc-rules/{exit}{print}' CLAUDE.md > CLAUDE.md.cm${b && b.length <= 12000 ? ` && echo ${b} | base64 -D | gunzip >> CLAUDE.md.cm` : ''} && mv CLAUDE.md.cm CLAUDE.md || true; }`;
+  // (T: this start's own; two starts in a folder at once sharing one lost the Mac folder's part)
+  return `{ T=CLAUDE.md.cm.$$; [ -f CLAUDE.md ] && awk '/^<!-- cm-pc-rules/{exit}{print}' CLAUDE.md > $T${b && b.length <= 12000 ? ` && echo ${b} | base64 -D | gunzip >> $T` : ''} && mv $T CLAUDE.md || rm -f $T; }`;
 }
 // a command on the Mac, its keychain unlocked first (sh: what runs; input: python3 - reads it), tried again when the
 // link to the server drops (ssh's 255); resolves to {status, out, err}
@@ -2801,6 +2837,7 @@ async function web() {
   // The copy here of the Mac's records and of which of its conversations run (MAC_WATCH there, one ssh connection
   // kept up: again 2 s after a drop, waiting longer, to a minute, while each try fails at once). One of yours there that
   // stops answering, or asks, is a note, as a hook's here.
+  let macOther = {}; // the Mac's other folders' records: how far each was read there (others.json)
   let macW = null, macWait = 2000, macSys = null; // macSys: the Mac's newest {sys}, and when it came
   function macWatch() {
     const m = load().mac;
@@ -2813,7 +2850,8 @@ async function web() {
     const proc = macW = require('child_process').spawn(sshExe, ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15',
       '-o', 'ServerAliveCountMax=3', m.host, 'python3', '-u', '-'], { windowsHide: true });
     proc.stdin.on('error', () => {});
-    proc.stdin.end(`DIR = ${JSON.stringify(m.dir)}\nHAVE = ${JSON.stringify(have)}\n${MAC_WATCH}`);
+    try { macOther = JSON.parse(fs.readFileSync(path.join(MAC, 'others.json'), 'utf8')); } catch { macOther = {}; }
+    proc.stdin.end(`DIR = ${JSON.stringify(m.dir)}\nHAVE = ${JSON.stringify(have)}\nOTHER = ${JSON.stringify(macOther)}\n${MAC_WATCH}`);
     let line = '';
     proc.stdout.setEncoding('utf8');
     proc.stdout.on('data', (d) => {
@@ -2831,7 +2869,7 @@ async function web() {
   }
   // (a name the Mac sends is a project folder and one name in it, or a record in that one's subagents, nothing else:
   // never a way out of accounts\mac)
-  const macPath = (k) => { if (!/^[\w.-]+\/[\w.-]+(\/subagents\/[\w.-]+)?\/?$/.test(k) || k.includes('..')) throw new Error(`不认识的名字：${k}`); return path.join(MAC, 'projects', ...k.split('/').filter(Boolean)); };
+  const macPath = (k, top = 'projects') => { if (!/^[\w.-]+\/[\w.-]+(\/subagents\/[\w.-]+)?\/?$/.test(k) || k.includes('..')) throw new Error(`不认识的名字：${k}`); return path.join(MAC, top, ...k.split('/').filter(Boolean)); };
   function macCopy(o, proc) {
     if (o.f) {
       const f = macPath(o.f), size = fs.existsSync(f) ? fs.statSync(f).size : 0;
@@ -2839,6 +2877,12 @@ async function web() {
       fs.mkdirSync(path.dirname(f), { recursive: true });
       if (o.at < size) fs.truncateSync(f, o.at);
       fs.appendFileSync(f, Buffer.from(o.d, 'base64'));
+    } else if (o.o) { // a record of another folder there, its replies' usage only: kept apart (others\), counted as its own row
+      const f = macPath(o.o, 'others');
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      if (!o.at) fs.rmSync(f, { force: true }); // from its start (the first of it, or rewritten there)
+      fs.appendFileSync(f, Buffer.from(o.d, 'base64'));
+      macOther[o.o] = o.to; fs.writeFileSync(path.join(MAC, 'others.json'), JSON.stringify(macOther));
     } else if (o.t) {
       fs.mkdirSync(macPath(o.t), { recursive: true });
       fs.writeFileSync(path.join(macPath(o.t), 'custom-title.json'), Buffer.from(o.d, 'base64'));
@@ -3588,7 +3632,9 @@ async function web() {
 function tokenRoots(reg = load()) {
   return [...reg.profiles, ...(reg.removed ?? []).map((p) => ({ ...p, label: `${p.label}（已移除）` }))]
     .map((p) => ({ id: p.id, label: p.label, dir: path.join(p.configDir, 'projects') }))
-    .concat(reg.mac ? [{ id: 'mac', label: macLabel(reg), dir: path.join(MAC, 'projects') }] : []); // the Mac's records, as copied here
+    // the Mac's records, as copied here; and what its other folders cost (others\: their replies' usage only), a row of its own
+    .concat(reg.mac ? [{ id: 'mac', label: macLabel(reg), dir: path.join(MAC, 'projects'), mac: true },
+      { id: 'mac-other', label: `${macLabel(reg)}（${path.posix.basename(reg.mac.dir)} 以外）`, dir: path.join(MAC, 'others'), mac: true, other: true }] : []);
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
 // input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5).
@@ -3701,7 +3747,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 });
   const add = (t, x, usd) => { t.i += x[2]; t.o += x[3]; t.cw += x[4] + x[5]; t.cr += x[6]; t.usd += usd; t.n++; };
-  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0 }));
+  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0, ...(r.mac && { mac: true }), ...(r.other && { other: true }) }));
   for (const { x, ri } of best.values()) {
     const usd = replyCost(x), t = (days[x[1]] ??= { d: x[1], ...zero(), by: roots.map(zero) });
     add(t, x, usd); add(t.by[ri], x, usd);
