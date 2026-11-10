@@ -139,6 +139,14 @@ const press = async (key, shift = false) => {
   await evaluate("readNote('A')");
   assert.equal(await desk(), '0等你 0在回复 0答完了 1空闲 | 空闲');
   await evaluate("butler=false; document.querySelector('#toast').style.display='none'");
+  // a note that came while its conversation was already shown: read in the pane you're in, this window in front only
+  await evaluate("state.notes=[{id:'A',kind:'done',at:5,by:'you'}]; document.hasFocus=()=>false; readShown({active:{id:'A'}})");
+  assert.equal(await evaluate('state.notes.length'), 1);
+  await evaluate("document.hasFocus=()=>true; readShown({active:{id:'B'}})");
+  assert.equal(await evaluate('state.notes.length'), 1);
+  await evaluate("readShown({active:{id:'A'}})");
+  assert.equal(await evaluate('state.notes.length'), 0);
+  await evaluate('delete document.hasFocus');
   // the 管家's own answer to you, its pane out of sight: a red dot on its icon and a notice; to a [系统通知], nothing
   const bdot = () => evaluate("[document.querySelector('#act .logo').classList.contains('new'), document.querySelector('#toast').style.display === 'block' ? document.querySelector('#toast').textContent : '']");
   await evaluate("state.butler='C:/b'; state.sessions.push({id:'M',title:'x',acct:0,cwd:'C:/b',at:1,pid:5}); state.notes=[{id:'M',kind:'done',at:3,by:'notice'}]; newNotes()");
