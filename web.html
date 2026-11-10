@@ -55,6 +55,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
   svg { display: block; flex: none; }
   [hidden] { display: none !important; }
+  b { font-weight: 600; } .hm b { font-weight: 700; } /* the chrome's bold is semibold; an answer's **bold** stays bold */
   /* where the keyboard is (Tab), ringed as VS Code rings it; a mouse's click shows none */
   :focus-visible:not(input, textarea) { outline: 1px solid var(--accent); outline-offset: -1px; } /* a text box shows its caret: no ring */
   .row:focus-visible, .tab:focus-visible { outline-width: 2px; outline-offset: -2px; }
@@ -75,33 +76,12 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #act .logo .ring { position: absolute; left: -8px; top: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; overflow: visible; }
   #act .logo .ring circle { fill: none; stroke: #d97757; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: 100; opacity: 0; }
   #act .logo.hold .ring circle { opacity: 1; animation: holdRing .8s linear forwards; }
-  #act .logo.hold .ring { filter: drop-shadow(0 0 4px rgba(217, 119, 87, .8)); }
-  #act .logo.hold .spark { animation: holdSpark .8s cubic-bezier(.5, 0, .9, .5) forwards; }
   @keyframes holdRing { to { stroke-dashoffset: 0; } }
-  @keyframes holdSpark { to { transform: rotate(300deg) scale(1.35); filter: drop-shadow(0 0 6px rgba(217, 119, 87, .9)); } }
-  /* the way in or out, a console booting: the screen goes dark over a faint grid (taps stopped), the mode changes in the
-     dark, a line of light sweeps down uncovering it; going in, the columns power up one by one (flipButler) */
-  #flip { position: fixed; inset: 0; z-index: 60; overflow: hidden; }
-  #flip .dark { position: absolute; inset: 0; opacity: 0; display: grid; place-items: center;
-    background: linear-gradient(rgba(217, 119, 87, .08) 1px, transparent 1px) 0 0 / 28px 28px, linear-gradient(90deg, rgba(217, 119, 87, .08) 1px, transparent 1px) 0 0 / 28px 28px,
-      radial-gradient(ellipse at 50% 42%, #1d1612, #07080a 72%); }
-  #flip .hud { font: 600 15px/1 var(--mono); letter-spacing: .4em; color: #f0a07c; text-shadow: 0 0 12px rgba(217, 119, 87, .85); white-space: nowrap; }
-  #flip .hud i { display: inline-block; width: .6em; height: 1em; margin-left: .1em; vertical-align: -2px; background: currentColor; animation: blink .5s steps(1) infinite; }
-  #flip .scan { position: absolute; left: 0; right: 0; top: 0; height: 2px; opacity: 0; background: #fff;
-    box-shadow: 0 0 8px 2px rgba(255, 196, 168, .95), 0 0 42px 12px rgba(217, 119, 87, .55); }
-  @keyframes blink { 50% { opacity: 0; } }
-  #app.arrive #desk, #app.arrive #butler, #app.arrive #deskR { animation: boot .75s cubic-bezier(.2, .8, .2, 1) both; }
-  #app.arrive #desk { animation-delay: .32s; } #app.arrive #butler { animation-delay: .47s; } #app.arrive #deskR { animation-delay: .62s; }
-  @keyframes boot {
-    0% { opacity: .12; filter: brightness(.45); box-shadow: 0 0 0 1px rgba(217, 119, 87, .95), 0 0 30px rgba(217, 119, 87, .6); }
-    55% { opacity: 1; filter: none; box-shadow: 0 0 0 1px rgba(217, 119, 87, .7), 0 0 22px rgba(217, 119, 87, .35); }
-    100% { box-shadow: 0 0 0 0 rgba(217, 119, 87, 0), 0 0 0 rgba(217, 119, 87, 0); } }
-  /* and a warm light over it, while there */
-  #app.butler { background: radial-gradient(900px 520px at 0 0, rgba(217, 119, 87, .16), transparent 70%); }
   .spark { display: block; width: 100%; height: 100%; }
   /* which one a conversation is, Claude's spark or OpenAI's mark, in its account's color, before its name */
   .mk { flex: none; display: inline-block; width: 13px; height: 13px; vertical-align: -2px; margin-right: 5px; }
   .mk svg { display: block; width: 100%; height: 100%; }
+  .row .mk { color: var(--fg2) !important; } /* in a list row the ring before it carries the account's color */
   #act button { position: relative; width: 40px; height: 40px; margin: 2px 0; border-radius: 8px; display: grid; place-items: center; color: var(--fg3); }
   #act button:hover, #act button.on { color: var(--fg); }
   #app.side #act button.on { background: var(--tint); } /* the side bar's view: a soft tile, as VS Code's now */
@@ -112,7 +92,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #badge { position: absolute; right: 2px; bottom: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
   #side { width: var(--sideW, 300px); flex: none; display: none; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); }
   #app.side #side { display: flex; }
-  .sideHead { height: 35px; flex: none; display: flex; align-items: center; padding: 0 8px 0 20px; font-size: 13px; font-weight: 600; color: var(--fgHi); }
+  .sideHead { height: 36px; flex: none; display: flex; align-items: center; padding: 0 8px 0 20px; font-size: 13px; font-weight: 600; color: var(--fgHi); }
   #sideTitle { flex: 1; }
   #sideActs { display: flex; gap: 2px; }
   .ico { width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--fg2); flex: none; }
@@ -140,7 +120,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     -webkit-mask: var(--chev) center / 16px no-repeat; mask: var(--chev) center / 16px no-repeat; transition: transform .1s; }
   details[open] > summary::before { transform: rotate(90deg); }
   details.sec > summary > span { flex: 1; }
-  .count { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--badge); color: var(--badgeFg); font-size: 10px; line-height: 16px; }
+  .count { margin-left: 6px; color: var(--fg3); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; } /* a count is quiet text */
   .link { color: var(--link); font-size: 11px; font-weight: 400; }
   /* rows highlight as rounded tiles inset from the side bar's edges */
   .row { display: flex; align-items: center; gap: 8px; min-height: 42px; margin: 1px 8px; padding: 4px 6px 4px 12px; border-radius: 6px; cursor: pointer; }
@@ -171,10 +151,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .spin { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid var(--orange); border-right-color: transparent; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .tab .spin { margin: 0 2px; }
-  .chip { font-size: 11.5px; flex: none; } /* where it runs: the status bar's green and purple, as words */
-  .chip.pc { color: var(--green); }
-  .chip.web { color: var(--purple); }
-  .dot { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex: none; font: 700 11px/1 var(--ui); font-style: normal; }
+  .chip { font-size: 11.5px; flex: none; color: var(--fg3); } /* where it runs, as words (the status bar has its colors) */
+  .dot { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex: none; font: 600 11px/1 var(--ui); font-style: normal; }
   .dot.done { background: rgba(63,185,80,.2); color: var(--green); }
   .dot.ask { background: rgba(229,160,58,.2); color: var(--orange); }
   /* a row waiting on you (orange) or answered and not looked at (green), as a tab marks it; on a folded folder too */
@@ -237,7 +215,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .rec { color: var(--green); font-size: 11.5px; font-weight: 600; }
   .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; padding: 8px 0 12px; border-bottom: 1px solid var(--border); }
   .tile { padding: 4px 0; }
-  .tile .k { font-size: 11.5px; color: var(--fg2); } .tile .v { font-size: 18px; font-weight: 600; color: var(--fgHi); } .tile .u { font-size: 12px; color: var(--fg2); }
+  .tile .k { font-size: 11.5px; color: var(--fg2); } .tile .v { font-size: 18px; font-weight: 600; color: var(--fgHi); font-variant-numeric: tabular-nums; } .tile .u { font-size: 12px; color: var(--fg2); }
   .bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-top: 6px; }
   .bars > div { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; height: 100%; }
   .bars i { display: block; border-radius: 2px 2px 0 0; }
@@ -294,7 +272,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #app.butler #side, #app.butler #sideSash, #app.butler #editor { display: none !important; }
   #butler.blank > .hint { display: flex; }
   /* its 操作台, beside it: how it is, what it keeps watching, the conversations, what just got done, the computer */
-  #desk { display: none; width: var(--deskW, clamp(240px, 16vw, 360px)); flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: linear-gradient(180deg, rgba(217, 119, 87, .10), transparent 200px), var(--bar); }
+  #desk { display: none; width: var(--deskW, clamp(240px, 16vw, 360px)); flex: none; flex-direction: column; gap: 18px; overflow: auto; padding: 16px 14px; background: var(--bar); }
   /* its input box as one rounded bar, its account, model and thinking effort in it before the send button (as a chat
      app has them); on a phone those three on a row under the words */
   #butler .send { position: relative; }
@@ -352,7 +330,6 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pill { flex: none; display: inline-block; font-size: 11px; font-weight: 600; font-style: normal; line-height: 18px; padding: 0 7px; border-radius: 9px; white-space: nowrap; color: var(--fg2); background: color-mix(in srgb, currentColor 15%, transparent); }
   .pill.g { color: var(--green); } .pill.o { color: var(--orange); } .pill.r { color: var(--red); } .pill.b { color: var(--a1); } .pill.p { color: var(--purple); } .pill.k { color: #d97757; }
   .desk .mood { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--cardB); border-radius: 10px; background: var(--bg); color: var(--fg); }
-  .desk .mood span { font-size: 18px; line-height: 1; }
   .desk .item { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; min-width: 0; }
   .desk .item[data-open] { cursor: pointer; }
   .desk .item .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -782,13 +759,15 @@ Object.defineProperty(HTMLElement.prototype, 'html', { set(h) {
   this.innerHTML = h; this.$html = h; this.$first = this.firstChild;
   if (f) this.querySelector(f.dataset.open != null ? `[data-open="${CSS.escape(f.dataset.open)}"]` : `[data-i="${CSS.escape(f.dataset.i)}"]`)?.focus({ preventScroll: true });
 } });
-// a message of yours as shown here: its [Image #N] out (the pictures show), a file's path as 📎 and its name, a paste unwrapped
-const shownText = (t) => t.replace(/\[Image #\d+\]\s*/g, '').replace(/^附件：.*?[\\/]\d{8}T\d{6}-[0-9a-f]{6}-(.+)$/gm, '📎 $1')
+// a message of yours as shown here: its [Image #N] out (the pictures show), a file's path as 附件： and its name, a paste unwrapped
+const shownText = (t) => t.replace(/\[Image #\d+\]\s*/g, '').replace(/^附件：.*?[\\/]\d{8}T\d{6}-[0-9a-f]{6}-(.+)$/gm, '附件：$1')
   .replace(/<pasted_content id="[^"]*">\n?([\s\S]*?)\n?<\/pasted_content id="[^"]*">/g, '$1').trim();
 const toast = (t, ms = 2600) => { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = 'none'), ms); };
 const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
 const fmtTok = (n) => n >= 1e8 ? `${(n / 1e8).toFixed(2)} 亿` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString()} 万` : Math.round(n).toLocaleString();
-const usd = (u) => '$' + (u >= 1000 ? Math.round(u).toLocaleString() : u.toFixed(2));
+// money in one format, whole dollars (estimates all): $7,012, $155; under a dollar said so; none, $0
+const usd = (u) => (u > 0 && u < 1 ? '不到 $1' : '$' + Math.round(u).toLocaleString());
+const about = (u) => (u > 0 && u < 1 ? '' : '约 ') + usd(u);
 const base = (p) => String(p ?? '').split(/[\\/]/).filter(Boolean).pop() ?? '';
 const svg = (d, w = 1.6) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M12 4.5v15"/>', close: '<path d="M7 7l10 10M17 7L7 17"/>',
@@ -1225,23 +1204,11 @@ function setButler(on) {
   if (on) { drawButler(); drawAsks(); drawDesk(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
   markRows(); save(); drawBDot();
 }
-// Held ~0.8 s (the ring full): in or out as a console booting (with less motion asked for, at once). Dark first; once it's
-// dark (its animation done, not a timer: a slow phone never shows the change early) the mode changes under it, then a line
-// of light sweeps down, the dark going with it; going in, the columns power up one by one as it passes.
+// Held ~0.8 s (the ring full): in or out, the new mode fading in once (at once with less motion asked for)
 let heldAt = 0;
 function flipButler(on) {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return setButler(on);
-  const f = document.createElement('div');
-  f.id = 'flip'; f.innerHTML = `<div class="dark">${on ? '<div class="hud">管家 · 启动中<i></i></div>' : ''}</div><div class="scan"></div>`;
-  document.body.append(f);
-  const [dark, scan] = f.children, sweep = { duration: 620, delay: on ? 280 : 60, easing: 'cubic-bezier(.45, 0, .2, 1)', fill: 'forwards' };
-  dark.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: 'ease-in', fill: 'forwards' }).finished.then(() => {
-    setButler(on); // in the dark
-    if (on) { $('#app').classList.add('arrive'); setTimeout(() => $('#app').classList.remove('arrive'), 1500); }
-    dark.animate([{ clipPath: 'inset(0 0 0 0)' }, { clipPath: 'inset(100% 0 0 0)' }], sweep);
-    scan.animate([{ transform: 'translateY(-4px)', opacity: 1 }, { transform: `translateY(${innerHeight}px)`, opacity: 1, offset: 0.9 }, { transform: `translateY(${innerHeight}px)`, opacity: 0 }], sweep)
-      .finished.then(() => f.remove());
-  });
+  setButler(on);
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) $('#app').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: 'cubic-bezier(.22, 1, .36, 1)' });
 }
 {
   const logo = $('#act .logo'), letGo = () => logo.classList.remove('hold');
@@ -1381,13 +1348,13 @@ $('#asks').onclick = async (e) => {
 function mood(up, thinking, run, decide = 0) {
   const wait = run.filter((x) => x.wait).length + decide, busy = run.filter((x) => x.busy).length, u = state.usage;
   const five = u.accounts?.[u.rec]?.windows?.find((x) => x.k === 'five_hour')?.pct ?? 0;
-  if (!up) return ['😴', '在休息'];
-  if (!u.open) return u.rec == null ? ['😶', shut(u)] : ['😵', '额度都用完了，等恢复'];
-  if (wait) return ['🙋', `有 ${wait} 件事等你拍板`];
-  if (thinking) return ['🤔', '在想事情'];
-  if (five >= 80) return ['😰', '额度快用完了'];
-  if (busy) return [busy >= 3 ? '💪' : '🙂', `盯着 ${busy} 个在干活的对话`];
-  return ['😌', '一切顺利，很清闲'];
+  if (!up) return '在休息';
+  if (!u.open) return u.rec == null ? shut(u) : '额度都用完了，等恢复';
+  if (wait) return `有 ${wait} 件事等你拍板`;
+  if (thinking) return '在想事情';
+  if (five >= 80) return '额度快用完了';
+  if (busy) return `盯着 ${busy} 个在干活的对话`;
+  return '一切顺利，很清闲';
 }
 // a section's title, and on its right what it comes to (what a closed one still tells you)
 const head = (id, title, digest) => { $('#' + id).parentElement.querySelector('h4').html = `${title}<span class="dg">${esc(digest)}</span>`; };
@@ -1398,11 +1365,11 @@ function drawDesk() {
   const tickets = state.tickets ?? [], open = tickets.filter((x) => !x.end), nYou = open.filter((x) => x.stage[1] === 'you').length;
   // it runs: listed with its Claude, or its pane here has one (just started, no message yet, it isn't listed)
   const up = !!me?.pid || !!(bConv?.started && !bConv.ended), thinking = bConv?.live === 'busy' || !!me?.busy, acct = me?.pid ? me.acct + 1 : bConv?.acct;
-  const [face, word] = mood(up, thinking, run, nYou), wait = run.filter((x) => x.wait), busy = run.filter((x) => x.busy && !x.wait);
+  const word = mood(up, thinking, run, nYou), wait = run.filter((x) => x.wait), busy = run.filter((x) => x.busy && !x.wait);
   const status = !up ? '没在运行' : bConv?.live === 'ask' || me?.wait ? '在等你回答' : thinking ? '在回复' : '空闲';
   const stC = !up ? '' : status === '在等你回答' ? 'o' : thinking ? 'g' : 'b';
   $('#deskMe').html = `<div class="me${thinking ? ' busy' : ''}">${SPARK}<div><b>管家</b><div class="sub"><span class="pill ${stC}">${status}</span>${up && acct ? `<span class="pill" style="color:${ACCT[(acct - 1) % 4]}">账号 ${acct}</span>` : ''}</div></div></div>
-    <div class="mood"><span>${face}</span>${esc(word)}</div>`;
+    <div class="mood">${esc(word)}</div>`;
   const hm = (t) => new Date(t).toTimeString().slice(0, 5), mins = (ms) => (ms < 60000 ? '不到 1 分钟' : ms < 3600000 ? `${Math.round(ms / 60000)} 分钟` : `${(ms / 3600000).toFixed(1)} 小时`);
   // each ticket: where it stands, who does it (tap: open it), and what it said when that waits on you or it's stuck; what
   // you asked for on hover
@@ -1441,10 +1408,10 @@ function drawDesk() {
   const mName = (id) => { const m = /claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id ?? ''); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? '.' + m[3] : ''}` : id || '其他'; };
   const fam = (id) => ({ opus: 'purple', sonnet: 'a1', haiku: 'green', fable: 'orange' })[/claude-([a-z]+)/.exec(id ?? '')?.[1]] ?? 'fg3';
   const row = (pill, v, color) => `<div class="cost">${pill}<div class="meter"><i style="width:${bc.today.usd ? Math.round((100 * v) / bc.today.usd) : 0}%;background:var(--${color})"></i></div><b>${usd(v)}</b></div>`;
-  head('deskCost', '管家花费', bc ? `今天约 ${usd(bc.today.usd)}` : '');
+  head('deskCost', '管家花费', bc ? `今天${about(bc.today.usd)}` : '');
   $('#deskCost').html = bc ? `<div class="sub">按用途</div>${COST.map(([k, l, c, v]) => row(`<span class="pill ${c}">${l}</span>`, bc.today[k], v)).join('')}
     <div class="sub">按模型</div>${Object.entries(bc.today.models ?? {}).sort((a, b) => b[1] - a[1]).map(([id, v]) => row(`<span class="pill">${esc(mName(id))}</span>`, v, fam(id))).join('') || '<div class="m">今天还没有回复</div>'}
-    <div class="m">今天 ${bc.today.n} 次回复 · 最近 7 天约 ${usd(bc.week.usd)} · 累计约 ${usd(bc.all.usd)}</div>` : '';
+    <div class="m">今天 ${bc.today.n} 次回复 · 最近 7 天${about(bc.week.usd)} · 累计${about(bc.all.usd)}</div>` : '';
   const today = tokens?.days?.find((d) => d.d === tokens.today), all = (d) => (d ? d.i + d.o + d.cw + d.cr : 0);
   const u = state.usage, gauge = (k, p, v) => `<div class="gauge"><div class="k"><span>${k}</span><span>${v}</span></div><div class="meter"><i class="${p >= 85 ? 'bad' : p >= 60 ? 'warn' : ''}" style="width:${Math.min(100, p)}%"></i></div></div>`;
   const ra = u.accounts?.[u.rec];
@@ -1453,7 +1420,7 @@ function drawDesk() {
     const on = state.sessions.filter((x) => x.pid && !x.gpt && x.acct === i).length; // a GPT one's acct is its G number
     return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="pill g">推荐</span>' : ''}<span class="grow"></span><span class="pill ${a.err ? '' : a.runway >= 2 ? 'g' : a.runway > 0 ? 'o' : 'r'}">${a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
       ${a.err ? '' : (a.windows ?? []).filter((w) => w.k === 'five_hour' || w.k === 'seven_day').map((w) => gauge(w.k === 'five_hour' ? '5 小时' : '7 天', w.pct, `${w.pct}% · ${esc(w.reset)}后重置`)).join('')}
-      ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · <b>约 ${usd(today.by[i].usd)}</b></div>` : ''}
+      ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · <b>${about(today.by[i].usd)}</b></div>` : ''}
       ${on ? `<span class="pill b">${on} 个对话在用</span>` : '<div class="m">没有对话在用</div>'}</div>`;
   }).join('')}` : '';
   const mine = butlerIds(), tl = state.timeline ?? []; // its own doings
@@ -1471,7 +1438,7 @@ function drawDesk() {
   $('#deskPc').html = pc ? `${gauge('CPU', pc.cpu ?? 0, pc.cpu == null ? '…' : pc.cpu + '%')}${gauge('内存', memPct, `${gb(pc.mem)} / ${gb(pc.memAll)} GB`)}` : '';
   const sel = bConv?.el.querySelector('.bset');
   if (sel) sel.innerHTML = `${ac(acct ?? (me ? me.acct + 1 : 0))}<span>${esc(modelName(state.butlerModel ?? me?.line?.model))} · ${esc(effortName(effortOf(me)))}</span>`;
-  $('#deskLine').html = `<span class="mood">${face} ${esc(word)}</span><span>在管 ${open.length}</span>${done.length ? `<span>${done.length} 个答完了</span>` : ''}${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}<span class="more">操作台 ›</span>`;
+  $('#deskLine').html = `<span class="mood">${esc(word)}</span><span>在管 ${open.length}</span>${done.length ? `<span>${done.length} 个答完了</span>` : ''}${pc?.cpu != null ? `<span>CPU ${pc.cpu}%</span><span>内存 ${memPct}%</span>` : ''}<span class="more">操作台 ›</span>`;
 }
 // a phone's 管家: its line opens the 操作台 over it, as a sheet; tapped outside it, or a conversation opened from it, away
 const deskOn = (on) => $('#app').classList.toggle('deskOn', on);
@@ -1631,19 +1598,21 @@ async function renderTokens() {
   const days = [...Array(14)].map((_, k) => { const dt = new Date(); dt.setDate(dt.getDate() - 13 + k); return { dt, d: map[key(dt)] }; });
   const week = days.slice(-7), sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
+  // an account's step: grey, from strong (the first) to faint (the last); today's bar in the accent's
+  const shade = (i, now) => `color-mix(in srgb, var(${now ? '--accent' : '--fg2'}) ${Math.round(90 - (70 * i) / Math.max(1, n - 1))}%, transparent)`;
   $('#view').html = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
     <div class="tiles">
-      <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">约 ${usd(t.usd)}</div></div>
-      <div class="tile"><div class="k">今天</div><div class="v">${fmtTok(all(today))}</div><div class="u">约 ${usd(today?.usd ?? 0)}</div></div>
-      <div class="tile"><div class="k">近 7 天</div><div class="v">${fmtTok(sum(week, (x) => all(x.d)))}</div><div class="u">约 ${usd(sum(week, (x) => x.d?.usd ?? 0))}</div></div>
-      <div class="tile"><div class="k">日均</div><div class="v">${fmtTok(t.total / active)}</div><div class="u">约 ${usd(t.usd / active)}</div></div>
+      <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">${about(t.usd)}</div></div>
+      <div class="tile"><div class="k">今天</div><div class="v">${fmtTok(all(today))}</div><div class="u">${about(today?.usd ?? 0)}</div></div>
+      <div class="tile"><div class="k">近 7 天</div><div class="v">${fmtTok(sum(week, (x) => all(x.d)))}</div><div class="u">${about(sum(week, (x) => x.d?.usd ?? 0))}</div></div>
+      <div class="tile"><div class="k">日均</div><div class="v">${fmtTok(t.total / active)}</div><div class="u">${about(t.usd / active)}</div></div>
     </div>
     <h3>近 14 天</h3><div class="card"><div class="bars">${days.map((x) => `<div title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
-      ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${ACCT[i % 4]}"></i>` : '').join('')}</div>`).join('')}</div>
+      ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${shade(i, x === days.at(-1))}"></i>` : '').join('')}</div>`).join('')}</div>
       <div class="ticks"><span>${days[0].dt.getMonth() + 1}/${days[0].dt.getDate()}</span><span>今天</span></div>
-      <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${ACCT[i % 4]}"></i>账号 ${i + 1}</span>`).join('')}</div></div>
+      <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${shade(i)}"></i>账号 ${i + 1}</span>`).join('')}</div></div>
     <h3>按账号</h3>${t.accounts.map((a, i) => `<div class="card cardHead">${ac(i + 1)}<div class="grow"><b>账号 ${i + 1}</b>
-      <div class="m">${esc(a.label)}</div></div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">约 ${usd(a.usd)}</div></div></div>`).join('')}</div>`;
+      <div class="m">${esc(a.label)}</div></div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">${about(a.usd)}</div></div></div>`).join('')}</div>`;
 }
 
 function newSheet() {
@@ -2119,7 +2088,7 @@ function makeConv(body, title) {
       // the pictures pasted one by one first; the files' paths go at the end of the words, a line each
       const pics = paths.filter((_, i) => !imgs[i].file), files = paths.filter((_, i) => imgs[i].file);
       const text = [v, ...files.map((f) => `附件：${f}`)].filter(Boolean).join('\n');
-      if (wait && files.length) { wait.text = shownText(text); drawLive(); } // the files too, as the record will show it (📎 name)
+      if (wait && files.length) { wait.text = shownText(text); drawLive(); } // the files too, as the record will show it (附件：name)
       if (pics.length) { // Claude attaches each pasted path in well under a second: Enter waits for that (4 s at most)
         const before = imagesShown();
         // ponytail: a later step failing leaves the pictures already attached in Claude's box; sent again, they'd go twice
@@ -2688,7 +2657,7 @@ function makeOai(id, title) {
     sending = true;
     if (text == null) { line.value = ''; atts = []; grow(); drawAtts(); }
     $p('.live').innerHTML = files.filter((a) => !a.file).map((a) => `<div class="hm img pending"><img src="${a.url}" alt=""></div>`).join('')
-      + files.filter((a) => a.file).map((a) => `<div class="hm user pending">📎 ${esc(a.name)}</div>`).join('') + (v ? `<div class="hm user pending">${esc(v)}</div>` : '');
+      + files.filter((a) => a.file).map((a) => `<div class="hm user pending">附件：${esc(a.name)}</div>`).join('') + (v ? `<div class="hm user pending">${esc(v)}</div>` : '');
     hist.scrollTop = hist.scrollHeight;
     try {
       const r = await post('/api/oai/send', { id: c.id, text: v, paths: await Promise.all(files.map((a) => a.up)), ...opts });
@@ -2744,10 +2713,10 @@ const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} 秒
 // (the page's /model, /effort, or one you typed), what the 管家 typed into a conversation (the service knows: by), a
 // thing handed to the 管家 from the 操作台
 function userHtml(m, mark) {
-  const t = m.text, [cls, lab, words] = t.startsWith('[系统通知]') ? ['sys', '🔔 系统通知', t.slice(6).trim()]
+  const t = m.text, [cls, lab, words] = t.startsWith('[系统通知]') ? ['sys', '系统通知', t.slice(6).trim()]
     : /^\/[a-z][\w-]*(\s|$)/.test(t) && !t.includes('\n') ? ['cmd', '', t]
     : m.by === 'butler' ? ['byb', '管家发的', t]
-    : t.startsWith(HAND) ? ['', '📌 交代给管家', t.slice(HAND.length)] : ['', '', t];
+    : t.startsWith(HAND) ? ['', '交代给管家', t.slice(HAND.length)] : ['', '', t];
   // a long one (a paste, a ticket): its first lines fading out, 「展开全部」 under them; that button's words from the CSS,
   // out of the bubble's text (停止 compares it with what was sent)
   const long = cls !== 'cmd' && (words.split('\n').length > 12 || words.length > 800);
