@@ -969,6 +969,7 @@ async function load(fresh) {
   butlerShown();
   if (openAsked) { const id = openAsked; openAsked = null; openSession(id); } // a notification tapped
   for (const c of allConvs()) c.sync();
+  readShown();
   bConv?.sync(); peek?.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
   drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere(); newNotes();
@@ -1722,7 +1723,8 @@ function makeGroup(ref, left) { // after ref (or before it: left), or last
     <div class="body"><div class="hint">${SPARK}<div>在左边点一个对话，在这里打开</div>
       <div class="btns"><button class="btn primary" data-new>＋ 新对话</button><button class="btn" data-shut>关闭这一栏</button></div></div></div>`;
   g.strip = g.el.querySelector('.strip'); g.body = g.el.querySelector('.body');
-  g.el.addEventListener('pointerdown', () => focusGroup(g), true);
+  g.el.addEventListener('pointerdown', () => { focusGroup(g); readShown(g); }, true);
+  g.el.addEventListener('wheel', () => readShown(g), { capture: true, passive: true });
   g.el.querySelector('.list').onclick = () => { sideOn = !sideOn; drawSide(); save(); };
   g.el.querySelector('.split').onclick = () => split(g);
   g.el.querySelector('[data-new]').onclick = newSheet;
@@ -1902,6 +1904,11 @@ function readNote(id) {
   state.notes = state.notes.filter((n) => n.id !== id);
   post('/api/read', { id }).catch(() => {});
   drawSide(); drawDesk(); drawBDot(); // its 答完了 in the 管家's 操作台 too, the 管家's dot
+}
+// one that came while its conversation was already shown: read at once in the pane you're in (this window in front, the
+// conversation not behind a phone's list), and in a pane beside it once you touch that one (a click, the wheel)
+function readShown(g = focusG) {
+  if (!butler && document.visibilityState === 'visible' && document.hasFocus() && !(NARROW.matches && sideOn)) readNote(g?.active?.id);
 }
 
 // --- a conversation in a tab. One running in the web service (started or continued here) takes the size of the
