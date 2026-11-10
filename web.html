@@ -81,7 +81,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* which one a conversation is, Claude's spark or OpenAI's mark, in its account's color, before its name */
   .mk { flex: none; display: inline-block; width: 13px; height: 13px; vertical-align: -2px; margin-right: 5px; }
   .mk svg { display: block; width: 100%; height: 100%; }
-  .row .mk { color: var(--fg2) !important; } /* in a list row the ring before it carries the account's color */
+  .row .mk { color: var(--fg2) !important; }
+  .row .ac0 { width: 20px; height: 20px; flex: none; display: grid; place-items: center; color: var(--fg); } .row .ac0 svg { width: 14px; height: 14px; } /* a Mac mini one's, where the ring is */ /* in a list row the ring before it carries the account's color */
   #act button { position: relative; width: 40px; height: 40px; margin: 2px 0; border-radius: 8px; display: grid; place-items: center; color: var(--fg3); }
   #act button:hover, #act button.on { color: var(--fg); }
   #app.side #act button.on { background: var(--tint); } /* the side bar's view: a soft tile, as VS Code's now */
@@ -1060,15 +1061,17 @@ const chatMark = (x) => {
 const nd = (k) => (k ? `<i class="nd ${k}" title="${k === 'ask' ? '在等你' : '答完了，还没看'}"></i>` : '');
 const chatEnd = (x) => `${nd(chatMark(x))}${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}${x.pid ? `<span class="chip ${x.where}">${x.where === 'web' ? '网页上' : '电脑上'}</span>` : `<span class="when">${ago(x.at)}</span>`}
     <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
-const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.cwd)}">${ac(x.acct + 1, '', x.gpt)}
-    <div class="main"><div class="t">${mark(x.gpt, x.acct + 1, x.mac)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
+// a row's first column: its account's ring, or a Mac mini one's Apple mark in the ring's place
+const lead = (x) => (x.mac ? `<i class="ac0" title="Mac mini">${APPLE}</i>` : ac(x.acct + 1, '', x.gpt));
+const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.cwd)}">${lead(x)}
+    <div class="main"><div class="t">${x.mac ? '' : mark(x.gpt, x.acct + 1)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
 function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
   const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run';
   // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
   const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', 'Claude'], ['gpt', 'GPT']].map(([k, l]) => `<button data-kind="${k}"${k === listKind ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : '';
-  const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${ac(x.acct + 1, '', x.gpt)}
-    <div class="main t">${mark(x.gpt, x.acct + 1, x.mac)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
+  const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${lead(x)}
+    <div class="main t">${x.mac ? '' : mark(x.gpt, x.acct + 1)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').html = `<button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
