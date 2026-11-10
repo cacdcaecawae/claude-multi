@@ -1328,5 +1328,19 @@ console.log('tokens ok');
   assert.equal(macCmd({ sess: 'cm-p1' }), "exec /opt/homebrew/bin/tmux -u -f /dev/null -L cm attach -t 'cm-p1'");
   const sh = require('child_process').spawnSync('sh', ['-n'], { input: again, encoding: 'utf8' });
   if (sh.error) console.log('(no sh here: the Mac script not parsed)'); else assert.equal(sh.status, 0, sh.stderr);
+  // the PC project's CLAUDE.md after the Mac folder's: packed into the start's sh; none there, or too big: only the old one taken out
+  {
+    const { macRules } = require('./claude-multi'), pc = path.join(TEST_HOME, 'pc-proj');
+    fs.mkdirSync(pc, { recursive: true });
+    assert.ok(!macRules(pc).includes('gunzip') && macRules(pc).includes("awk '/^<!-- cm-pc-rules/{exit}{print}'"));
+    fs.writeFileSync(path.join(pc, 'CLAUDE.md'), '\uFEFF# 规矩\n\n- 先跑测试\n');
+    const put = /echo (\S+) \| base64 -D \| gunzip >> CLAUDE.md.cm && mv CLAUDE.md.cm CLAUDE.md \|\| true; }$/.exec(macRules(pc));
+    const text = require('zlib').gunzipSync(Buffer.from(put[1], 'base64')).toString();
+    assert.match(text, /^<!-- cm-pc-rules: [^\n]*pc-proj\/CLAUDE.md[^\n]* -->\n\n# 规矩\n\n- 先跑测试\n$/);
+    fs.writeFileSync(path.join(pc, 'CLAUDE.md'), require('crypto').randomBytes(20000).toString('hex'));
+    assert.ok(!macRules(pc).includes('gunzip'));
+    const sh2 = require('child_process').spawnSync('sh', ['-n'], { input: macRules(pc), encoding: 'utf8' });
+    if (!sh2.error) assert.equal(sh2.status, 0, sh2.stderr);
+  }
   console.log('mac mini ok');
 }

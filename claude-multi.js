@@ -752,6 +752,16 @@ function macCmd({ into = '', resume = null, sess = null, name = '', cols = 100, 
     `exec ${tm} attach -t "$S"`].join('\n');
   return `exec /bin/sh -c "$(echo ${Buffer.from(sh).toString('base64')} | base64 -D)"`;
 }
+// The PC project's own CLAUDE.md, kept after the Mac folder's (from a mark line on: put again at each start, gone when
+// it's gone there): loaded with it, where "read the one there" was only asked, and forgotten. sh, run in the Mac
+// folder; never what stops a start.
+// shortcut: one that packs to over 12 K isn't copied (the whole command has to fit Windows' 32 K line), the note above it still says to read it there
+function macRules(pc) {
+  let md = '';
+  try { md = fs.readFileSync(path.join(pc, 'CLAUDE.md'), 'utf8').replace(/^\uFEFF/, '').trim(); } catch {}
+  const b = md && require('zlib').gzipSync(`<!-- cm-pc-rules: 以下是电脑上 ${pc.replace(/\\/g, '/')}/CLAUDE.md 的内容，每次从网页开这个对话时更新；要改去电脑上改 -->\n\n${md}\n`).toString('base64');
+  return `{ [ -f CLAUDE.md ] && awk '/^<!-- cm-pc-rules/{exit}{print}' CLAUDE.md > CLAUDE.md.cm${b && b.length <= 12000 ? ` && echo ${b} | base64 -D | gunzip >> CLAUDE.md.cm` : ''} && mv CLAUDE.md.cm CLAUDE.md || true; }`;
+}
 // a command on the Mac, its keychain unlocked first (sh: what runs; input: python3 - reads it), tried again when the
 // link to the server drops (ssh's 255); resolves to {status, out, err}
 function macRun(reg, cmd, input) {
@@ -2751,12 +2761,12 @@ async function web() {
     if (!pw) throw new Error(`还没保存 Mac 的密码（${MAC_PW}）`);
     const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`, resume = o.resume ?? null;
     let into = `cd ${m.dir}`;
-    if (o.resume) into = `cd ${sq(o.cwd)}`;
+    if (o.resume) { const pc = o.cwd && macFolders()[path.posix.basename(o.cwd)]; into = `cd ${sq(o.cwd)}${pc ? ` && ${macRules(pc)}` : ''}`; }
     else if (o.pc) {
       const name = macName(o.pc), at = o.pc.replace(/\\/g, '/');
       const md = `# 项目：${name}\n\n这个项目在用户 Windows 电脑上的 \`${at}\`，不在这台 Mac 上；这个文件夹只是它在 Mac 上启动的地方（怎么连那台电脑，见上一层的 CLAUDE.md）。\n\n`
         + `- 先 \`ssh pc\` 看看那边有没有 \`${at}/CLAUDE.md\`，有就读一遍，照它的规矩来。\n- 读、改、编译、运行、用 git，都在那边的 \`${at}\` 里做。\n`;
-      into += ` && mkdir -p ${sq(name)} && cd ${sq(name)} && { [ -f CLAUDE.md ] || echo ${Buffer.from(md).toString('base64')} | base64 -D > CLAUDE.md; }`;
+      into += ` && mkdir -p ${sq(name)} && cd ${sq(name)} && { [ -f CLAUDE.md ] || echo ${Buffer.from(md).toString('base64')} | base64 -D > CLAUDE.md; } && ${macRules(o.pc)}`;
       macFolders({ [name]: o.pc });
     }
     const cmd = macCmd({ into, resume, name: `cm-${key}`, cols, rows });
@@ -3770,7 +3780,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
