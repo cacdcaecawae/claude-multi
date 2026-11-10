@@ -1598,8 +1598,9 @@ async function renderTokens() {
   const days = [...Array(14)].map((_, k) => { const dt = new Date(); dt.setDate(dt.getDate() - 13 + k); return { dt, d: map[key(dt)] }; });
   const week = days.slice(-7), sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
-  // an account's step: grey, from strong (the first) to faint (the last); today's bar in the accent's
-  const shade = (i, now) => `color-mix(in srgb, var(${now ? '--accent' : '--fg2'}) ${Math.round(90 - (70 * i) / Math.max(1, n - 1))}%, transparent)`;
+  // today's bar in the accent, whole (its accounts apart by the gaps); the days before in grey, an account a step each,
+  // from strong (the first) to faint (the last)
+  const shade = (i, now) => (now ? 'var(--accent)' : `color-mix(in srgb, var(--fg) ${Math.round(85 - (60 * i) / Math.max(1, n - 1))}%, transparent)`);
   $('#view').html = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
     <div class="tiles">
       <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">${about(t.usd)}</div></div>
