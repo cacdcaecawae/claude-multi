@@ -1343,13 +1343,13 @@ console.log('tokens ok');
     const sh2 = require('child_process').spawnSync('sh', ['-n'], { input: macRules(pc), encoding: 'utf8' });
     if (!sh2.error) assert.equal(sh2.status, 0, sh2.stderr);
   }
-  // a reply of the Mac's other folders as the watcher sends it (its usage only): counted like a record's, in a row of its own
+  // a reply of the Mac's other folders as the watcher sends it (its usage only): counted like a record's, as an amount beside the Mac's
   {
     const { tokenStats } = require('./claude-multi'), od = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cm-oth-'));
     fs.mkdirSync(path.join(od, 'others', 'p'), { recursive: true });
     fs.writeFileSync(path.join(od, 'others', 'p', 's.jsonl'), '{"type":"assistant","timestamp":"2026-11-09T11:18:30.593Z","requestId":"req_1","message":{"id":"msg_1","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":3,"output_tokens":4}}}\n');
-    const ts = tokenStats([{ id: 'mac-other', label: 'M', dir: path.join(od, 'others'), mac: true, other: true }], path.join(od, 'c.json'), path.join(od, 'no.log'));
-    assert.deepEqual([ts.total, ts.accounts[0].total, ts.accounts[0].mac, ts.accounts[0].other, ts.usd > 0], [19, 19, true, true, true]);
+    const ts = tokenStats([{ id: 'mac', label: 'M', dir: path.join(od, 'projects'), mac: true }, { id: 'mac-other', label: '', dir: path.join(od, 'others'), other: true }], path.join(od, 'c.json'), path.join(od, 'no.log'));
+    assert.deepEqual([ts.total, ts.usd, ts.days.length, ts.accounts.length, ts.accounts[0].mac, ts.accounts[0].plus > 0], [0, 0, 0, 1, true, true]); // in no total: beside the Mac's
     fs.rmSync(od, { recursive: true, force: true });
   }
   console.log('mac mini ok');

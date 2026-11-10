@@ -3632,9 +3632,9 @@ async function web() {
 function tokenRoots(reg = load()) {
   return [...reg.profiles, ...(reg.removed ?? []).map((p) => ({ ...p, label: `${p.label}（已移除）` }))]
     .map((p) => ({ id: p.id, label: p.label, dir: path.join(p.configDir, 'projects') }))
-    // the Mac's records, as copied here; and what its other folders cost (others\: their replies' usage only), a row of its own
+    // the Mac's records, as copied here; and what its other folders cost (others\: their replies' usage only), an amount beside its own
     .concat(reg.mac ? [{ id: 'mac', label: macLabel(reg), dir: path.join(MAC, 'projects'), mac: true },
-      { id: 'mac-other', label: `${macLabel(reg)}（${path.posix.basename(reg.mac.dir)} 以外）`, dir: path.join(MAC, 'others'), mac: true, other: true }] : []);
+      { id: 'mac-other', label: '', dir: path.join(MAC, 'others'), other: true }] : []);
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
 // input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5).
@@ -3747,12 +3747,16 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 });
   const add = (t, x, usd) => { t.i += x[2]; t.o += x[3]; t.cw += x[4] + x[5]; t.cr += x[6]; t.usd += usd; t.n++; };
-  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0, ...(r.mac && { mac: true }), ...(r.other && { other: true }) }));
+  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0, ...(r.mac && { mac: true }) }));
+  let plus = 0; // what the Mac's other folders cost: in no total and no day, one amount beside the Mac's (plus)
   for (const { x, ri } of best.values()) {
-    const usd = replyCost(x), t = (days[x[1]] ??= { d: x[1], ...zero(), by: roots.map(zero) });
+    const usd = replyCost(x);
+    if (roots[ri].other) { plus += usd; continue; }
+    const t = (days[x[1]] ??= { d: x[1], ...zero(), by: roots.map(zero) });
     add(t, x, usd); add(t.by[ri], x, usd);
     accounts[ri].total += sum(x); accounts[ri].usd += usd;
   }
+  roots.forEach((r, i) => { if (r.other) { const m = accounts[roots.findIndex((q) => q.id === 'mac')]; if (m) m.plus = plus; accounts.splice(i, 1); } }); // (the last root)
   return { days: Object.values(days).sort((a, b) => (a.d < b.d ? -1 : 1)), accounts, total: accounts.reduce((s, a) => s + a.total, 0),
     usd: accounts.reduce((s, a) => s + a.usd, 0), today: day(Date.now()) };
 }

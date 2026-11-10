@@ -1653,7 +1653,7 @@ async function renderTokens() {
   const week = days.slice(-7), sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
   t.accounts.forEach((a, i) => { a.mac ??= !!state.mac && i === n - 1; }); // the Mac's rows, said by the server (one that doesn't: its last)
-  const col = (i) => (t.accounts[i]?.other ? '#8e8e93' : t.accounts[i]?.mac ? 'var(--apple)' : ACCT[i % 4]); // its other folders' in gray; // the Mac mini's share in Apple's black (white on dark)
+  const col = (i) => (t.accounts[i]?.mac ? 'var(--apple)' : ACCT[i % 4]); // the Mac mini's share in Apple's black (white on dark)
   $('#view').html = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
     <div class="tiles">
       <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">约 ${usd(t.usd)}</div></div>
@@ -1666,7 +1666,7 @@ async function renderTokens() {
       <div class="ticks"><span>${days[0].dt.getMonth() + 1}/${days[0].dt.getDate()}</span><span>今天</span></div>
       <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${col(i)}"></i>${a.mac ? esc(a.label) : `账号 ${i + 1}`}</span>`).join('')}</div></div>
     <h3>按账号</h3>${t.accounts.map((a, i) => `<div class="card cardHead">${a.mac ? mark(false, 0, true) : ac(i + 1)}<div class="grow"><b>${a.mac ? esc(a.label) : `账号 ${i + 1}`}</b>
-      ${a.mac ? '' : `<div class="m">${esc(a.label)}</div>`}</div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">约 ${usd(a.usd)}</div></div></div>`).join('')}</div>`;
+      ${a.mac ? '' : `<div class="m">${esc(a.label)}</div>`}</div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">约 ${usd(a.usd)}${a.plus != null ? `<span title="这台 Mac 上其他文件夹的 Claude Code 用量，不算进上面的任何合计"> + ${usd(a.plus)}</span>` : ''}</div></div></div>`).join('')}</div>`;
 }
 
 function newSheet() {
