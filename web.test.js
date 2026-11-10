@@ -123,6 +123,9 @@ const press = async (key, shift = false) => {
   assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-machine=here] .win')].map((r) => r.textContent)"), ['CPU50%Claude 20%', '内存50%Claude 2.0 GB']);
   await evaluate("document.querySelector('#act [data-side=chats]').click()");
   console.log('browser CPU and memory in 额度 ok');
+  // a waiting one's marks (the list's dot, a tab's ×, 提示's !) keep their size: the question card's class is ask too
+  assert.deepEqual(await evaluate("(() => { const d = document.createElement('div'); d.style.display = 'flex'; d.innerHTML = '<i class=\"nd ask\"></i><button class=\"x ask\"></button><i class=\"dot ask\"></i>'; document.body.append(d); const r = [...d.children].map((e) => [e.offsetWidth, getComputedStyle(e).paddingTop]); d.remove(); return [r[0][0], r[1][0], r[2][1]]; })()"), [8, 20, '0px']);
+  console.log('browser waiting marks ok');
 
   // the 管家's 操作台: a running conversation that answered a turn you set going, not looked at, says 答完了 with a red
   // dot (counted apart from 空闲) till it's opened (its note read); answering the 管家's own turn, it stays 空闲. One of
