@@ -2301,14 +2301,17 @@ function pushAuth(endpoint, jwk) {
 }
 // {title, body, id} to every subscription (or the one at endpoint only); one its push service says is gone (404, 410:
 // the app removed, notifications turned off) is dropped. The push services' answers back: 201 is delivered to them.
-// Any other answer goes to the log, with the service's words: why a device got nothing.
+// Any other answer goes to the log, with the service's words: why a device got nothing. No answer at all (the connection
+// dropped, ECONNRESET, or a timeout: the way abroad does it now and then, a quarter of an hour's pushes some days) is tried
+// once more 3 s on, before it's logged; a push that got there twice is still one notification (its tag).
 async function pushAll(msg, endpoint) {
   const s = pushStore(), subs = (s?.subs ?? []).filter((x) => !endpoint || x.endpoint === endpoint);
   if (!subs.length) return [];
-  const out = await Promise.all(subs.map((sub) => fetch(sub.endpoint, {
+  const post = (sub) => fetch(sub.endpoint, {
     method: 'POST', body: pushBody(sub.keys, JSON.stringify(msg)), signal: AbortSignal.timeout(15000),
     headers: { authorization: pushAuth(sub.endpoint, s.jwk), 'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: '86400', urgency: 'high' },
-  }).then(async (r) => {
+  });
+  const out = await Promise.all(subs.map((sub) => post(sub).catch(() => sleep(3000).then(() => post(sub))).then(async (r) => {
     if (r.status !== 201) log('push_fail', { host: new URL(sub.endpoint).host, status: r.status, said: (await r.text().catch(() => '')).slice(0, 300) });
     return r.status;
   }, (e) => { log('push_fail', { host: new URL(sub.endpoint).host, err: `${e.cause?.code ?? ''} ${e.message}`.trim() }); return e.cause?.code ?? e.message; })));
@@ -3119,6 +3122,18 @@ async function web() {
   });
   server.keepAliveTimeout = 5000; // the relay's nginx lets its idle ones go at 4 s, before: it never reuses one closing here
   server.on('error', (e) => { if (e.code === 'EADDRINUSE') process.exit(0); throw e; }); // already running
+  // The last guard: a throw nothing caught (a timer's, a handler's: a write on a full disk, a file unreadable a moment) is
+  // logged, the same one once in 10 minutes, and the service goes on: ended, it took every conversation running here with
+  // it, and nothing starts it again. Before it listens (the port refused, say) it ends, as before.
+  const fell = new Map();
+  const keepOn = (e) => {
+    if (!server.listening) { console.error(e); process.exit(1); }
+    const k = String(e?.stack ?? e).split('\n').slice(0, 2).join(' ').slice(0, 300);
+    if (Date.now() - (fell.get(k) ?? 0) < 600000) return;
+    fell.set(k, Date.now());
+    try { log('web_error', { err: k }); } catch {} // the log itself on the full disk
+  };
+  process.on('uncaughtException', keepOn).on('unhandledRejection', keepOn);
   // A restart ended the conversations running here (as the last service last wrote, read before this one writes), and
   // the 管家's reminders with it (chat wait --until, still ahead, its process gone)
   const ranBefore = (() => { try { return JSON.parse(fs.readFileSync(WEB_RUN, 'utf8')); } catch { return []; } })();

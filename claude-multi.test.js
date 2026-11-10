@@ -1238,5 +1238,24 @@ console.log('tokens ok');
   assert.deepEqual(butlerSwitch(null, { on: true }), { on: true }); assert.equal(marked, 'on'); assert.deepEqual(stopped, []);
   assert.deepEqual(butlerSwitch(null, { on: false }), { on: false }); assert.equal(marked, null); assert.deepEqual(stopped, ['C:/b']);
   assert.deepEqual(butlerSwitch(null, {}), { on: false }); // off again: no file to remove is fine
+  // a push whose connection dropped is tried once more (logged only when that fails too); a push service's answer isn't
+  const pushLog = [], pushCalls = []; let plan = [];
+  const pushAll = vm.runInNewContext(fn(js, 'pushAll') + ';pushAll;', {
+    pushStore: () => ({ jwk: {}, subs: [{ endpoint: 'https://fcm.googleapis.com/x', keys: {} }] }), savePush: () => {},
+    pushBody: () => 'b', pushAuth: () => 'a', sleep: async () => {}, URL, AbortSignal, log: (e, f) => pushLog.push(`${e} ${f.err ?? f.status}`),
+    fetch: async () => { pushCalls.push(1); const p = plan.shift(); if (p instanceof Error) throw p; return { status: p, text: async () => '' }; } });
+  const reset = Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNRESET' } });
+  plan = [reset, 201]; assert.deepEqual(await pushAll({}), [201]); assert.equal(pushCalls.length, 2); assert.deepEqual(pushLog, []);
+  plan = [reset, reset]; pushCalls.length = 0; assert.deepEqual(await pushAll({}), ['ECONNRESET']); assert.equal(pushCalls.length, 2);
+  assert.deepEqual(pushLog, ['push_fail ECONNRESET fetch failed']);
+  plan = [410]; pushCalls.length = 0; assert.deepEqual(await pushAll({}), [410]); assert.equal(pushCalls.length, 1);
+  // the web service's last guard: a throw before it listens ends it; listening, it's logged (the same once in 10 min) and it goes on
+  const guardLog = [], exits = [];
+  const guard = (listening) => vm.runInNewContext(part(js, '  const fell = new Map();', '\n  process.on(') + '\nkeepOn;', {
+    server: { listening }, log: (e) => guardLog.push(e), console: { error() {} }, process: { exit: (c) => { exits.push(c); throw new Error('exit'); } } });
+  assert.throws(() => guard(false)(new Error('EACCES')), /exit/); assert.deepEqual(exits, [1]); assert.deepEqual(guardLog, []);
+  const keepOn = guard(true), full = new Error('ENOSPC: no space left on device');
+  keepOn(full); keepOn(full); assert.deepEqual(guardLog, ['web_error']);
+  keepOn(new Error('another')); keepOn('a rejection that is no Error'); assert.equal(guardLog.length, 3); assert.deepEqual(exits, [1]);
   console.log('review follow-up ok (binding, desktop history, async writes, quick input, session drafts and queued sends)');
 })().catch((e) => { console.error(e); process.exitCode = 1; });
