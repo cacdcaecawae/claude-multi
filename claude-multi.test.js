@@ -112,6 +112,7 @@ assert.equal(t.accounts[0].total, 20); assert.equal(t.accounts[1].total, 0);
 near(t.usd, 68.8e-6 + (5 * 50 + 5 * 0.25) / 1e6); near(t.accounts[0].usd, t.usd); // Fable 5.1: $50 out, $0.25 reads
 fs.appendFileSync(fa, ',"usage":{"input_tokens":7},"x":1},"type":"assistant","timestamp":"' + atH(11) + '"}\n'); // the half line completes
 assert.equal(tokenStats(roots, cacheF).total, 27);
+fs.utimesSync(cacheF, 0, 0); assert.equal(tokenStats(roots, cacheF).total, 27); assert.equal(fs.statSync(cacheF).mtimeMs, 0); // nothing new: not written again
 fs.rmSync(fa); // Claude Code's 30-day cleanup: the replies stay counted (the copy in b now carries msg_1/msg_2)
 assert.equal(tokenStats(roots, cacheF).total, 27);
 fs.rmSync(require('path').join(B, 'copy.jsonl'));
@@ -150,6 +151,35 @@ assert.equal(t.total, 2); near(t.usd, (1 + 1 * 2) * 4 / 1e6);
 }
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('tokens ok');
+
+// From session 0 (ssh, a service) the Recycle Bin deletes for good: a delete there is refused, the file kept. (Run from
+// the desktop, these aren't: they'd fill your Recycle Bin.)
+const SESSION0 = require('child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', '[Diagnostics.Process]::GetCurrentProcess().SessionId'], { encoding: 'utf8' }).stdout?.trim() === '0';
+if (SESSION0) {
+  const { recycle } = require('./claude-multi'), f = require('path').join(TEST_HOME, 'rb.txt');
+  fs.writeFileSync(f, 'x');
+  const r = recycle([f]);
+  assert.equal(r.status, 3); assert.ok(fs.existsSync(f)); assert.match(r.stderr, /回收站/);
+  console.log('recycle ok');
+}
+// 换账号继续 moves the record and its side folder into the account going on with it: none left in the old one, whose
+// replies stay its own
+{
+  const { copyTo } = require('./claude-multi'), path = require('path'), id = '3f1e2d3c-4b5a-4968-8776-655443322110';
+  const reg = path.join(TEST_HOME, '.claude-multi', 'profiles.json'), was = fs.readFileSync(reg, 'utf8'), A = path.join(TEST_HOME, 'mv-a'), B = path.join(TEST_HOME, 'mv-b');
+  fs.writeFileSync(reg, JSON.stringify({ active: null, profiles: [{ id: 'mv-a', label: 'a', configDir: A }, { id: 'mv-b', label: 'b', configDir: B }] }));
+  const from = path.join(A, 'projects', 'p', `${id}.jsonl`), sub = path.join('p', id, 'subagents', 'agent-x.jsonl');
+  fs.mkdirSync(path.dirname(path.join(A, 'projects', sub)), { recursive: true });
+  fs.writeFileSync(from, reply('msg_mv', new Date(Date.now() - 6e4).toISOString(), 0, 3, 0, 0, 'claude-opus-5-5')); // before the switch (logged in whole seconds)
+  fs.writeFileSync(path.join(A, 'projects', sub), '{}\n');
+  const until = Date.now() + 30; while (Date.now() < until); // the copy born later
+  copyTo({ id, file: from }, { id: 'mv-b', configDir: B });
+  assert.ok(fs.existsSync(path.join(B, 'projects', 'p', `${id}.jsonl`)) && fs.existsSync(path.join(B, 'projects', sub)));
+  assert.ok(!fs.existsSync(from) && !fs.existsSync(path.join(A, 'projects', 'p', id)));
+  assert.deepEqual(tokenStats().accounts.map((a) => a.total), [3, 0]);
+  fs.writeFileSync(reg, was);
+  console.log('switch move ok');
+}
 
 // Notifications on the web page: the latest per conversation, gone once read anywhere or answered since.
 {
@@ -1046,6 +1076,12 @@ console.log('tokens ok');
   assert.match(rm.stdout, /Codex 正在运行/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(r1, '.claude-multi', 'profiles.json'), 'utf8')).gpt.length, 1); // still listed
   assert.ok(fs.existsSync(g));                                                                                   // its folder kept
+  if (SESSION0) { // no Codex on it now, but from ssh: refused before it leaves the list (its folder would be gone for good)
+    fs.rmSync(path.join(r1, '.claude-multi', 'gpt-live', `${process.pid}.json`));
+    const rm2 = run(r1, 'remove', 'G1');
+    assert.equal(rm2.status, 1, rm2.stdout); assert.match(rm2.stdout, /回收站/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(r1, '.claude-multi', 'profiles.json'), 'utf8')).gpt.length, 1); assert.ok(fs.existsSync(g));
+  }
   const u = run(r1, 'usage', '--json'), uj = JSON.parse(u.stdout);
   assert.deepEqual([uj.accounts, uj.rec, uj.open, uj.gpt.map((x) => x.label)], [[], null, false, ['g@example.com']]);
   fs.rmSync(r1, { recursive: true, force: true });
