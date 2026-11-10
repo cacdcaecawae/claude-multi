@@ -3230,9 +3230,9 @@ function tokenRoots(reg = load()) {
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
 // input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5).
-// ponytail: copied by hand from Anthropic's price list (2026-06); a model not
+// ponytail: copied by hand from Anthropic's price list (2026-06; Fable 5.2 from Claude Code 2.1.321's notes); a model not
 // listed is priced as Opus 5.5, so add a row when a new one shows up
-const PRICES = { 'claude-fable-5-1': [10, 50, 0.25], 'claude-fable-5': [10, 50, 1], 'claude-opus-5-5': [4, 20, 0.2],
+const PRICES = { 'claude-fable-5-2': [8, 40, 0.2], 'claude-fable-5-1': [10, 50, 0.25], 'claude-fable-5': [10, 50, 1], 'claude-opus-5-5': [4, 20, 0.2],
   'claude-opus-5': [5, 25, 0.5], 'claude-opus-4': [5, 25, 0.5], 'claude-sonnet-5': [2, 10, 0.2], 'claude-sonnet-4': [3, 15, 0.3],
   'claude-haiku-4': [1, 5, 0.1], '<synthetic>': [0, 0, 0] };
 function replyCost([, , i, o, w5, w1, r, model, fast]) {

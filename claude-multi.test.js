@@ -1249,6 +1249,10 @@ console.log('tokens ok');
   plan = [reset, reset]; pushCalls.length = 0; assert.deepEqual(await pushAll({}), ['ECONNRESET']); assert.equal(pushCalls.length, 2);
   assert.deepEqual(pushLog, ['push_fail ECONNRESET fetch failed']);
   plan = [410]; pushCalls.length = 0; assert.deepEqual(await pushAll({}), [410]); assert.equal(pushCalls.length, 1);
+  // 用量's prices: Fable 5.2 its own (8/40, cache reads 0.2), not the older Fable 5's (cache reads 1) its name also starts with
+  const replyCost = vm.runInNewContext(part(js, 'const PRICES', '\nfunction tokenStats') + ';replyCost;');
+  assert.equal(replyCost(['k', 'd', 1e6, 1e6, 0, 0, 1e6, 'claude-fable-5-2', false]), 48.2);
+  assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5-20260101', false]), 0.2); assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5', false]), 1);
   // the web service's last guard: a throw before it listens ends it; listening, it's logged (the same once in 10 min) and it goes on
   const guardLog = [], exits = [];
   const guard = (listening) => vm.runInNewContext(part(js, '  const fell = new Map();', '\n  process.on(') + '\nkeepOn;', {
