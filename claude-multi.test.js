@@ -1308,6 +1308,15 @@ console.log('tokens ok');
   const py = require('child_process').spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "watch", "exec")'],
     { input: `DIR = "~"\nHAVE = {}\n${MAC_WATCH}`, encoding: 'utf8' });
   if (py.error) console.log('(no python here: the Mac watcher not compiled)'); else assert.equal(py.status, 0, py.stderr);
+  // the names taken from the Mac: a record, a conversation's folder, a record of its subagents; nothing leading out
+  {
+    const src = /const macPath = .*/.exec(fs.readFileSync(path.join(__dirname, 'claude-multi.js'), 'utf8'))[0];
+    const macPath = new Function('path', 'MAC', `${src} return macPath;`)(path.posix, '/m');
+    assert.equal(macPath('p/a.jsonl'), '/m/projects/p/a.jsonl');
+    assert.equal(macPath('p/id/'), '/m/projects/p/id');
+    assert.equal(macPath('p/id/subagents/agent-1.jsonl'), '/m/projects/p/id/subagents/agent-1.jsonl');
+    for (const bad of ['../x', 'p/../x', 'p/id/other/a.jsonl', 'p/id/subagents/../../../x', 'p/id/subagents/a/b', '/p/a']) assert.throws(() => macPath(bad), /不认识的名字/, bad);
+  }
   // a Claude there in our tmux: new, continued (one running there joined first), or its session joined again
   const { macCmd } = require('./claude-multi');
   const script = (c) => Buffer.from(/echo (\S+) \| base64 -D/.exec(c)[1], 'base64').toString();

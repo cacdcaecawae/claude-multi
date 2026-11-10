@@ -636,6 +636,18 @@ def names(d):
     try: return os.listdir(d)
     except OSError: return []
 seen, live_was, beat, sys_at = dict(HAVE), None, 0, 0
+def feed(p, key, now): # a record's bytes past what's there; True: more of it left for the next round
+    try: size = os.path.getsize(p)
+    except OSError: return False
+    now.add(key)
+    k = seen.get(key, 0)
+    if size < k: out({'f': key, 'at': 0, 'd': ''}); k = 0
+    if size > k:
+        with open(p, 'rb') as fh: fh.seek(k); d = fh.read(min(size - k, 524288))
+        out({'f': key, 'at': k, 'd': base64.b64encode(d).decode()})
+        k += len(d)
+    seen[key] = k
+    return k < size
 def run(*a): return subprocess.run(a, capture_output=True, text=True).stdout
 def sysnow():
     k, cpu, mine, mem_mine, n = os.cpu_count() or 1, 0.0, 0.0, 0, 0
@@ -657,18 +669,10 @@ while True:
     for g in [x for x in names(root) if x == base or x.startswith(base + '-')]:
         for n in names(os.path.join(root, g)):
             p, key = os.path.join(root, g, n), g + '/' + n
-            if n.endswith('.jsonl'):
-                try: size = os.path.getsize(p)
-                except OSError: continue
-                now.add(key)
-                k = seen.get(key, 0)
-                if size < k: out({'f': key, 'at': 0, 'd': ''}); k = 0
-                if size > k:
-                    with open(p, 'rb') as fh: fh.seek(k); d = fh.read(min(size - k, 524288))
-                    out({'f': key, 'at': k, 'd': base64.b64encode(d).decode()})
-                    k += len(d); more = more or k < size
-                seen[key] = k
+            if n.endswith('.jsonl'): more = feed(p, key, now) or more
             elif os.path.isdir(p):
+                for a in names(os.path.join(p, 'subagents')): # its subagents' records: their tokens are counted too
+                    if a.endswith('.jsonl'): more = feed(os.path.join(p, 'subagents', a), key + '/subagents/' + a, now) or more
                 t = os.path.join(p, 'custom-title.json')
                 try: m = os.path.getmtime(t)
                 except OSError: continue
@@ -2794,6 +2798,7 @@ async function web() {
     const have = {}, since = Date.now();
     for (const d of ls(path.join(MAC, 'projects'))) for (const n of ls(path.join(MAC, 'projects', d))) {
       if (n.endsWith('.jsonl')) try { have[`${d}/${n}`] = fs.statSync(path.join(MAC, 'projects', d, n)).size; } catch {}
+      else for (const a of ls(path.join(MAC, 'projects', d, n, 'subagents'))) if (a.endsWith('.jsonl')) try { have[`${d}/${n}/subagents/${a}`] = fs.statSync(path.join(MAC, 'projects', d, n, 'subagents', a)).size; } catch {}
     }
     const proc = macW = require('child_process').spawn(sshExe, ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15',
       '-o', 'ServerAliveCountMax=3', m.host, 'python3', '-u', '-'], { windowsHide: true });
@@ -2814,8 +2819,9 @@ async function web() {
       setTimeout(macWatch, macWait);
     });
   }
-  // (a name the Mac sends is a project folder and one name in it, nothing else: never a way out of accounts\mac)
-  const macPath = (k) => { if (!/^[\w.-]+\/[\w.-]+\/?$/.test(k) || k.includes('..')) throw new Error(`不认识的名字：${k}`); return path.join(MAC, 'projects', ...k.split('/').filter(Boolean)); };
+  // (a name the Mac sends is a project folder and one name in it, or a record in that one's subagents, nothing else:
+  // never a way out of accounts\mac)
+  const macPath = (k) => { if (!/^[\w.-]+\/[\w.-]+(\/subagents\/[\w.-]+)?\/?$/.test(k) || k.includes('..')) throw new Error(`不认识的名字：${k}`); return path.join(MAC, 'projects', ...k.split('/').filter(Boolean)); };
   function macCopy(o, proc) {
     if (o.f) {
       const f = macPath(o.f), size = fs.existsSync(f) ? fs.statSync(f).size : 0;
