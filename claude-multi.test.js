@@ -1109,6 +1109,9 @@ if (SESSION0) {
   await assert.rejects(getTokens(answer(500, { err: '读不了' })), /读不了/);
   await assert.rejects(getTokens(answer(502, null)), /502/);
   assert.deepEqual(await getTokens(answer(200, { accounts: [], days: [] })), { accounts: [], days: [] });
+  // money in one format: whole dollars; under one said so; none $0
+  const [usd, about] = new Function(`${part(/^const usd = .*$/m)}\n${part(/^const about = .*$/m)}\nreturn [usd, about];`)();
+  assert.deepEqual([usd(7012.4), usd(154.66), usd(0), usd(0.42), about(154.66), about(0.42), about(0)], ['$7,012', '$155', '$0', '不到 $1', '约 $155', '不到 $1', '约 $0']);
   const shut = new Function(`${part(/^const shut = .*$/m)}\nreturn shut;`)();
   assert.deepEqual([shut({ accounts: [] }), shut({ accounts: [{}], rec: null }), shut({ accounts: [{}], rec: 0, ready: '2小时' })], ['还没有 Claude 账号', '额度暂时读不到', '都到上限了，2小时后恢复']);
   console.log('review page ok');
