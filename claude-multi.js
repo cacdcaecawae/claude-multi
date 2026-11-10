@@ -424,7 +424,8 @@ async function warmup() {
       await new Promise((ok) => setTimeout(ok, 3000));
       after = await fetchUsage(p);
     }
-    const why = r.error?.message || (r.stderr || r.stdout || '').trim().split('\n').pop() || `退出码 ${r.status}`;
+    // claude -p says why on stdout (a weekly limit hit, say); stderr's warnings (a plugin's) would hide it
+    const why = r.error?.message || (r.stdout?.trim() || r.stderr?.trim() || '').split('\n').pop() || `退出码 ${r.status}`;
     console.log(`\r${head}${r.status === 0 && running(after) ? c(32, `已预热，${until(after.u.five_hour.resets_at)}后重置`)
       : r.status === 0 ? c(33, `已发送，但还没查到窗口开始计时（${after.err ?? '稍后用 usage 再看'}）`)
         : c(31, `失败：${why}`)}`);
