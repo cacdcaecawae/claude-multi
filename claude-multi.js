@@ -702,6 +702,7 @@ function removeGpt(n) {
   const g = gptAccounts()[n - 1];
   if (!g) { console.log('没有这个 GPT 账号：用 claude-multi list 看编号（G1、G2…）'); process.exit(1); }
   if (gptMarks().some((m) => sameDir(m.home, g.home))) { console.log('这个 GPT 账号上有 Codex 正在运行，先关掉再移除。'); process.exit(1); }
+  canRecycle();
   update((r) => { r.gpt = (r.gpt ?? []).filter((x) => x.id !== g.id); });
   log('gpt_removed', { profile_id: g.id });
   try { unlinkAll(g.home); } catch {}
@@ -1058,7 +1059,7 @@ function rename(id, name) {
 
 // resume ID N: continue a past conversation with account N, in its own folder. Claude only finds a
 // transcript in its own config dir, so the newest copy (and its side folder of subagent and tool-output
-// files) is copied into N's first when another account wrote it last.
+// files) is moved into N's first when another account wrote it last.
 function resume(id, n) {
   const reg = load(), s = listSessions(reg).find((x) => x.id === id);
   if (!s) { // a GPT one: on its own account (a GPT one changes none), in its folder
@@ -1510,7 +1511,7 @@ async function reportTo(cmd, [id, ...a]) {
     console.log(`已告诉管家（工单 #${t.id}「${t.name}」）。`);
   } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
 }
-// Before account p continues conversation s: its newest record (and side folder) into p's config dir.
+// Before account p continues conversation s: its newest record (and side folder) moved into p's config dir.
 function copyTo(s, p) {
   const dst = path.join(p.configDir, 'projects', path.basename(path.dirname(s.file)));
   if (path.resolve(dst).toLowerCase() === path.resolve(path.dirname(s.file)).toLowerCase()) return;
@@ -1519,10 +1520,13 @@ function copyTo(s, p) {
   const side = s.file.slice(0, -6);
   if (fs.existsSync(side)) fs.cpSync(side, path.join(dst, s.id), { recursive: true });
   log('session_copied', { profile_id: p.id, session_id: s.id });
+  // then the old one goes (a month of switches left 1.1 GB of them), its tokens counted first as a delete does. Copied,
+  // not renamed: a rename keeps the birth time, and usage gives a tie to the older file's account
+  try { tokenStats(); fs.rmSync(side, { recursive: true, force: true }); fs.rmSync(s.file, { force: true }); } catch {} // not counted (a full disk), held open: it stays
 }
 
 // delete ID: a conversation that isn't running goes to the Recycle Bin: its transcript in every account
-// (resume copies it) and the side folder beside each. Its tokens are counted first; the usage page keeps
+// (older versions left copies on a resume) and the side folder beside each. Its tokens are counted first; the usage page keeps
 // counting a record once it's gone.
 function del(id) {
   const reg = load(), s = listSessions(reg).find((x) => x.id === id);
@@ -1545,11 +1549,18 @@ function del(id) {
   log('session_deleted', { session_id: id, files: paths.length });
   console.log(`已删除「${s.title}」，可以在回收站里找回。`);
 }
-const recycle = (paths) => spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Add-Type -AssemblyName Microsoft.VisualBasic; '
-  + 'foreach ($p in ($env:CM_DEL | ConvertFrom-Json)) { if (Test-Path -PathType Container $p) '
-  + '{ [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, "OnlyErrorDialogs", "SendToRecycleBin") } '
-  + 'else { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, "OnlyErrorDialogs", "SendToRecycleBin") } }'],
-{ env: { ...process.env, CM_DEL: JSON.stringify(paths) }, windowsHide: true, encoding: 'utf8' });
+// Session 0 (ssh, a service) has no Recycle Bin: there it deletes for good without a word, so it's refused (exit 3)
+function recycle(paths) {
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', 'if ([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) { exit 3 }; '
+    + 'Add-Type -AssemblyName Microsoft.VisualBasic; foreach ($p in ($env:CM_DEL | ConvertFrom-Json)) { if (Test-Path -PathType Container $p) '
+    + '{ [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, "OnlyErrorDialogs", "SendToRecycleBin") } '
+    + 'else { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, "OnlyErrorDialogs", "SendToRecycleBin") } }'],
+  { env: { ...process.env, CM_DEL: JSON.stringify(paths) }, windowsHide: true, encoding: 'utf8' });
+  if (r.status === 3) r.stderr = '从 ssh 这类后台会话放不进回收站（会直接永久删除），所以没删：到电脑桌面上做';
+  return r;
+}
+// remove's check, before an account leaves the list: its folder can go to the Recycle Bin from here
+const canRecycle = () => { const r = recycle([]); if (r.status !== 0) { console.log(`没移除：${(r.stderr || '').trim().split('\n')[0]}`); process.exit(1); } };
 // Every link (symlink, junction) under d removed, never what it points to: an account's settings, skills, plugins and
 // notes are links to ~/.claude's, which a folder deleted for good (one too big for the Recycle Bin) mustn't reach through.
 function unlinkAll(d) {
@@ -1568,6 +1579,7 @@ function remove(x) {
   const reg = load(), i = /^\d+$/.test(x ?? '') ? Number(x) - 1 : reg.profiles.findIndex((q) => q.id === x), p = reg.profiles[i];
   if (!p) { console.log('用法：claude-multi remove <账号编号或 id，如 acct-20261010-002>'); process.exit(1); }
   if (runsOn(p.configDir)) { console.log('这个账号上有 Claude 正在运行，先关掉再移除。'); process.exit(1); }
+  canRecycle();
   tokenStats(); shareMemory(); // while it's still listed
   update((r) => {
     r.profiles = r.profiles.filter((q) => q.id !== p.id);
@@ -1700,7 +1712,13 @@ function dropNote(n, pid = null) {
     fs.renameSync(`${f}.tmp`, `${f}.json`);
   }
   fs.appendFileSync(NOTES, JSON.stringify({ at: Date.now(), ...n }) + '\n');
-  try { if (fs.statSync(NOTES).size > 262144) fs.writeFileSync(NOTES, readNotes(200).reverse().map((x) => JSON.stringify(x)).join('\n') + '\n'); } catch {}
+  try { // trimmed whole or not at all: a page reading it then never gets half
+    if (fs.statSync(NOTES).size > 262144) {
+      const tmp = `${NOTES}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, readNotes(200).reverse().map((x) => JSON.stringify(x)).join('\n') + '\n');
+      try { fs.renameSync(tmp, NOTES); } catch { fs.rmSync(tmp, { force: true }); }
+    }
+  } catch {}
   island();
 }
 
@@ -2609,7 +2627,8 @@ async function web() {
       }
     } catch {} // caught mid-write: as it was
     else if (t?.kind === 'pc' && t.pid) { const s = sessions().find((x) => x.pid === t.pid); if (s) t.file = s.file; }
-    return { t, file: t?.file === undefined ? sessions().find((x) => x.id === q.get('id'))?.file : t.file };
+    // (a path gone since: a 换账号继续 moved the record to the other account; found again by its id)
+    return { t, file: t?.file === undefined || (t.file && !fs.existsSync(t.file)) ? sessions().find((x) => x.id === q.get('id'))?.file : t.file };
   }
 
   // A new notification to the phones, but none for a conversation a page shows you right now: each page in front says
@@ -2895,7 +2914,8 @@ async function web() {
       if (!b.oai) return b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''));
       const c = oaiRead(String(b.id ?? '')); // a GPT 聊天 one: an answer on its way stopped (not paid for), then its files to the Recycle Bin
       if (c.pending) await oaiApi(`responses/${c.pending}/cancel`, {}).catch(() => {});
-      recycle([path.join(OAI, `${c.id}.json`), path.join(OAI, c.id)].filter((p) => fs.existsSync(p)));
+      const r = recycle([path.join(OAI, `${c.id}.json`), path.join(OAI, c.id)].filter((p) => fs.existsSync(p)));
+      if (r.status !== 0) throw new Error(`删除失败：${(r.stderr || '').trim().split('\n')[0]}`);
       return { said: `已删除「${c.title}」，可以在回收站里找回。` };
     },
     // a GPT 聊天 one: its messages and the mode and effort it was last sent with (the page asks every 2 s while it's
@@ -2940,7 +2960,7 @@ async function web() {
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         if (sameDir(s.cwd, BUTLER) && !butlerOn()) throw new Error(BUTLER_SHUT);
         const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
-        copyTo(s, p);
+        copyTo(s, p); sessCache = null; // listed a moment ago at the old copy, gone now
         return opened(startPty(p, s.cwd, ['--resume', s.id], cols, rows));
       }
       if (b.dir && sameDir(b.dir, BUTLER) && !butlerOn()) throw new Error(BUTLER_SHUT);
@@ -2968,7 +2988,7 @@ async function web() {
       const free = hold(s.id, 'switch');
       let later = null; // a switch still to happen: held till it has
       try {
-        if (!s.pid) { copyTo(s, p); return { key: startPty(p, s.cwd, args, b.cols | 0 || 100, b.rows | 0 || 30).key, kind: 'pty' }; }
+        if (!s.pid) { copyTo(s, p); sessCache = null; return { key: startPty(p, s.cwd, args, b.cols | 0 || 100, b.rows | 0 || 30).key, kind: 'pty' }; }
         const t = where(s);
         if (t?.kind !== 'pty') { later = switchWindow(s, b.acct, !!b.now).catch((e) => t && send(t, 'swapfail', { err: `没换成：${e.message}` })); return { window: true }; }
         later = (async () => {
@@ -2979,7 +2999,7 @@ async function web() {
           t.switching = true;
           t.proc.kill();
           while (!t.gone) await sleep(100); // it has stopped writing its record: the copy is whole
-          copyTo(s, p);
+          copyTo(s, p); sessCache = null;
           send(t, 'switched', { key: startPty(p, s.cwd, args, t.w, t.h).key });
         })().catch((e) => send(t, 'swapfail', { err: `没换成：${e.message}` })); // its pages stop waiting
         return { pty: true };
@@ -3242,12 +3262,12 @@ function replyCost([, , i, o, w5, w1, r, model, fast]) {
   return ((i + w5 * 1.25 + w1 * 2) * pi + o * po + r * pr) / 1e6 * (fast ? 2 : 1);
 }
 function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-cache.json'), logFile = LOG) {
-  let cache = { v: 3, files: {} };
+  let cache = { v: 3, files: {} }, dirty = false; // dirty: something read further, or dropped: the cache is written
   try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch (e) {
     if (e.code !== 'ENOENT') try { fs.copyFileSync(cacheFile, `${cacheFile}.bad`); } catch {} // unreadable: keep it for a hand rescue
   }
   // replies now carry their time (who made one goes by it): the records read again; deleted ones keep theirs, without
-  if (cache.v !== 3) cache = { v: 3, files: Object.fromEntries(Object.entries(cache.files ?? {}).filter(([f]) => !fs.existsSync(f))) };
+  if (cache.v !== 3) dirty = true, cache = { v: 3, files: Object.fromEntries(Object.entries(cache.files ?? {}).filter(([f]) => !fs.existsSync(f))) };
   const num = (s, k) => +(s.match(new RegExp(`"${k}":(\\d+)`))?.[1] ?? 0);
   const two = (n) => String(n).padStart(2, '0');
   const day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; };
@@ -3286,6 +3306,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
       let st; try { st = fs.statSync(f); } catch { continue; } // gone since the walk (Claude's cleanup, a delete): its cached replies stay, below
       const size = st.size;
       let c = cache.files[f] ?? { size: 0, recs: [] };
+      const was = cache.files[f] && `${c.size} ${c.born}`;
       c.born ??= st.birthtimeMs;
       if (size < c.size) c.size = 0; // rewritten shorter: read it all again, keeping what it had
       if (size > c.size) {
@@ -3312,6 +3333,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
         fs.closeSync(fd);
       }
       next[f] = c;
+      if (`${c.size} ${c.born}` !== was) dirty = true;
       count(c, ri, sidOf(ri, f));
     }
   });
@@ -3325,9 +3347,12 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   }
   // whole or not at all: this cache is the only record left of deleted transcripts, so a cut-off write must
   // never replace it (two runs at once: the later rename wins, each file whole)
-  const tmp = `${cacheFile}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ v: 3, files: next }));
-  try { fs.renameSync(tmp, cacheFile); } catch { fs.rmSync(tmp, { force: true }); } // held open by another run: it saves
+  // nothing new since the last run: not written again (13 MB each time, for nothing)
+  if (dirty || Object.keys(next).length !== Object.keys(cache.files).length) {
+    const tmp = `${cacheFile}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ v: 3, files: next }));
+    try { fs.renameSync(tmp, cacheFile); } catch { fs.rmSync(tmp, { force: true }); } // held open by another run: it saves
+  }
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 });
   const add = (t, x, usd) => { t.i += x[2]; t.o += x[3]; t.cw += x[4] + x[5]; t.cr += x[6]; t.usd += usd; t.n++; };
@@ -3410,7 +3435,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { recycle, copyTo, claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
