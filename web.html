@@ -1397,11 +1397,7 @@ function drawDesk() {
   $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span>
     <span class="${done.length ? 'b' : ''}"><b>${done.length}</b>答完了</span><span><b>${idle.length}</b>空闲</span></div>
     ${[...wait, ...busy, ...done, ...idle].map((x) => `<div class="item" data-open="${esc(x.id)}" tabindex="0" role="button" title="${esc(x.cwd)}">${mark(x.gpt, x.acct + 1)}<span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
-  if (!tokensNow && Date.now() - tokensAt > 120000) {
-    tokensAt = Date.now();
-    tokensNow = getTokens().then((t) => { tokens = t; tokensErr = ''; setTimeout(drawDesk); return t; }).finally(() => { tokensNow = null; });
-    tokensNow.catch(() => {}); // failed: the last counts stay, asked again in 2 minutes
-  }
+  renewTokens(drawDesk);
   // what the 管家 itself costs today, by what set it going (its replies at the API price; the watchdog's Haiku logged)
   const bc = tokens?.butler, COST = [['you', '你问的', 'b', 'a1'], ['notice', '系统通知', 'o', 'orange'], ['bg', '后台任务', 'p', 'purple']];
   // and by model: claude-opus-5-5 → Opus 5.5, its bar in the family's color
@@ -1582,20 +1578,30 @@ async function warm() {
 // (tokensErr: the last count failed, said in the panel till 刷新, not asked again by itself every 5 s)
 const getTokens = (fresh) => fetch(`/api/tokens${fresh ? '?fresh=1' : ''}`).then((r) => r.json().catch(() => ({ err: `连不上（${r.status}）` })))
   .then((t) => { if (!Array.isArray(t?.accounts)) throw new Error(t?.err || '统计失败'); return t; });
+// the counts asked again every 2 minutes in the background, the last ones shown meanwhile; then redrawn
+function renewTokens(then) {
+  if (tokensNow || Date.now() - tokensAt < 120000) return;
+  tokensAt = Date.now();
+  tokensNow = getTokens().then((t) => { tokens = t; tokensErr = ''; setTimeout(then); return t; }).finally(() => { tokensNow = null; });
+  tokensNow.catch(() => {}); // failed: the last counts stay, asked again in 2 minutes
+}
 async function renderTokens() {
   $('#sideActs').html = `<button class="ico" data-refresh title="重新统计">${svg(I.refresh)}</button>`;
   if (!tokens) {
     if (tokensErr) return void ($('#view').html = `<div class="empty">统计失败：${esc(tokensErr)}<br>点右上角的刷新再试一次</div>`);
     $('#view').html = '<div class="empty">统计中…</div>';
     // one count at a time: it takes seconds, and the list's refresh every 10 s asks again meanwhile
-    tokensNow ??= getTokens(true).finally(() => { tokensNow = null; });
+    tokensAt = Date.now(); tokensNow ??= getTokens(true).finally(() => { tokensNow = null; });
     try { tokens = await tokensNow; } catch (e) { tokensErr = e.message; if (side === 'tokens') renderTokens(); return; }
     if (side !== 'tokens') return;
   }
+  renewTokens(() => side === 'tokens' && renderTokens());
   const t = tokens, n = t.accounts.length, map = Object.fromEntries(t.days.map((d) => [d.d, d]));
   const all = (d) => d ? d.i + d.o + d.cw + d.cr : 0;
   const key = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-  const days = [...Array(14)].map((_, k) => { const dt = new Date(); dt.setDate(dt.getDate() - 13 + k); return { dt, d: map[key(dt)] }; });
+  // the days as the PC counts them, ending on its today: this device can be a date ahead or behind it (another time zone)
+  const [y, mo, dd] = t.today.split('-').map(Number);
+  const days = [...Array(14)].map((_, k) => { const dt = new Date(y, mo - 1, dd - 13 + k); return { dt, d: map[key(dt)] }; });
   const week = days.slice(-7), sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
   // today's bar in the accent, whole (its accounts apart by the gaps); the days before in grey, an account a step each,
