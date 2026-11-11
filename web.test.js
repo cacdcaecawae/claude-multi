@@ -28,7 +28,7 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname.startsWith('/api/')) {
     const data = url.pathname === '/api/state' ? state : url.pathname === '/api/asks' ? []
-      : url.pathname === '/api/tokens' ? { accounts: [], days: [] }
+      : url.pathname === '/api/tokens' ? tokens
       : url.pathname === '/api/open' ? { key: 'fixture', pid: 123, kind: 'pty' }
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
       : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: [{ role: 'claude', text: long }] }
@@ -41,6 +41,9 @@ const server = http.createServer((req, res) => {
   res.setHeader('content-type', ({ '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png' })[path.extname(file)] || 'application/octet-stream');
   fs.createReadStream(file).pipe(res);
 });
+// the PC's day, not this computer's: 用量's 今天 is its last one
+const z = { i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 }, tokens = { accounts: [{ label: 'a', total: 7, usd: 0 }], total: 7, usd: 0, today: '2000-01-02',
+  days: [{ d: '2000-01-02', ...z, i: 7, n: 1, by: [{ ...z, i: 7, n: 1 }] }] };
 let proc, socket, id = 0;
 const pending = new Map(), errors = [];
 function call(method, params = {}) {
@@ -211,8 +214,13 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
   // Optionally keep a screenshot outside the repository for visual review.
   if (process.env.CM_TEST_SCREENSHOT) fs.writeFileSync(process.env.CM_TEST_SCREENSHOT, Buffer.from((await call('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  // 用量 on the PC's day (its today the last one), not this computer's
+  await evaluate("document.querySelector('#act [data-side=tokens]').click()");
+  const tile = "[...document.querySelectorAll('.tile')].find((e) => e.querySelector('.k').textContent === '今天')?.querySelector('.v').textContent";
+  for (let i = 0; i < 100 && !(await evaluate(tile)); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual([await evaluate(tile), await evaluate("document.querySelector('.ticks span').textContent")], ['7', '12/20']);
   assert.deepEqual(errors, []);
-  console.log('browser mobile targets, light theme and page width ok');
+  console.log('browser mobile targets, light theme, page width and 用量 on the PC\'s day ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }
