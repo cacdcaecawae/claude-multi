@@ -2408,6 +2408,18 @@ function claudeShare(text, prev, ms, ncpu) {
   return { cpu: prev && ms > 0 ? Math.min(100, Math.round((100 * used) / (ms * ncpu))) : null, mem, n: now.size, prev: now };
 }
 
+// A terminal's private modes (mouse reporting, the full screen, bracketed paste...) as its output last set them. The
+// switches come once, as the program starts (or tmux joins it); a busy screen's output soon pushes them out of the
+// 256 KB a page is given first, and a page that opened later had no mouse (the band's buttons dead), no paste mode
+// (each line of a paste sent on its own), no full screen. So the replay starts with them. Left out: 2026 (synchronized
+// output), which a frame cut halfway would leave on.
+const MODES = /\x1b\[\?([\d;]+)([hl])/g;
+function keepOut(t, d) {
+  for (const m of (t.buf.slice(-20) + d).matchAll(MODES)) for (const n of m[1].split(';')) if (n && n !== '2026') (t.modes ??= {})[n] = m[2]; // -20: one cut between two pieces
+  t.buf = (t.buf + d).slice(-262144);
+}
+const replayPty = (t) => Object.entries(t.modes ?? {}).map(([n, v]) => `\x1b[?${n}${v}`).join('') + t.buf;
+
 async function web() {
   procStarts.beside = true; // its process checks never hold up the terminals
   const http = require('http'), pty = require('@lydell/node-pty');
@@ -2513,7 +2525,7 @@ async function web() {
       resume: args[0] === '--resume' ? args[1] : null };
     proc.onData((d) => {
       if (!t.listed && proc.pid) { t.listed = true; saveTerms(); }
-      t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
+      keepOut(t, d); send(t, 'data', d);
     });
     // ended to go on with another account (switching): its pages are sent to the new one instead of told it's gone
     proc.onExit(() => { t.gone = true; saveTerms(); saveRun(); if (!t.switching) send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
@@ -2534,7 +2546,7 @@ async function web() {
     // its pid once the pseudo-terminal is ready (0 before): its marker, and the web-terms list the island reads
     proc.onData((d) => {
       if (!t.marked && proc.pid) { t.marked = proc.pid; markWeb(t); saveTerms(); }
-      t.buf = (t.buf + d).slice(-262144); send(t, 'data', d);
+      keepOut(t, d); send(t, 'data', d);
     });
     proc.onExit(() => { t.gone = true; gptCache = null; if (t.marked) gptUnmark(t.marked); saveTerms(); send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t); gptCache = null;
@@ -2591,7 +2603,7 @@ async function web() {
   // what a page gets first: our terminal's output; for a window here, the record before what its reader kept,
   // the kept lines, then pushed off the screen (a newline per row) so the frame doesn't cover them, and the frame
   function replay(t) {
-    if (t.kind === 'pty') return t.buf;
+    if (t.kind === 'pty') return replayPty(t);
     let l = { text: '', skip: 0 };
     const rows = (t.frame ?? '').replace(/^\x1b\[H/, '').split('\r\n');
     try { if (t.file && t.w) { const h = history(t.file, { keep: Infinity }); l = lead(h.items, [...t.hist, ...rows], h.start > 0); } } catch {} // all of it: the window's kept lines reach further back than a page's first look
@@ -3449,7 +3461,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { procStarts, tokensBeside, recycle, copyTo, claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
