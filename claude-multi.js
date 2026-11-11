@@ -739,11 +739,19 @@ while True:
         except Exception: pass
     if not more: time.sleep(1)
 `;
-let macPw; // the Mac's password, read once it reads (null: not saved, or not read this time: tried again the next)
-const macPassword = () => macPw || (macPw = !fs.existsSync(MAC_PW) ? null
-  : spawnSync('powershell.exe', ['-NoProfile', '-Command', `[Net.NetworkCredential]::new('', (Get-Content '${MAC_PW}' | ConvertTo-SecureString)).Password`],
-    { encoding: 'utf8', windowsHide: true }).stdout?.replace(/\r?\n$/, '') || null);
-const macNoPw = () => fs.existsSync(MAC_PW) ? `没读出 Mac 的密码（${MAC_PW}），再试一次` : `还没保存 Mac 的密码（${MAC_PW}）`;
+// A file ConvertFrom-SecureString wrote (DPAPI, this Windows user, as hex) read back by .NET alone, no PowerShell module:
+// a 预热 started by the web service once found ConvertTo-SecureString's module failing to load ("The member AuditToString
+// is already present"), the Mac skipped
+const dpapiRead = (file) => spawnSync('powershell.exe', ['-NoProfile', '-Command', "[void][Reflection.Assembly]::Load('System.Security, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a'); "
+  + `$h = [IO.File]::ReadAllText('${file}').Trim(); [Text.Encoding]::Unicode.GetString([Security.Cryptography.ProtectedData]::Unprotect([byte[]]($h -split '(..)' -ne '' | ForEach-Object { [Convert]::ToByte($_, 16) }), $null, 'CurrentUser'))`],
+{ encoding: 'utf8', windowsHide: true });
+let macPw, macPwWhy = ''; // the Mac's password, read once it reads (null: not saved, or not read this time: tried again the next); why not
+const macPassword = () => macPw || (macPw = !fs.existsSync(MAC_PW) ? null : (() => {
+  const r = dpapiRead(MAC_PW);
+  macPwWhy = (r.error?.message || r.stderr || '').trim().split('\n')[0].trim();
+  return r.stdout?.replace(/\r?\n$/, '') || null;
+})());
+const macNoPw = () => fs.existsSync(MAC_PW) ? `没读出 Mac 的密码（${MAC_PW}${macPwWhy ? `：${macPwWhy}` : ''}），再试一次` : `还没保存 Mac 的密码（${MAC_PW}）`;
 // The Mac account's usage, read there (python3 -): its sign-in never leaves the Mac. As fetchUsage's: {u} or {err, temp?}.
 const MAC_USAGE = String.raw`
 import json, os, subprocess, sys, time, urllib.request, urllib.error
@@ -3860,7 +3868,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

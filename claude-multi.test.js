@@ -1429,5 +1429,18 @@ if (SESSION0) {
     assert.deepEqual([ts.total, ts.usd, ts.days.length, ts.accounts.length, ts.accounts[0].mac, ts.accounts[0].plus > 0], [0, 0, 0, 1, true, true]); // in no total: beside the Mac's
     fs.rmSync(od, { recursive: true, force: true });
   }
+  // the Mac's password file (ConvertFrom-SecureString: DPAPI, this Windows user) read back by .NET alone; a broken one says
+  // why. In a node of its own: its PowerShells, run here, held up the timed waits going on meanwhile
+  require('child_process').execFile(process.execPath, ['-e', `
+    const { dpapiRead } = require(${JSON.stringify(require.resolve('./claude-multi'))}), fs = require('fs'), f = ${JSON.stringify(path.join(TEST_HOME, 'pw.dpapi'))};
+    fs.writeFileSync(f, require('child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', "ConvertTo-SecureString 'pw Test-1' -AsPlainText -Force | ConvertFrom-SecureString"], { encoding: 'utf8' }).stdout.trim());
+    const good = dpapiRead(f).stdout; fs.writeFileSync(f, 'abcd'); const bad = dpapiRead(f);
+    console.log(JSON.stringify([good, bad.stdout, bad.stderr]));`], { encoding: 'utf8' }, (e, out) => {
+    assert.ifError(e);
+    const [good, badOut, badErr] = JSON.parse(out);
+    assert.equal(good.replace(/\r?\n$/, ''), 'pw Test-1');
+    assert.ok(!badOut.trim() && /Unprotect/.test(badErr), badErr);
+    console.log('mac password read ok');
+  });
   console.log('mac mini ok');
 }
