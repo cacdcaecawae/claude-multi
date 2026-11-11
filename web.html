@@ -34,7 +34,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   :root { --bg: #1f1f1f; --bar: #181818; --border: #2b2b2b; --hover: #2a2d2e; --sel: #37373d; --input: #313131; --inputB: #3c3c3c;
     --fg: #cccccc; --fg2: #9d9d9d; --fg3: #6e7681; --accent: #0078d4; --link: #4daafc; --green: #3fb950; --orange: #e5a03a; --red: #f85149;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
-    --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; --gpt: #19c37d; color-scheme: dark;
+    --a1: #0a84ff; --gpt: #19c37d; color-scheme: dark;
     --fgHi: #ffffff; --msg: #d4d4d4; --tint: rgba(255,255,255,.08); --btn: #313131; --btnH: #3c3c3c; --badge: #616161; --badgeFg: #f8f8f8;
     --pop: #252526; --popB: #454545; --accentH: #026ec1; --accentBg: rgba(0,120,212,.22); --errFg: #ffa198; --cellB: #3c3c3c;
     --split: #4a4a4a; --term: #1f1f1f; --act: #131313; --purple: #b180d7; --shadow: rgba(0,0,0,.5); --lift: rgba(0,0,0,.25); --frame: #111111; --cardB: #2b2b2b; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
@@ -46,7 +46,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     --accentBg: rgba(0,95,184,.1); --link: #005fb8; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.06);
     --btn: #e8e8e8; --btnH: #dadada; --badge: #cccccc; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #d4d4d4; --cellB: #d9d9d9;
     --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
-    --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --gpt: #0b8a5c; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
+    --a1: #0066cc; --gpt: #0b8a5c; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 13px/1.4 var(--ui); }
   /* opened from the home screen, iOS 26 makes the page shorter than the screen by the status bar (WebKit bug 301108):
@@ -143,13 +143,13 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .switch.on { background: var(--accent); }
   .switch.on::after { left: 18px; }
   /* an account's mark: its number in a ring of its color, the ring filled clockwise as far as its 5-hour window has left */
-  .ac { position: relative; width: 20px; height: 20px; flex: none; display: grid; place-items: center; font: 600 10.5px/1 var(--ui); font-style: normal; color: var(--c); }
+  .ac { position: relative; width: 20px; height: 20px; flex: none; display: grid; place-items: center; font: 600 10.5px/1 var(--ui); font-style: normal; color: var(--fg); } /* the number in text ink, the ring in the account's color (a yellow 4 on white can't be read) */
   .ac::before { content: ''; position: absolute; inset: 0; border-radius: 50%;
     background: conic-gradient(var(--c) calc(var(--p) * 1%), color-mix(in srgb, var(--c) 22%, transparent) 0);
     -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
     mask: radial-gradient(closest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); }
   .ac.g { font-size: 8.5px; letter-spacing: -.2px; } /* a GPT account's G1: two characters in the ring */
-  .ac.nq::before { background: none; border: 1.5px dashed color-mix(in srgb, var(--c) 60%, transparent); -webkit-mask: none; mask: none; } /* quota unread */
+  .ac.nq::before { background: none; border: 1.5px dashed var(--c); -webkit-mask: none; mask: none; } /* quota unread */
   .spin { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid var(--orange); border-right-color: transparent; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .tab .spin { margin: 0 2px; }
@@ -221,7 +221,6 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-top: 6px; }
   .bars > div { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; height: 100%; }
   .bars i { display: block; border-radius: 2px 2px 0 0; }
-  .bars > .now { background: var(--tint); border-radius: 3px; } /* today's column */
   .ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--fg3); margin-top: 6px; }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--fg2); margin-top: 8px; }
   .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 4px; margin-right: 5px; }
@@ -733,7 +732,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 /* global parseScreen */ // screen.js
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const ACCT = ['var(--a1)', 'var(--a2)', 'var(--a3)', 'var(--a4)'];
+const ACCT = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)', 'var(--s7)', 'var(--s8)']; // an account's color everywhere: rings, dots, the usage chart (the island's and the status line's are the same)
 // An error the service answers comes with its words (err). One without them didn't come from it, the relay's own page
 // with the PC away, say: marked away, for a caller to try again rather than give up (as with no network at all).
 const post = async (url, body) => {
@@ -795,7 +794,7 @@ const ac = (n, cls = '', gpt = false) => {
   const a = state?.usage?.accounts?.[n - 1], w = !a?.err && a?.windows?.find((x) => x.k === 'five_hour');
   const left = w ? Math.max(0, 100 - w.pct) : null;
   const tip = left == null ? `账号 ${n} · 额度没读到` : `账号 ${n} · 5 小时额度还剩 ${left}%${w.reset ? `（${w.reset}后重置）` : ''}`;
-  return `<i class="ac${cls}${left == null ? ' nq' : ''}" style="--c:${ACCT[(n - 1) % 4]};--p:${left ?? 0}" title="${esc(tip)}">${n}</i>`;
+  return `<i class="ac${cls}${left == null ? ' nq' : ''}" style="--c:${ACCT[(n - 1) % ACCT.length]};--p:${left ?? 0}" title="${esc(tip)}">${n}</i>`;
 };
 // Claude's spark, as the icon draws it, in currentColor
 const RAYS = [29, 24, 27, 23, 30, 25, 27, 23, 28, 24, 27, 22], TILT = [0, 2, -1, 1, -1, -2, 1, 1, -1, 2, 0, -1]; // the spark's rays: length, a little off true
@@ -803,7 +802,7 @@ const SPARK = `<svg class="spark" viewBox="-32 -32 64 64" fill="currentColor">${
   `<path transform="rotate(${k * 30 + 8 + TILT[k]})" d="M-4.7 0L-2.5 -${l}A2.5 2.5 0 0 1 2.5 -${l}L4.7 0z"/>`).join('')}<circle r="7.6"/></svg>`;
 // OpenAI's mark (Simple Icons), in currentColor; a conversation's mark: n its account, 1 on
 const OPENAI = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>`;
-const mark = (gpt, n) => `<i class="mk" style="color:${gpt ? 'var(--gpt)' : ACCT[(n - 1) % 4]}" title="${gpt ? 'GPT' : 'Claude'}">${gpt ? OPENAI : SPARK}</i>`;
+const mark = (gpt, n) => `<i class="mk" style="color:${gpt ? 'var(--gpt)' : ACCT[(n - 1) % ACCT.length]}" title="${gpt ? 'GPT' : 'Claude'}">${gpt ? OPENAI : SPARK}</i>`;
 $('#act .logo').insertAdjacentHTML('afterbegin', `<span class="sp">${SPARK}<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" pathLength="100"/></svg></span>`);
 
 // --- the layout, as in VS Code: the activity bar picks what the side bar shows (对话, 额度, 用量); conversations open as
@@ -999,7 +998,7 @@ function drawStatus() {
   const b = state.sessions.filter((s) => s.busy).length;
   $('#host').textContent = state.me;
   $('#conn').innerHTML = (n ? `${n} 个在运行` : '') + (b ? ` · <span class="spin"></span> ${b} 个在回复` : '');
-  $('#sAcct').innerHTML = u.open ? `<i style="background:${ACCT[u.rec % 4]}"></i>推荐 账号 ${u.rec + 1}${w ? ` · 5 小时已用 ${w.pct}%` : ''}` : esc(shut(u));
+  $('#sAcct').innerHTML = u.open ? `<i style="background:${ACCT[u.rec % ACCT.length]}"></i>推荐 账号 ${u.rec + 1}${w ? ` · 5 小时已用 ${w.pct}%` : ''}` : esc(shut(u));
 }
 // The conversation you're looking at, in the status bar: where it runs, its account (and that one's 5-hour use), model and
 // effort and context used (its terminal's status line), how long the prompt cache lives on (an hour from the last
@@ -1015,7 +1014,7 @@ function drawHere() {
   el.innerHTML = [
     w && `<span class="where ${w}" title="这个对话的 ${c.gpt ? 'Codex' : 'Claude'} 在哪里运行">${w === 'pc' ? '电脑窗口' : '网页服务'}</span>`,
     c.acct && c.gpt && `<span title="${esc(g?.label ?? '')}"><i style="background:var(--gpt)"></i>GPT 账号 G${c.acct}${gw ? ` · ${winName(gw.k)} <b class="${tone(gw.pct)}">${gw.pct}%</b>` : ''}</span>`,
-    c.acct && !c.gpt && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % 4]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
+    c.acct && !c.gpt && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % ACCT.length]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
     line?.model && `<span title="模型 · 思考强度">${esc([line.model, line.effort].filter(Boolean).join(' · '))}</span>`,
     line?.ctx != null && `<span title="上下文已用">上下文 <b class="${tone(line.ctx)}">${Math.round(line.ctx)}%</b></span>`,
     left != null && (left > 0 || w) && `<span title="提示缓存在最后一次请求后留 1 小时；过期后，下一条消息要把整段对话重新写进缓存，多用额度">${left > 0
@@ -1330,7 +1329,7 @@ async function drawAsks() {
   askOf = new Map(list.map((a) => [a.id, a.menu?.ask]));
   $('#asks').html = list.map(({ id, title, acct, menu }) => {
     const simple = menu && !menu.tabs && !menu.opts.some((o) => o.check != null);
-    return `<div class="ask" data-id="${esc(id)}"><div class="from"><i style="background:${ACCT[(acct - 1) % 4]}"></i><b>${esc(title)}</b><span>账号 ${acct}</span><button class="open" data-open="1">打开对话 ›</button></div>${menu
+    return `<div class="ask" data-id="${esc(id)}"><div class="from"><i style="background:${ACCT[(acct - 1) % ACCT.length]}"></i><b>${esc(title)}</b><span>账号 ${acct}</span><button class="open" data-open="1">打开对话 ›</button></div>${menu
       ? askHead(menu) + (simple ? askOpts(menu, (o) => `data-n="${o.n}"${OWN_TYPE.test(o.label) ? ' data-open="1"' : ''}`) : '<div class="note">多选，或者一次问了好几题，打开对话回答</div>')
       : '<div class="note">它在等你处理，打开看看</div>'}</div>`;
   }).join('');
@@ -1371,7 +1370,7 @@ function drawDesk() {
   const word = mood(up, thinking, run, nYou), wait = run.filter((x) => x.wait), busy = run.filter((x) => x.busy && !x.wait);
   const status = !up ? '没在运行' : bConv?.live === 'ask' || me?.wait ? '在等你回答' : thinking ? '在回复' : '空闲';
   const stC = !up ? '' : status === '在等你回答' ? 'o' : thinking ? 'g' : 'b';
-  $('#deskMe').html = `<div class="me${thinking ? ' busy' : ''}">${SPARK}<div><b>管家</b><div class="sub"><span class="pill ${stC}">${status}</span>${up && acct ? `<span class="pill" style="color:${ACCT[(acct - 1) % 4]}">账号 ${acct}</span>` : ''}</div></div></div>
+  $('#deskMe').html = `<div class="me${thinking ? ' busy' : ''}">${SPARK}<div><b>管家</b><div class="sub"><span class="pill ${stC}">${status}</span>${up && acct ? `<span class="pill" style="background:color-mix(in srgb, ${ACCT[(acct - 1) % ACCT.length]} 22%, transparent)">账号 ${acct}</span>` : ''}</div></div></div>
     <div class="mood">${esc(word)}</div>`;
   const hm = (t) => new Date(t).toTimeString().slice(0, 5), mins = (ms) => (ms < 60000 ? '不到 1 分钟' : ms < 3600000 ? `${Math.round(ms / 60000)} 分钟` : `${(ms / 3600000).toFixed(1)} 小时`);
   // each ticket: where it stands, who does it (tap: open it), and what it said when that waits on you or it's stuck; what
@@ -1607,9 +1606,9 @@ async function renderTokens() {
   const days = [...Array(14)].map((_, k) => { const dt = new Date(y, mo - 1, dd - 13 + k); return { dt, d: map[key(dt)] }; });
   const week = days.slice(-7), sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
-  // each account its own color, the same every day (a whole bar in one color hid who used it); today's column on a tint.
+  // each account in its ring's color, the same every day (a whole bar in one color hid who used it).
   // shortcut: a 9th account takes the first's color again; fold the oldest into one 其他 if it comes to that
-  const col = (i) => `var(--s${(i % 8) + 1})`;
+  const col = (i) => ACCT[i % ACCT.length];
   $('#view').html = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
     <div class="tiles">
       <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">${about(t.usd)}</div></div>
@@ -1617,7 +1616,7 @@ async function renderTokens() {
       <div class="tile"><div class="k">近 7 天</div><div class="v">${fmtTok(sum(week, (x) => all(x.d)))}</div><div class="u">${about(sum(week, (x) => x.d?.usd ?? 0))}</div></div>
       <div class="tile"><div class="k">日均</div><div class="v">${fmtTok(t.total / active)}</div><div class="u">${about(t.usd / active)}</div></div>
     </div>
-    <h3>近 14 天</h3><div class="card"><div class="bars">${days.map((x) => `<div${x === days.at(-1) ? ' class="now"' : ''} title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
+    <h3>近 14 天</h3><div class="card"><div class="bars">${days.map((x) => `<div title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
       ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${col(i)}" title="${x.dt.getMonth() + 1}/${x.dt.getDate()} 账号 ${i + 1} ${fmtTok(all(b))} · ${usd(b.usd)}"></i>` : '').join('')}</div>`).join('')}</div>
       <div class="ticks"><span>${days[0].dt.getMonth() + 1}/${days[0].dt.getDate()}</span><span>今天</span></div>
       <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${col(i)}"></i>账号 ${i + 1}</span>`).join('')}</div></div>

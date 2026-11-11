@@ -1177,7 +1177,7 @@ $script:tokAt = [datetime]::MinValue
 $script:tokView = 'heat'
 $script:tokAcct = -1 # -1 all accounts, else the account's index
 $HEAT = '#104281', '#1C5CAB', '#2A78D6', '#5598E7', '#9EC5F4' # one blue, dark surface: brighter = more
-$ACCT_COLORS = '#0A84FF', '#FF9F0A', '#BF5AF2', '#30D158'      # the status line's account colors
+$ACCT_COLORS = '#3987E5', '#D95926', '#199E70', '#C98500', '#D55181', '#008300', '#9085E9', '#E66767' # the account colors: the web page's (dark) and the status line's
 
 function Open-Tokens { $script:folder = '#tokens'; $script:arranging = $false; Open-Chats; Render-List; Load-Tokens }
 function Load-Tokens {
@@ -1220,7 +1220,7 @@ function Render-Tokens {
   if ($script:tokAcct -ge $accts.Count) { $script:tokAcct = -1 }
   for ($k = -1; $k -lt $accts.Count; $k++) { # 全部账号, then one chip per account in its color
     $on = $script:tokAcct -eq $k
-    $dot = if ($k -ge 0) { "<Ellipse Width='7' Height='7' Fill='$($ACCT_COLORS[$k % 4])' VerticalAlignment='Center' Margin='0,0,7,0'/>" } else { '' }
+    $dot = if ($k -ge 0) { "<Ellipse Width='7' Height='7' Fill='$($ACCT_COLORS[$k % $ACCT_COLORS.Count])' VerticalAlignment='Center' Margin='0,0,7,0'/>" } else { '' }
     $chip = X ("<Border $ns CornerRadius='10' Padding='12,5' Margin='0,0,6,0' Cursor='Hand' BorderThickness='1' " +
       "Background='$(if ($on) { '#24FFFFFF' } else { '#0DFFFFFF' })' BorderBrush='$(if ($on) { '#99FFFFFF' } else { '#1AFFFFFF' })'>" +
       "<StackPanel Orientation='Horizontal'>$dot<TextBlock Text='$(if ($k -ge 0) { "账号 $($k + 1)" } else { '全部账号' })' FontSize='12' FontWeight='SemiBold' " +
@@ -1307,7 +1307,7 @@ function Heat-Map($map) {
 function Bar-Chart($map, [int]$nAcct) {
   $N = 30; $H = 160; $L = 56; $cwid = 26
   $stack = $script:tokAcct -lt 0 -and $nAcct -gt 1 # all accounts: one segment each, in its color
-  $cols = @(if ($stack) { $ACCT_COLORS } elseif ($script:tokAcct -ge 0) { $ACCT_COLORS[$script:tokAcct % 4] } else { '#3987E5' }) # @(): one color stays a list
+  $cols = @(if ($stack) { $ACCT_COLORS } elseif ($script:tokAcct -ge 0) { $ACCT_COLORS[$script:tokAcct % $ACCT_COLORS.Count] } else { '#3987E5' }) # @(): one color stays a list
   $today = [datetime]::Today
   $vals = @(for ($k = 0; $k -lt $N; $k++) { Day-Total (Day-View $map[(Day-Key $today.AddDays($k - $N + 1))]) })
   $max = [math]::Max(1, ($vals | Measure-Object -Maximum).Maximum)
@@ -1342,7 +1342,7 @@ function Bar-Chart($map, [int]$nAcct) {
   }
   $legend = if ($stack) {
     "<StackPanel Orientation='Horizontal' Margin='$L,8,0,0'>" + (@(for ($k = 0; $k -lt $nAcct; $k++) {
-      "<Ellipse Width='8' Height='8' Fill='$($ACCT_COLORS[$k % 4])' VerticalAlignment='Center' Margin='0,0,6,0'/><TextBlock Text='账号 $($k + 1)' FontSize='11' Foreground='#99FFFFFF' Margin='0,0,16,0'/>" }) -join '') + '</StackPanel>'
+      "<Ellipse Width='8' Height='8' Fill='$($ACCT_COLORS[$k % $ACCT_COLORS.Count])' VerticalAlignment='Center' Margin='0,0,6,0'/><TextBlock Text='账号 $($k + 1)' FontSize='11' Foreground='#99FFFFFF' Margin='0,0,16,0'/>" }) -join '') + '</StackPanel>'
   } else { '' }
   X "<StackPanel $ns HorizontalAlignment='Left'><Canvas Width='$($L + $N * $cwid)' Height='$($H + 24)'>$sb</Canvas>$legend</StackPanel>"
 }
@@ -1352,7 +1352,7 @@ function Acct-Card($t) {
   $sb = New-Object Text.StringBuilder
   for ($k = 0; $k -lt $accts.Count; $k++) {
     $a = $accts[$k]
-    $col = $ACCT_COLORS[$k % 4]
+    $col = $ACCT_COLORS[$k % $ACCT_COLORS.Count]
     $pct = if ($t.total) { [math]::Round($a.total / $t.total * 100, 1) } else { 0 }
     [void]$sb.Append("<Grid Margin='0,6'><Grid.ColumnDefinitions><ColumnDefinition Width='300'/><ColumnDefinition/><ColumnDefinition Width='90'/><ColumnDefinition Width='96'/><ColumnDefinition Width='56'/></Grid.ColumnDefinitions>" +
       "<StackPanel Orientation='Horizontal' VerticalAlignment='Center'><Ellipse Width='8' Height='8' Fill='$col' VerticalAlignment='Center'/>" +

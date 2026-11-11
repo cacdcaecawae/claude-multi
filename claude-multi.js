@@ -3399,7 +3399,7 @@ function butlerCost(roots = tokenRoots(), logFile = LOG, now = Date.now()) {
   return out;
 }
 
-const ACCOUNT_COLORS = ['38;2;10;132;255', '38;2;255;159;10', '38;2;191;90;242', '38;2;48;209;88']; // the island's blue, orange, purple, green
+const ACCOUNT_COLORS = ['38;2;57;135;229', '38;2;217;89;38', '38;2;25;158;112', '38;2;201;133;0', '38;2;213;81;129', '38;2;0;131;0', '38;2;144;133;233', '38;2;230;103;103']; // the island's and the web page's (dark) account colors
 function statusline(input = {}) {
   const paint = (code, s) => (process.env.NO_COLOR ? s : `\x1b[${code}m${s}\x1b[0m`);
   const dir = process.env.CLAUDE_CONFIG_DIR;
