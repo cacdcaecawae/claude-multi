@@ -33,6 +33,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* VS Code's Dark Modern colors; the account colors are the island's */
   :root { --bg: #1f1f1f; --bar: #181818; --border: #2b2b2b; --hover: #2a2d2e; --sel: #37373d; --input: #313131; --inputB: #3c3c3c;
     --fg: #cccccc; --fg2: #9d9d9d; --fg3: #6e7681; --accent: #0078d4; --link: #4daafc; --green: #3fb950; --orange: #e5a03a; --red: #f85149;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
     --a1: #0a84ff; --a2: #ff9f0a; --a3: #bf5af2; --a4: #30d158; --gpt: #19c37d; color-scheme: dark;
     --fgHi: #ffffff; --msg: #d4d4d4; --tint: rgba(255,255,255,.08); --btn: #313131; --btnH: #3c3c3c; --badge: #616161; --badgeFg: #f8f8f8;
     --pop: #252526; --popB: #454545; --accentH: #026ec1; --accentBg: rgba(0,120,212,.22); --errFg: #ffa198; --cellB: #3c3c3c;
@@ -44,6 +45,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     --inputB: #cecece; --fg: #3b3b3b; --fg2: #616161; --fg3: #6e6e6e; --fgHi: #1f1f1f; /* fg3 (times, paths): VS Code's #8b8b8b read 3.5:1 on white, this 5:1 */ --msg: #2b2b2b; --accent: #005fb8; --accentH: #0258a8;
     --accentBg: rgba(0,95,184,.1); --link: #005fb8; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.06);
     --btn: #e8e8e8; --btnH: #dadada; --badge: #cccccc; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #d4d4d4; --cellB: #d9d9d9;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
     --a1: #0066cc; --a2: #c46a00; --a3: #8e44c4; --a4: #1e8e3e; --gpt: #0b8a5c; --split: #cfcfcf; --purple: #8250df; --shadow: rgba(0,0,0,.16); --lift: rgba(0,0,0,.06); --frame: #e9e9e9; --cardB: #d8d8d8; --bar: #f7f7f7; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 13px/1.4 var(--ui); }
@@ -219,6 +221,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-top: 6px; }
   .bars > div { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; height: 100%; }
   .bars i { display: block; border-radius: 2px 2px 0 0; }
+  .bars > .now { background: var(--tint); border-radius: 3px; } /* today's column */
   .ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--fg3); margin-top: 6px; }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--fg2); margin-top: 8px; }
   .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 4px; margin-right: 5px; }
@@ -1604,9 +1607,9 @@ async function renderTokens() {
   const days = [...Array(14)].map((_, k) => { const dt = new Date(y, mo - 1, dd - 13 + k); return { dt, d: map[key(dt)] }; });
   const week = days.slice(-7), sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
-  // today's bar in the accent, whole (its accounts apart by the gaps); the days before in grey, an account a step each,
-  // from strong (the first) to faint (the last)
-  const shade = (i, now) => (now ? 'var(--accent)' : `color-mix(in srgb, var(--fg) ${Math.round(85 - (60 * i) / Math.max(1, n - 1))}%, transparent)`);
+  // each account its own color, the same every day (a whole bar in one color hid who used it); today's column on a tint.
+  // shortcut: a 9th account takes the first's color again; fold the oldest into one 其他 if it comes to that
+  const col = (i) => `var(--s${(i % 8) + 1})`;
   $('#view').html = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
     <div class="tiles">
       <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">${about(t.usd)}</div></div>
@@ -1614,10 +1617,10 @@ async function renderTokens() {
       <div class="tile"><div class="k">近 7 天</div><div class="v">${fmtTok(sum(week, (x) => all(x.d)))}</div><div class="u">${about(sum(week, (x) => x.d?.usd ?? 0))}</div></div>
       <div class="tile"><div class="k">日均</div><div class="v">${fmtTok(t.total / active)}</div><div class="u">${about(t.usd / active)}</div></div>
     </div>
-    <h3>近 14 天</h3><div class="card"><div class="bars">${days.map((x) => `<div title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
-      ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${shade(i, x === days.at(-1))}"></i>` : '').join('')}</div>`).join('')}</div>
+    <h3>近 14 天</h3><div class="card"><div class="bars">${days.map((x) => `<div${x === days.at(-1) ? ' class="now"' : ''} title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
+      ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${col(i)}" title="${x.dt.getMonth() + 1}/${x.dt.getDate()} 账号 ${i + 1} ${fmtTok(all(b))} · ${usd(b.usd)}"></i>` : '').join('')}</div>`).join('')}</div>
       <div class="ticks"><span>${days[0].dt.getMonth() + 1}/${days[0].dt.getDate()}</span><span>今天</span></div>
-      <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${shade(i)}"></i>账号 ${i + 1}</span>`).join('')}</div></div>
+      <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${col(i)}"></i>账号 ${i + 1}</span>`).join('')}</div></div>
     <h3>按账号</h3>${t.accounts.map((a, i) => `<div class="card cardHead">${ac(i + 1)}<div class="grow"><b>账号 ${i + 1}</b>
       <div class="m">${esc(a.label)}</div></div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">${about(a.usd)}</div></div></div>`).join('')}</div>`;
 }
