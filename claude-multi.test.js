@@ -1323,3 +1323,16 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   tokensBeside().then((t) => { assert.deepEqual(Object.keys(t).sort(), here); assert.ok(t.butler && Array.isArray(t.days)); console.log('usage beside ok'); },
     (e) => { console.error(e); process.exitCode = 1; });
 }
+
+// a page that opens a busy terminal late still gets its modes: the mouse (the band's buttons), the full screen, paste
+{
+  const { keepOut, replayPty } = require('./claude-multi');
+  const t = { buf: '' };
+  keepOut(t, '\x1b[?1049h\x1b[?1003h\x1b[?100'); keepOut(t, '6h\x1b[?2004h\x1b[?2026h'); // a switch cut between two pieces
+  for (let i = 0; i < 300; i++) keepOut(t, 'x'.repeat(1024)); // 300 KB more: the switches long out of the kept output
+  keepOut(t, '\x1b[?2004l');
+  const r = replayPty(t), head = r.slice(0, r.length - t.buf.length);
+  assert.ok(!t.buf.includes('\x1b[?1003h') && t.buf.length === 262144 && r.endsWith(t.buf));
+  assert.deepEqual(head.match(/\x1b\[\?\d+[hl]/g).sort(), ['\x1b[?1003h', '\x1b[?1006h', '\x1b[?1049h', '\x1b[?2004l']);
+  console.log('replay modes ok');
+}
