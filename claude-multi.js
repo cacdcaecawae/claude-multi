@@ -2764,7 +2764,7 @@ async function web() {
     for (const l of log.split('\n')) try { const j = l && JSON.parse(l); if (j?.at >= t0 && j.who !== 'you') out.push({ ...j, kind: 'butler' }); } catch {}
     return out.sort((a, b) => b.at - a.at).slice(0, 30);
   };
-  let tokAt = 0, tokCache = null;
+  let tokAt = 0, tokCache = null, tokNow = null;
   // the model and effort it starts with (model, effortLevel): its folder's settings.local.json (chosen on the page) over
   // settings.json
   const butlerSet = (k) => { for (const n of ['settings.local.json', 'settings.json']) try { const m = JSON.parse(fs.readFileSync(path.join(BUTLER, '.claude', n), 'utf8'))[k]; if (m) return m; } catch {} return null; };
@@ -2823,7 +2823,12 @@ async function web() {
     'GET /api/tickets': () => ticketsNow(),
     'POST /api/ticket': (q, b) => editTickets((all) => ticketOp(all, b)),
     'GET /api/machines': () => machines(),
-    'GET /api/tokens': (q) => { if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) { tokCache = { ...tokenStats(), butler: butlerCost() }; tokAt = Date.now(); } return tokCache; },
+    'GET /api/tokens': async (q) => {
+      if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) // counted beside, one count at a time; the child failed: here, as before
+        await (tokNow ??= tokensBeside().catch(() => ({ ...tokenStats(), butler: butlerCost() }))
+          .then((t) => { tokCache = t; tokAt = Date.now(); }).finally(() => { tokNow = null; }));
+      return tokCache;
+    },
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
     'POST /api/push/sub': (q, b) => { // a page's subscription, one per endpoint
       if (!/^https:\/\/[^/]+\//.test(b.endpoint ?? '') || !b.keys?.p256dh || !b.keys?.auth) throw new Error('通知订阅不完整');
@@ -3265,6 +3270,11 @@ function replyCost([, , i, o, w5, w1, r, model, fast]) {
   const [pi, po, pr] = PRICES[k ?? 'claude-opus-5-5'];
   return ((i + w5 * 1.25 + w1 * 2) * pi + o * po + r * pr) / 1e6 * (fast ? 2 : 1);
 }
+// The page's usage (as GET /api/tokens gives it) counted in a child node: reading the records takes ~0.3 s, and in the web
+// service the whole service, every terminal with it, stood still meanwhile.
+const tokensBeside = () => new Promise((ok, no) => require('child_process').execFile(process.execPath,
+  ['-e', `const m = require(${JSON.stringify(__filename)}); process.stdout.write(JSON.stringify({ ...m.tokenStats(), butler: m.butlerCost() }))`],
+  { windowsHide: true, maxBuffer: 256 << 20 }, (e, out) => { try { if (e) throw e; ok(JSON.parse(out)); } catch (x) { no(x); } }));
 function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-cache.json'), logFile = LOG) {
   let cache = { v: 3, files: {} }, dirty = false; // dirty: something read further, or dropped: the cache is written
   try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch (e) {
@@ -3439,7 +3449,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { procStarts, recycle, copyTo, claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { procStarts, tokensBeside, recycle, copyTo, claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

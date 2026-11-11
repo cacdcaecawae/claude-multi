@@ -1314,3 +1314,12 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
     catch (e) { console.error(e); process.exitCode = 1; }
   });
 }
+
+// the page's usage counted beside, in a child node (counting it in the web service held every terminal ~0.3 s): the
+// same fields as counted here, the 管家's cost with them
+{
+  const { tokensBeside, tokenStats, butlerCost } = require('./claude-multi');
+  const here = Object.keys({ ...tokenStats(), butler: butlerCost() }).sort();
+  tokensBeside().then((t) => { assert.deepEqual(Object.keys(t).sort(), here); assert.ok(t.butler && Array.isArray(t.days)); console.log('usage beside ok'); },
+    (e) => { console.error(e); process.exitCode = 1; });
+}
