@@ -226,6 +226,9 @@ const press = async (key, shift = false) => {
   const tile = "[...document.querySelectorAll('.tile')].find((e) => e.querySelector('.k').textContent === '今天')?.querySelector('.v').textContent";
   for (let i = 0; i < 100 && !(await evaluate(tile)); i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual([await evaluate(tile), await evaluate("document.querySelector('.ticks span').textContent")], ['7', '12/20']);
+  // each account in its own color, today's too (a whole bar in the accent hid whose it was), its column marked
+  assert.deepEqual(await evaluate("(() => { const d = document.querySelector('.bars > div:last-child'), i = d.querySelector('i'); return [d.className, i.style.background, i.title]; })()"),
+    ['now', 'var(--s1)', '1/2 账号 1 7 · $0']);
   assert.deepEqual(errors, []);
   console.log('browser mobile targets, light theme, page width and 用量 on the PC\'s day ok');
   // 新对话 on the Mac mini: its own folder there (no folder here) unless one is picked; back to an account here, a folder here
