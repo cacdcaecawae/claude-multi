@@ -1333,6 +1333,9 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   keepOut(t, '\x1b[?2004l');
   const r = replayPty(t), head = r.slice(0, r.length - t.buf.length);
   assert.ok(!t.buf.includes('\x1b[?1003h') && t.buf.length === 262144 && r.endsWith(t.buf));
-  assert.deepEqual(head.match(/\x1b\[\?\d+[hl]/g).sort(), ['\x1b[?1003h', '\x1b[?1006h', '\x1b[?1049h', '\x1b[?2004l']);
+  assert.deepEqual(head.match(/\x1b\[\?\d+[hl]/g).sort(), ['\x1b[?1003h', '\x1b[?1006h', '\x1b[?1049h', '\x1b[?2004h']); // enabled at the cut; the retained output turns paste off
   console.log('replay modes ok');
 }
+
+// Exercise the actual terminal parser too: string membership alone misses output replayed into the wrong buffer.
+require('./replay.test')().then(() => console.log('replay terminal buffers ok'), (e) => { console.error(e); process.exitCode = 1; });
