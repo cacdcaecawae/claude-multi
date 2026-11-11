@@ -2408,17 +2408,29 @@ function claudeShare(text, prev, ms, ncpu) {
   return { cpu: prev && ms > 0 ? Math.min(100, Math.round((100 * used) / (ms * ncpu))) : null, mem, n: now.size, prev: now };
 }
 
-// A terminal's private modes (mouse reporting, the full screen, bracketed paste...) as its output last set them. The
-// switches come once, as the program starts (or tmux joins it); a busy screen's output soon pushes them out of the
-// 256 KB a page is given first, and a page that opened later had no mouse (the band's buttons dead), no paste mode
-// (each line of a paste sent on its own), no full screen. So the replay starts with them. Left out: 2026 (synchronized
-// output), which a frame cut halfway would leave on.
+// Private modes at the START of the kept output, not its end: entering the full screen before replaying older
+// normal-screen text puts that text in the wrong buffer. Only discarded output advances this checkpoint; the kept
+// output then applies its own switches in order. Left out: 2026 (synchronized output), which could leave a frame held.
 const MODES = /\x1b\[\?([\d;]+)([hl])/g;
+// xterm takes at most 32 parameters, each capped at 2^31-1. Compact a cut-off CSI the same way so endless zeroes or
+// separators cannot grow the saved prefix without bound. The extra ';' keeps further parameters ignored by xterm.
+const modeParams = (s) => s.split(';', 32).map((n) => Math.min(Number(n), 2147483647));
 function keepOut(t, d) {
-  for (const m of (t.buf.slice(-20) + d).matchAll(MODES)) for (const n of m[1].split(';')) if (n && n !== '2026') (t.modes ??= {})[n] = m[2]; // -20: one cut between two pieces
-  t.buf = (t.buf + d).slice(-262144);
+  const out = (t.modeTail ?? '') + t.buf + d, cut = Math.max(0, out.length - 262144), gone = out.slice(0, cut);
+  for (const m of gone.matchAll(MODES)) for (const n of modeParams(m[1])) if (n && n !== 2026) {
+    t.modes ??= new Map();
+    t.modes.delete(n); t.modes.set(n, m[2]); // last-set order matters for aliases such as 47/1049
+  }
+  // A trim can land inside ESC [ ? ... h/l. Keep that unfinished prefix for replay and for the next trim, rather
+  // than losing the switch or scanning the last bytes of the kept output a second time.
+  t.modeTail = gone.match(/\x1b(?:\[(?:\?[\d;]*)?)?$/)?.[0] ?? '';
+  if (t.modeTail.startsWith('\x1b[?')) {
+    const p = t.modeTail.slice(3);
+    t.modeTail = '\x1b[?' + modeParams(p).join(';') + (p.split(';', 33).length > 32 ? ';' : '');
+  }
+  t.buf = out.slice(cut);
 }
-const replayPty = (t) => Object.entries(t.modes ?? {}).map(([n, v]) => `\x1b[?${n}${v}`).join('') + t.buf;
+const replayPty = (t) => [...(t.modes ?? [])].map(([n, v]) => `\x1b[?${n}${v}`).join('') + (t.modeTail ?? '') + t.buf;
 
 async function web() {
   procStarts.beside = true; // its process checks never hold up the terminals
