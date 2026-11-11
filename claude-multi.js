@@ -975,7 +975,7 @@ async function oaiSend(b) {
   try {
     // ponytail: a chat whose last answer OpenAI no longer keeps (30 days) can't go on; sending its messages again would
     const r = await oaiApi('responses', { model: OAI_MODEL, reasoning: opts, tools: [{ type: 'web_search' }], input: [{ role: 'user', content: oaiInput(text, ups) }],
-      previous_response_id: old?.resp ?? undefined, background: true, store: true });
+      previous_response_id: old?.resp ?? undefined, background: true, store: true, truncation: 'auto' }); // a chat grown past its window: its oldest dropped there, not this message refused
     const c = old ? oaiRead(id) : { id, title: (text.split('\n')[0] || oaiName(ups[0])).slice(0, 40), msgs: [], resp: null }, now = Date.now();
     const dir = path.join(OAI, id), files = ups.map((p) => path.join(dir, path.basename(p)));
     if (ups.length) fs.mkdirSync(dir, { recursive: true });
