@@ -1302,3 +1302,15 @@ if (SESSION0) {
   keepOn(new Error('another')); keepOn('a rejection that is no Error'); assert.equal(guardLog.length, 3); assert.deepEqual(exits, [1]);
   console.log('review follow-up ok (binding, desktop history, async writes, quick input, session drafts and queued sends)');
 })().catch((e) => { console.error(e); process.exitCode = 1; });
+
+// the web service's process check runs beside, never waited on (waiting on PowerShell froze every terminal once a
+// minute): at once the pid alone (null), a moment later the start times
+{
+  const cli = require('path').join(__dirname, 'claude-multi.js');
+  require('child_process').execFile(process.execPath, ['-e', `const { procStarts } = require(${JSON.stringify(cli)}); procStarts.beside = true;
+const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t < 100, end = Date.now() + 20000;
+(function poll() { const m = procStarts([process.pid]); if (m || Date.now() > end) { console.log(JSON.stringify([first, quick, !!m?.get(String(process.pid))])); process.exit(0); } setTimeout(poll, 100); })();`], { encoding: 'utf8' }, (err, out) => {
+    try { assert.deepEqual(JSON.parse(out.trim().split('\n').pop()), [null, true, true]); console.log('process check beside ok'); } // not waited on: the timed tests above go on
+    catch (e) { console.error(e); process.exitCode = 1; }
+  });
+}

@@ -499,16 +499,19 @@ function lastTyped(tail, before = Infinity) {
 
 // Start times (Windows FILETIME, as sessions/<pid>.json's procStart) of these pids; null if PowerShell failed.
 // The same pids within a minute: the last answer (PowerShell takes ~0.2 s, and the web service asks every few seconds).
-let startsSeen = { key: '', at: 0, map: null };
+// The web service sets procStarts.beside: there it runs beside, never waited on (waiting froze the service, and every
+// terminal with it, once a minute); till it answers, or for a minute after it failed, null: the pid alone.
+let startsSeen = { key: '', at: 0, map: null }, startsRun = null;
 function procStarts(pids) {
   if (!pids.length) return new Map();
   const key = [...pids].sort().join(',');
   if (startsSeen.key === key && Date.now() - startsSeen.at < 60000) return startsSeen.map;
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
-    + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'], { encoding: 'utf8', windowsHide: true });
-  if (r.status !== 0) return null;
-  startsSeen = { key, at: Date.now(), map: new Map(r.stdout.trim().split(/\r?\n/).filter(Boolean).map((l) => l.split(' '))) };
-  return startsSeen.map;
+  const args = ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
+    + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'];
+  const took = (out) => (startsSeen = { key, at: Date.now(), map: out == null ? null : new Map(out.trim().split(/\r?\n/).filter(Boolean).map((l) => l.split(' '))) }).map;
+  if (!procStarts.beside) { const r = spawnSync('powershell.exe', args, { encoding: 'utf8', windowsHide: true }); return r.status === 0 ? took(r.stdout) : null; }
+  startsRun ??= require('child_process').execFile('powershell.exe', args, { encoding: 'utf8', windowsHide: true }, (err, out) => { startsRun = null; took(err ? null : out); });
+  return startsSeen.key === key ? startsSeen.map : null;
 }
 
 const readHeads = new Map(); // record file -> { at: its mtime, cwd, title, prompt }
@@ -2406,6 +2409,7 @@ function claudeShare(text, prev, ms, ncpu) {
 }
 
 async function web() {
+  procStarts.beside = true; // its process checks never hold up the terminals
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
   const codex = codexCmd(); // GPT conversations: none started without it
@@ -3435,7 +3439,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { recycle, copyTo, claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { procStarts, recycle, copyTo, claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
