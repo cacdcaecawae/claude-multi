@@ -219,9 +219,9 @@ const press = async (key, shift = false) => {
   const tile = "[...document.querySelectorAll('.tile')].find((e) => e.querySelector('.k').textContent === '今天')?.querySelector('.v').textContent";
   for (let i = 0; i < 100 && !(await evaluate(tile)); i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual([await evaluate(tile), await evaluate("document.querySelector('.ticks span').textContent")], ['7', '12/20']);
-  // each account in its own color, today's too (a whole bar in the accent hid whose it was), its column marked
-  assert.deepEqual(await evaluate("(() => { const d = document.querySelector('.bars > div:last-child'), i = d.querySelector('i'); return [d.className, i.style.background, i.title]; })()"),
-    ['now', 'var(--s1)', '1/2 账号 1 7 · $0']);
+  // each account in its own color, today's too (a whole bar in the accent hid whose it was), the same as its ring below
+  assert.deepEqual(await evaluate("(() => { const i = document.querySelector('.bars > div:last-child i'); return [i.style.background, i.title, document.querySelector('.cardHead .ac').style.getPropertyValue('--c')]; })()"),
+    ['var(--s1)', '1/2 账号 1 7 · $0', 'var(--s1)']);
   assert.deepEqual(errors, []);
   console.log('browser mobile targets, light theme, page width and 用量 on the PC\'s day ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
