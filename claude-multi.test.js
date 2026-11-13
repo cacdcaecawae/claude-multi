@@ -274,6 +274,12 @@ if (SESSION0) {
   const pic = [{ role: 'user', text: '先看第一张' }, { role: 'img', text: '1234.0' }, { role: 'user', text: '[Image #1] 这是什么' }, { role: 'claude', text: '那是一只橘猫' }];
   assert.deepEqual(plain(lead(pic, ['● 那是一只橘猫'])), [EARLIER, '❯ [图片]', '❯ [Image #1] 这是什么', MARK]); // its picture with it
   assert.equal(lead(pic, ['● 1234.0']).skip, 1);                               // not found: the place isn't text
+  // a long screen of tool rows over a long record: the same answer (the last message with that key), at once
+  const big = Array.from({ length: 3000 }, (_, i) => ({ role: i % 3 ? 'tool' : i % 2 ? 'user' : 'claude', text: `消息编号 ${i % 500}` }));
+  const rows = [...Array.from({ length: 1000 }, (_, i) => `● Bash(step ${i})`), '● 消息编号 4'], t0 = Date.now(), b = lead(big, rows);
+  assert.deepEqual([b.skip, Date.now() - t0 < 100], [1000, true]);
+  // the last 消息编号 4 that isn't a tool's is #2004 (Claude's): from its question, #2001
+  assert.deepEqual(plain(b), [EARLIER, '❯ 消息编号 1', '● 消息编号 2', '● 消息编号 3', MARK]);
   console.log('lead ok');
 }
 

@@ -1985,7 +1985,7 @@ function Add-Chat($s) {
   $tip = if ($s.web) { '在网页上运行：点击开一个终端标签接上它，两边同步，关掉标签不会结束对话' } elseif ($s.pid) { '还开着，点击切回它的终端标签' } else { "用$acctName$who 在 $($s.cwd) 继续" }
   # one folder can hold conversations of several accounts
   $sub = @(@(if ($mixed) { "<Run Text='$(Esc (Split-Path $s.cwd -Leaf))' Foreground='#99FFFFFF'/>" }) +
-    $(if ($s.gpt) { "<Run Text='$acctName' Foreground='#19C37D'/>" } else { "<Run Text='$acctName'/>" }) +
+    $(if ($s.gpt) { "<Run Text='$(Esc $acctName)' Foreground='#19C37D'/>" } else { "<Run Text='$(Esc $acctName)'/>" }) +
     @(if ($s.prompt) { "<Run Text='$(Esc $s.prompt)' Foreground='#80FFFFFF'/>" })) -join "<Run Text='   ·   '/>"
   $b = New-Object Windows.Controls.Button
   $b.Style = $script:cw.FindResource('Item')
@@ -2007,7 +2007,7 @@ function Add-Chat($s) {
     "$(if (-not $s.gpt -and -not $s.mac) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,6,0'><Button x:Name='Ren' Content='&#xE70F;' ToolTip='改名'/></Border>" })<Grid VerticalAlignment='Center'>" +
     "<ContentControl Style='{DynamicResource OffHover}' HorizontalAlignment='Right' VerticalAlignment='Center'>$rest</ContentControl>" +
     "<Border Style='{DynamicResource OnHover}' Background='$(if ($s.pid) { '#30D158' } else { '#E6FFFFFF' })' CornerRadius='10' Padding='11,3' HorizontalAlignment='Right'>" +
-    "<TextBlock Text='$act' FontSize='12' FontWeight='SemiBold' Foreground='Black'/></Border></Grid></StackPanel></Grid>")
+    "<TextBlock Text='$(Esc $act)' FontSize='12' FontWeight='SemiBold' Foreground='Black'/></Border></Grid></StackPanel></Grid>")
   $sw = $b.Content.FindName('Sw') # none for a GPT one, nor 改名
   if ($sw) { $sw.Style = $script:cw.FindResource('Icon'); $sw.Tag = $s; $sw.Add_Click({ param($x, $e) $e.Handled = $true; Switch-Chat $x.Tag }) } # not a click on the row
   $ren = $b.Content.FindName('Ren'); $ed = $b.Content.FindName('E')

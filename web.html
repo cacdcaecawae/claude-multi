@@ -998,7 +998,8 @@ async function pushDisable() {
 async function load(fresh) {
   try {
     const view = document.visibilityState === 'visible' && (butler || !(NARROW.matches && sideOn)) ? shownConvs().map((c) => c.id).filter(Boolean).join(',') : '';
-    const s = await (await fetch('/api/state?' + new URLSearchParams({ ...(fresh && { fresh: 1 }), ...(view && { view }) }))).json();
+    const bg = document.visibilityState !== 'visible'; // in the background: for the tab's unread count, the quota not read again for it
+    const s = await (await fetch('/api/state?' + new URLSearchParams({ ...(fresh && { fresh: 1 }), ...(view && { view }), ...(bg && { bg: 1 }) }))).json();
     if (s.err) throw new Error(s.err);
     state = s; $('#status').classList.remove('off'); $('#offline').hidden = true;
   } catch (e) {
@@ -1013,7 +1014,8 @@ async function load(fresh) {
   readShown();
   bConv?.sync(); peek?.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
-  drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere(); newNotes();
+  drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere();
+  if (document.visibilityState === 'visible') newNotes(); // its toast when you're back, not into a hidden page
   return ''; // read: no error
 }
 // A note for you, not looked at: one you set going that answers, or asks you something (the 管家's turns there don't: it
@@ -1750,7 +1752,7 @@ async function renderTokens() {
       <div class="tile"><div class="k">近 7 天</div><div class="v">${fmtTok(sum(week, (x) => all(x.d)))}</div><div class="u">${about(sum(week, (x) => x.d?.usd ?? 0))}</div></div>
       <div class="tile"><div class="k">日均</div><div class="v">${fmtTok(t.total / active)}</div><div class="u">${about(t.usd / active)}</div></div>
     </div>
-    <h3>近 14 天</h3><div class="card"><div class="bars">${days.map((x) => `<div title=""${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
+    <h3>近 14 天</h3><div class="card"><div class="bars">${days.map((x) => `<div title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
       ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${col(i)}" title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${t.accounts[i]?.mac ? esc(t.accounts[i].label) : `账号 ${i + 1}`} ${fmtTok(all(b))} · ${usd(b.usd)}"></i>` : '').join('')}</div>`).join('')}</div>
       <div class="ticks"><span>${days[0].dt.getMonth() + 1}/${days[0].dt.getDate()}</span><span>今天</span></div>
       <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${col(i)}"></i>${a.mac ? esc(a.label) : `账号 ${i + 1}`}</span>`).join('')}</div></div>
@@ -2869,7 +2871,9 @@ function makeOai(id, title) {
   };
   c.wake = () => {
     shown = true; el.classList.add('on'); readNote(c.id); c.sync(); goMode(); refresh();
-    clearInterval(timer); timer = setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 2000);
+    // every 2 s while it answers or a message goes, else every 16 s: the chat comes whole each time
+    let ticks = 0;
+    clearInterval(timer); timer = setInterval(() => { if (document.visibilityState === 'visible' && (busy || sending || !(++ticks % 8))) refresh(); }, 2000);
   };
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(timer); readNote(c.id); };
   c.close = () => { c.closed = true; c.sleep(); el.remove(); };
@@ -3054,7 +3058,7 @@ document.addEventListener('click', (e) => {
 focusGroup(makeGroup());
 drawSide();
 load();
-setInterval(() => { if (document.visibilityState === 'visible') load(); }, 5000);
+setInterval(load, 5000); // in the background too: the tab's title counts the unread (a hidden page's timer is slowed anyway)
 </script>
 </body>
 </html>

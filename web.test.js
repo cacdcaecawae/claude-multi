@@ -251,6 +251,7 @@ const press = async (key, shift = false) => {
   // each account in its own color, today's too (a whole bar in the accent hid whose it was), the same as its ring below
   assert.deepEqual(await evaluate("(() => { const i = document.querySelector('.bars > div:last-child i'); return [i.style.background, i.title, document.querySelector('.cardHead .ac').style.getPropertyValue('--c')]; })()"),
     ['var(--s1)', '1/2 账号 1 7 · $0', 'var(--s1)']);
+  assert.equal(await evaluate("document.querySelector('.bars > div:last-child').title"), '1/2 7 · $0'); // the day's own, on hovering it
   assert.deepEqual(errors, []);
   console.log('browser mobile targets, light theme, page width and 用量 on the PC\'s day ok');
   // 新对话 on the Mac mini: its own folder there (no folder here) unless one is picked; back to an account here, a folder here

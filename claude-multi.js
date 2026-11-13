@@ -607,7 +607,8 @@ function listSessions(reg) {
 // of them run (accounts\mac: projects\<folder>\ as a config dir's, live.json), so the list, the record and the notes
 // read them as an account's here. The Mac's password, saved encrypted (DPAPI, this Windows user) in mac-password.dpapi,
 // unlocks its keychain, where its sign-in is, in each ssh connection: an ssh session finds it locked. It goes as LC_MACKC
-// (the Mac's sshd takes LC_*), never on a command line.
+// (the Mac's sshd takes LC_*), never on this PC's command line. On the Mac, `security unlock-keychain -p` has it on its
+// own for that moment, where that Mac's other users could see it with ps (none so far: each Mac has the one user).
 // Beside it, macs [{id, host, dir, config, label?}]: more of them, each a Mac and a config dir there (config: its
 // CLAUDE_CONFIG_DIR, written as the Mac's own launcher sets it: Claude keeps its sign-in under a name made from that very
 // string). Each entry is one account, as the Mac mini is: its copy here (accounts\<id>), its watcher, its live and
@@ -860,7 +861,7 @@ function macRun(m, cmd, input) {
 async function macPut(file, m) {
   if (!m) throw new Error('没有这台 Mac');
   const name = sq(path.basename(file));
-  const r = await macRun(m, `cd ${m.dir} && mkdir -p .uploads && { find .uploads -type f -mtime +7 -delete; cat > .uploads/${name}; } && printf %s "$PWD/.uploads/"${name}`, fs.readFileSync(file));
+  const r = await macRun(m, `cd ${macSh(m.dir)} && mkdir -p .uploads && { find .uploads -type f -mtime +7 -delete; cat > .uploads/${name}; } && printf %s "$PWD/.uploads/"${name}`, fs.readFileSync(file));
   if (r.status || !r.out) throw new Error(`没传到 ${m.label} 上：${r.err.trim().split('\n').pop() || r.status}`);
   return r.out;
 }
@@ -2008,7 +2009,9 @@ function notify(kind) {
   if (kind === 'done' && (lastTyped(tail) ?? '').startsWith('[系统通知]')) return; // the service woke it: not your news
   // the conversation's title, which its terminal tab shows: lets the island drop it once you look
   // (the 管家's is 管家, wherever it shows: the island, the page, the phone)
-  const title = sameDir(home || j.cwd || '.', BUTLER) ? '管家' : field(tail, 'customTitle', true) ?? field(tail, 'aiTitle', true);
+  // (/rename's sidecar first, as the list reads it: its line may be out of the tail)
+  let named = null; try { named = JSON.parse(fs.readFileSync(path.join(j.transcript_path.slice(0, -6), 'custom-title.json'), 'utf8')).customTitle; } catch {}
+  const title = sameDir(home || j.cwd || '.', BUTLER) ? '管家' : named || field(tail, 'customTitle', true) || field(tail, 'aiTitle', true);
   // the folder the conversation was opened in: the hook's cwd is wherever Claude last cd'd (a .build inside it, say)
   const dir = home || j.cwd;
   dropNote({ kind, project: dir ? path.basename(dir) : '', msg, title, id: j.session_id ?? null }, Number(process.env.CLAUDE_PID) || null);
@@ -2016,10 +2019,11 @@ function notify(kind) {
 // A note out: to the island's inbox (written to .tmp then renamed: it reads every 300 ms), with the Claude's pid that lets
 // a click find its terminal window; and for the pages and phones, the notes file, which lists the latest ones (trimmed to
 // its last 200 now and then). Then the island, made sure it runs.
+let noteSeq = 0;
 function dropNote(n, pid = null) {
   if (!islandOff()) {
     fs.mkdirSync(INBOX, { recursive: true });
-    const f = path.join(INBOX, `${Date.now()}-${process.pid}`);
+    const f = path.join(INBOX, `${Date.now()}-${process.pid}-${++noteSeq}`); // (two in one millisecond: both kept)
     fs.writeFileSync(`${f}.tmp`, JSON.stringify({ ...n, pid }));
     fs.renameSync(`${f}.tmp`, `${f}.json`);
   }
@@ -2633,10 +2637,13 @@ function fileServed(n, up = UPLOADS, oai = OAI) {
 function lead(items, lines, more = false) { // more: the record goes back further than items
   const key = (t) => String(t).split('\n')[0].replace(/[\s*`#>]/g, '').slice(0, 16);
   let cut = -1, skip = 0;
+  // each message's key at its last place in the record, made once (each row against every message took ~1 s on a long
+  // screen and record, every terminal stopped meanwhile)
+  const at = new Map();
+  items.forEach((it, i) => { if (it.role !== 'tool' && it.role !== 'img') at.set(key(it.text), i); });
   for (let r = 0; r < lines.length && cut < 0; r++) {
     const m = /^[❯●]\s+(.*)/.exec(lines[r].replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')), k = m && key(m[1]);
-    if (!k || k.length < 4) continue;
-    for (let i = items.length - 1; i >= 0 && cut < 0; i--) if (items[i].role !== 'tool' && items[i].role !== 'img' && key(items[i].text) === k) { cut = i; skip = r; }
+    if (k && k.length >= 4 && at.has(k)) { cut = at.get(k); skip = r; }
   }
   if (cut < 0) { cut = items.length; skip = lines.length; } // not found: from your latest question, no kept lines (the screen stays)
   let start = cut; // the screen starts at a question: nothing before it
@@ -3317,7 +3324,8 @@ async function web() {
     // 3 s at most, then shows the last numbers; the page's next look (10 s) has the new ones.
     'GET /api/state': async (q) => {
       for (const id of (q.get('view') ?? '').split(',').filter(Boolean)) viewing.set(id, Date.now()); // shown in a page in front
-      if (!usageCache || q.has('fresh') || Date.now() - usageAt > 60000) usageNow ??= usageState(undefined, { macFresh: q.has('fresh') || !usageAt }).then((r) => {
+      // (a page in the background, bg: there for its tab's unread count only, it doesn't keep the quota read)
+      if (!usageCache || (!q.has('bg') && (q.has('fresh') || Date.now() - usageAt > 60000))) usageNow ??= usageState(undefined, { macFresh: q.has('fresh') || !usageAt }).then((r) => {
         usageCache = r.json; usageAt = Date.now();
         fs.writeFile(WEB_USAGE, JSON.stringify(r.json), () => {});
       }, () => {}).finally(() => { usageNow = null; });
@@ -3418,10 +3426,12 @@ async function web() {
       const id = b.all ? '*' : /^[\w-]{1,80}$/.test(b.id ?? '') ? b.id : null;
       if (!id) throw new Error('缺少对话 id');
       markRead(id);
-      fs.mkdirSync(INBOX, { recursive: true });
-      const f = path.join(INBOX, `${Date.now()}-read`);
-      fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'read', id }));
-      fs.renameSync(`${f}.tmp`, `${f}.json`);
+      if (!islandOff()) { // (off: nothing would ever take it out)
+        fs.mkdirSync(INBOX, { recursive: true });
+        const f = path.join(INBOX, `${Date.now()}-read`);
+        fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'read', id }));
+        fs.renameSync(`${f}.tmp`, `${f}.json`);
+      }
       return {};
     },
     'POST /api/warmup': () => new Promise((ok) => { // not spawnSync: the terminals keep streaming meanwhile
