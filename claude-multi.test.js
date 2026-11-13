@@ -1552,3 +1552,11 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual(all.map((p) => [p.id, p.name, p.ids.join()]), [[1, '声速场', 'a-1,c-3'], [2, '再一个', '']]);
   console.log('projects ok');
 }
+// A Mac's usage read at most every 5 minutes (each read an ssh there and a request from it to Anthropic): read again
+// within that, the first read's; 刷新 (fresh) reads now. (A Mac with no password saved here: no ssh at all.)
+{
+  const { macUsageNow } = require('./claude-multi'), m = { id: 'cache-test', host: 'no-such-mac', label: 'T' };
+  const a = macUsageNow(m), b = macUsageNow(m), c = macUsageNow(m, true);
+  assert.ok(a === b && c !== a, 'cached within 5 minutes, fresh reads again');
+  c.then((r) => { assert.match(r.err, /密码/); console.log('mac usage every 5 min ok'); });
+}

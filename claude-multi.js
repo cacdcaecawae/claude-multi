@@ -2051,13 +2051,23 @@ function island() {
 const WINDOWS = [['five_hour', '5 小时'], ['seven_day', '7 天'], ['seven_day_opus', 'Opus 7 天'], ['seven_day_sonnet', 'Sonnet 7 天']];
 const readyAt = (u) => Math.max(0, ...WINDOWS.map(([k]) => u[k])
   .filter((w) => w && w.utilization >= 100 && w.resets_at).map((w) => +new Date(w.resets_at)));
+// A Mac's usage, read there at most every 5 minutes (a long-running caller, the web service: each read is a new ssh
+// through the server, and one more request from that Mac to Anthropic); macFresh (刷新, 预热) reads it now
+const MAC_USAGE_EVERY = 5 * 60000, macUsageSeen = new Map(); // id: {at, r}
+const macUsageNow = (m, fresh) => {
+  const was = macUsageSeen.get(m.id);
+  if (!fresh && was && Date.now() - was.at < MAC_USAGE_EVERY) return was.r;
+  const r = macUsage(m);
+  macUsageSeen.set(m.id, { at: Date.now(), r });
+  return r;
+};
 // Every account's usage and the pick. json is what the island and the web page read.
-async function usageState(reg = load()) {
+async function usageState(reg = load(), { macFresh = false } = {}) {
   let cache = {};
   try { cache = JSON.parse(fs.readFileSync(USAGE_CACHE, 'utf8')); } catch {}
   const macs = macList(reg);
   const [got, states, macGot] = await Promise.all([Promise.all(reg.profiles.map(fetchUsage)), Promise.all(reg.profiles.map((p) => subState(p, cache))),
-    Promise.all(macs.map(macUsage))]);
+    Promise.all(macs.map((m) => macUsageNow(m, macFresh)))]);
   const res = keepLast(reg.profiles, got, cache);
   const macRes = keepLast(macs, macGot, cache); // the Macs', apart: none of the accounts here, never recommended
   // counted only with an account at its limit (the island's notice is all that needs it): listing costs a PowerShell
@@ -3295,7 +3305,7 @@ async function web() {
     // 3 s at most, then shows the last numbers; the page's next look (10 s) has the new ones.
     'GET /api/state': async (q) => {
       for (const id of (q.get('view') ?? '').split(',').filter(Boolean)) viewing.set(id, Date.now()); // shown in a page in front
-      if (!usageCache || q.has('fresh') || Date.now() - usageAt > 60000) usageNow ??= usageState().then((r) => {
+      if (!usageCache || q.has('fresh') || Date.now() - usageAt > 60000) usageNow ??= usageState(undefined, { macFresh: q.has('fresh') || !usageAt }).then((r) => {
         usageCache = r.json; usageAt = Date.now();
         fs.writeFile(WEB_USAGE, JSON.stringify(r.json), () => {});
       }, () => {}).finally(() => { usageNow = null; });
@@ -3990,7 +4000,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { projectOp, macList, MAC_USAGE, fileServed, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { projectOp, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
