@@ -13,6 +13,7 @@ const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
 let histHang = false; // the next history read never answered (a phone's request left hanging)
+let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -45,7 +46,7 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/tokens' ? tokens
       : url.pathname === '/api/open' ? { key: 'fixture', pid: 123, kind: 'pty' }
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
-      : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: [{ role: 'claude', text: long }] }
+      : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: histFeed ? histFeed.splice(0) : [{ role: 'claude', text: long }] }
       : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' } : {};
     res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(data));
   }
@@ -366,6 +367,17 @@ const press = async (key, shift = false) => {
     } finally { AbortSignal.timeout = real; } })()`), true);
   assert.equal(histHang, false); // the hanging read did come
   console.log('browser a hanging history read given up ok');
+  // the screen done before the record brings the answer (a Mac's comes 1–3 s later): 正在取回答… till it does
+  termBusy = true; histFeed = [];
+  await evaluate("window.hw = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, hw)");
+  await until("hw.live === 'busy'");
+  termBusy = false; // its stream opened again (as a page back from the background), the screen done
+  await evaluate("(() => { const real = Date.now; hw.sync(); try { Date.now = () => real() + 21000; hw.sync(); } finally { Date.now = real; } })()");
+  await until("hw.el.querySelector('.live')?.textContent.includes('正在取回答')");
+  histFeed.push({ role: 'claude', text: '回答到了' });
+  await until("!!hw.el.querySelector('.hm.claude')?.textContent.includes('回答到了') && !hw.el.querySelector('.live').textContent.includes('正在取回答')");
+  await evaluate('closeConv(hw)'); histFeed = null;
+  console.log('browser 正在取回答 till the record has it ok');
   // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
   assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
     a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);
