@@ -519,8 +519,9 @@ $PAY = @{
   google_play_subscription = @('Google Play 订阅', 'M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z')
   stripe_subscription = $BANK_CARD; stripe_subscription_contracted = $BANK_CARD
 }
-# a MacBook's mark (a Mac entry with icon laptop), as the page draws it: its lid solid with Apple's mark cut out of it (F0)
-$LAPTOP = 'F0 M4.6 1h14.8a1.6 1.6 0 0 1 1.6 1.6V18H3V2.6a1.6 1.6 0 0 1 1.6 -1.6zM0.5 19h23.0l-.5 1.4a.8 .8 0 0 1 -.8 .6H1.8a.8 .8 0 0 1 -.8 -.6zM12.397 6.621c-0.532 0 -1.356 -0.605 -2.223 -0.584c-1.145 0.015 -2.195 0.664 -2.785 1.692c-1.188 2.063 -0.306 5.11 0.853 6.786c0.569 0.816 1.239 1.735 2.129 1.706c0.853 -0.036 1.173 -0.554 2.209 -0.554c1.028 0 1.319 0.554 2.223 0.532c0.919 -0.015 1.502 -0.831 2.063 -1.655c0.649 -0.948 0.918 -1.866 0.933 -1.917c-0.022 -0.007 -1.786 -0.685 -1.807 -2.726c-0.015 -1.706 1.392 -2.523 1.458 -2.559c-0.802 -1.173 -2.034 -1.305 -2.464 -1.334c-1.123 -0.088 -2.063 0.612 -2.588 0.612zM14.293 4.9c0.473 -0.568 0.786 -1.362 0.699 -2.15c-0.678 0.029 -1.494 0.452 -1.983 1.02c-0.438 0.503 -0.816 1.312 -0.715 2.085c0.751 0.058 1.524 -0.386 1.998 -0.955'
+# a MacBook's mark (a Mac entry with icon rainbow), as the page draws it: Apple's mark in its old six colors (hard bands down it)
+$RAINBOW = "<LinearGradientBrush StartPoint='0,0' EndPoint='0,1'>" + ((@(@('#61BB46', 0, 0.369), @('#FDB827', 0.369, 0.495), @('#F5821F', 0.495, 0.621),
+  @('#E03A3E', 0.621, 0.746), @('#963D97', 0.746, 0.872), @('#009DDC', 0.872, 1)) | ForEach-Object { "<GradientStop Color='$($_[0])' Offset='$($_[1])'/><GradientStop Color='$($_[0])' Offset='$($_[2])'/>" }) -join '') + '</LinearGradientBrush>'
 # An account at its limit while conversations run on it: one notice (per account, until it's off its limit again) that
 # they wait for the reset; a click opens the running ones, each with 换账号继续. Nothing switches by itself.
 $script:limitTold = @{}
@@ -663,10 +664,10 @@ function Render {
   }
   # each Mac (the Mac mini, a MacBook's accounts): Claude on that Mac, in its folder there, run by the web service
   # (claude-multi start <its id>: a tab joined to it, so the page and the phone have it too); its usage as read on the
-  # Mac, never recommended here. Its mark: Apple's, or a laptop for a MacBook's (icon laptop)
+  # Mac, never recommended here. Its mark: Apple's, in white; a MacBook's (icon rainbow) in its old six colors
   foreach ($m in @($d.macs)) {
     if (-not $m) { continue }
-    $mark = if ($m.icon -eq 'laptop') { $LAPTOP } else { $PAY.apple_subscription[1] }
+    $fill = if ($m.icon -eq 'rainbow') { $RAINBOW } else { "<SolidColorBrush Color='#E6FFFFFF'/>" } # white on the dark panel
     $lines = if ($m.err -or -not @($m.windows).Count) { "<TextBlock Text='$(Esc $(if ($m.err) { $m.err } else { '额度还没读到' }))' Margin='0,8,0,0' FontSize='11' Foreground='#8CFFFFFF' TextWrapping='Wrap'/>" } else {
       foreach ($w in @($m.windows)) {
         $nm = if ($names[$w.k]) { $names[$w.k] } else { $w.k }
@@ -679,7 +680,7 @@ function Render {
     $card = X ("<Border $ns Background='#0AFFFFFF' CornerRadius='14' Padding='14,11,14,12' Margin='0,0,0,6'><StackPanel><DockPanel>" +
       "<Button x:Name='Go' DockPanel.Dock='Right' Content='&#xE768;' ToolTip='在 $(Esc $m.label) 上的 $(Esc $m.dir) 里启动 Claude' Margin='6,-6,-8,-6'/>" +
       "<TextBlock DockPanel.Dock='Right' Text='$(Esc $m.plan)' FontSize='12' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
-      "<Path Data='$mark' Fill='#E6FFFFFF' Width='14' Height='14' Stretch='Uniform' Margin='0,-2,8,0' VerticalAlignment='Center'/>" + # its mark, white on the dark panel
+      "<Path Data='$($PAY.apple_subscription[1])' Width='14' Height='14' Stretch='Uniform' Margin='0,-2,8,0' VerticalAlignment='Center'><Path.Fill>$fill</Path.Fill></Path>" +
       "<TextBlock Text='$(Esc $m.label)' FontSize='13' FontWeight='SemiBold' Foreground='#CCFFFFFF' Margin='0,0,12,0' VerticalAlignment='Center'/>" +
       "</DockPanel>$($lines -join '')</StackPanel></Border>")
     $go = $card.FindName('Go'); $go.Style = $win.FindResource('Icon')

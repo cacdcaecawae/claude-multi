@@ -234,7 +234,7 @@ const press = async (key, shift = false) => {
   // 新对话 on the Mac mini: its own folder there (no folder here) unless one is picked; back to an account here, a folder here
   // (and a second Mac, a MacBook's account: offered beside it, its own folder there)
   assert.equal(await evaluate(`(() => { state.macs = [{ id: 'mac', label: 'Mac mini', dir: '~/Desktop/mine', host: 'mini' },
-      { id: 'la-a1', label: 'Mac a1', dir: '~/work', host: 'mymac', icon: 'laptop' }]; state.usage.projects = ['F:/proj'];
+      { id: 'la-a1', label: 'Mac a1', dir: '~/work', host: 'mymac', icon: 'rainbow' }]; state.usage.projects = ['F:/proj'];
     const on = () => document.querySelector('#sheetIn [data-d].on')?.dataset.d ?? 'none', text = () => document.querySelector('#sheetIn').textContent;
     newSheet(); const a = on(); document.querySelector('#sheetIn [data-a="mac"]').click(); const b = on();
     const said = text().includes('直接在 Mac mini 上的 ~/Desktop/mine 里运行');
@@ -242,12 +242,12 @@ const press = async (key, shift = false) => {
     document.querySelector('#sheetIn [data-a="1"]').click(); const c = on(); sheetOff(); state.usage.projects = [];
     return [a, b, said, la, c].join(' | '); })()`), 'F:/proj |  | true | /true | F:/proj');
   console.log('browser 新对话 Mac mini in mine, and a second Mac ok');
-  // 用量: each Mac's records (listed last) under its name and its mark (Apple's; a laptop for the MacBook), not as one more 账号 n
+  // 用量: each Mac's records (listed last) under its name and its mark (Apple's; the old rainbow one for the MacBook), not as one more 账号 n
   assert.equal(await evaluate(`(() => {
     tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }], days: [], total: 3, usd: 0, today: '2000-01-02' }; renderTokens();
     const h = [...document.querySelectorAll('#view .cardHead')];
-    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg path[d^="M4.6 1h14.8"]') ? '+laptop' : x.querySelector('.mk svg') ? '+apple' : '')).join(' | '); })()`),
-    '账号 1 | Mac mini+apple | Mac a1+laptop');
+    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg linearGradient stop[stop-color="#61BB46"]') ? '+rainbow' : x.querySelector('.mk svg') ? '+apple' : '')).join(' | '); })()`),
+    '账号 1 | Mac mini+apple | Mac a1+rainbow');
   console.log('browser 用量 Mac mini and a MacBook ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }

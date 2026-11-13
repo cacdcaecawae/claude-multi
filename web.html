@@ -1534,11 +1534,17 @@ const PAY = {
   stripe_subscription: CARD, stripe_subscription_contracted: CARD,
 };
 const APPLE = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="${PAY.apple_subscription[1]}"/></svg>`; // the Mac mini's mark (its conversations, its card)
-// a MacBook's (an entry with icon 'laptop'): a laptop, its lid solid with Apple's mark cut out of it (big enough to read at 14 px)
-const LAPTOP = `<svg viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><path d="M4.6 1h14.8a1.6 1.6 0 0 1 1.6 1.6V18H3V2.6a1.6 1.6 0 0 1 1.6 -1.6zM0.5 19h23.0l-.5 1.4a.8 .8 0 0 1 -.8 .6H1.8a.8 .8 0 0 1 -.8 -.6zM12.397 6.621c-0.532 0 -1.356 -0.605 -2.223 -0.584c-1.145 0.015 -2.195 0.664 -2.785 1.692c-1.188 2.063 -0.306 5.11 0.853 6.786c0.569 0.816 1.239 1.735 2.129 1.706c0.853 -0.036 1.173 -0.554 2.209 -0.554c1.028 0 1.319 0.554 2.223 0.532c0.919 -0.015 1.502 -0.831 2.063 -1.655c0.649 -0.948 0.918 -1.866 0.933 -1.917c-0.022 -0.007 -1.786 -0.685 -1.807 -2.726c-0.015 -1.706 1.392 -2.523 1.458 -2.559c-0.802 -1.173 -2.034 -1.305 -2.464 -1.334c-1.123 -0.088 -2.063 0.612 -2.588 0.612zM14.293 4.9c0.473 -0.568 0.786 -1.362 0.699 -2.15c-0.678 0.029 -1.494 0.452 -1.983 1.02c-0.438 0.503 -0.816 1.312 -0.715 2.085c0.751 0.058 1.524 -0.386 1.998 -0.955"/></svg>`;
+// a MacBook's (an entry with icon 'rainbow'): Apple's mark in its old six colors, the leaf in the green (hard bands down
+// it); each drawn with a gradient id of its own, so one taken out of the page never blanks the others
+const RAINBOW = [['#61BB46', 0.369], ['#FDB827', 0.495], ['#F5821F', 0.621], ['#E03A3E', 0.746], ['#963D97', 0.872], ['#009DDC', 1]];
+let rainbowN = 0;
+const rainbowApple = () => {
+  const id = `rb${++rainbowN}`, stops = RAINBOW.map(([c, to], i) => `<stop offset="${i ? RAINBOW[i - 1][1] : 0}" stop-color="${c}"/><stop offset="${to}" stop-color="${c}"/>`).join('');
+  return `<svg viewBox="0 0 24 24"><defs><linearGradient id="${id}" x2="0" y2="1">${stops}</linearGradient></defs><path fill="url(#${id})" d="${PAY.apple_subscription[1]}"/></svg>`;
+};
 // a Mac by its id (true: the Mac mini, as an older page said it), its mark and its name
 const macOf = (id) => state?.macs?.find((m) => m.id === (id === true ? 'mac' : id));
-const macMark = (id) => (macOf(id)?.icon === 'laptop' ? LAPTOP : APPLE);
+const macMark = (id) => (macOf(id)?.icon === 'rainbow' ? rainbowApple() : APPLE);
 const macName = (id) => macOf(id)?.label ?? 'Mac';
 const renew = (s) => {
   if (!s) return '';

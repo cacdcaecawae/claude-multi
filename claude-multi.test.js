@@ -1455,7 +1455,7 @@ if (SESSION0) {
 {
   const fs = require('fs'), path = require('path');
   const { listSessions, macList, macCmd, MAC_USAGE } = require('./claude-multi');
-  const la = { id: 'la-a1', host: 'mymac', dir: '~/work', config: '~/claude/a1', label: 'Mac a1', icon: 'laptop' };
+  const la = { id: 'la-a1', host: 'mymac', dir: '~/work', config: '~/claude/a1', label: 'Mac a1', icon: 'rainbow' };
   const reg = { profiles: [], mac: { host: 'mini', dir: '~/Desktop/mine' },
     macs: [la, { id: 'mac', host: 'x', dir: '~' }, { id: 'acct-1', host: 'x', dir: '~' }, { id: '../x', host: 'x', dir: '~' }, { id: 'nohost', dir: '~' }, { id: 'h', host: 'a b', dir: '~' }] };
   assert.deepEqual(macList(reg).map((m) => [m.id, m.config, m.label]), [['mac', null, 'Mac mini'], ['la-a1', la.config, 'Mac a1']]);

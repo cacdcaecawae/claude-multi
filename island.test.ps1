@@ -63,3 +63,12 @@ try {
     Write-Output "island conversation $($wa.Width)x$($wa.Height) ok"
   }
 } finally { if ($cw) { $cw.Close() }; $win.Close() }
+# A Mac card's mark: the MacBook's in Apple's old six colors (12 stops, hard bands), the others white; both parse as the card has them
+foreach ($name in 'BANK_CARD', 'PAY', 'RAINBOW') {
+  $node = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq ('$' + $name) }, $true)
+  . ([scriptblock]::Create($node.Extent.Text))
+}
+$mark = X "<Path $ns Data='$($PAY.apple_subscription[1])' Width='14' Height='14' Stretch='Uniform'><Path.Fill>$RAINBOW</Path.Fill></Path>"
+$st = $mark.Fill.GradientStops
+if ($st.Count -ne 12 -or "$($st[0].Color)" -ne '#FF61BB46' -or "$($st[11].Color)" -ne '#FF009DDC' -or $st[1].Offset -ne $st[2].Offset) { throw 'The rainbow mark is not six hard bands' }
+Write-Output 'island mac marks ok'
