@@ -256,6 +256,21 @@ const press = async (key, shift = false) => {
     $('#cmenu').hidden = true; sheetOff(); swapFrom(state.sessions.at(-1)); const sheet = document.querySelector('#sheet').classList.contains('on');
     state.sessions.pop(); return said + ' / ' + sheet; })()`), 'true / 换账号继续…用的是 Mac a1 的账号，换不了 / false');
   console.log('browser 换账号 off for a Mac one ok');
+  // a conversation's ⋯: 新对话 opens another tab beside it, in its folder on its account (a Mac's: on that Mac, its folder
+  // here); its 换账号继续 off on a Mac; no 新对话 in the 管家's folder (the newest there is the 管家)
+  assert.equal(await evaluate(`(async () => {
+    const g = focusG, last = () => [...document.querySelectorAll('[data-m]')], pick = (k) => last().filter((b) => b.dataset.m === k).pop(), out = [];
+    const tab = (body, title) => { const c = makeConv(body, title); addConv(g, c); return c; };
+    const menu = (c) => { c.el.querySelector('[data-act="more"]').click(); return ['fresh', 'swap', 'end'].map((k) => pick(k).disabled ? 'off' : 'on').join(','); };
+    const a = tab({ id: 'A' }, 'Test conversation'); await new Promise((ok) => setTimeout(ok, 300));
+    out.push(menu(a)); pick('fresh').click(); const n = g.active; out.push([n !== a, n.dir(), n.acct, n.mac, n.title].join(','));
+    state.sessions.push({ id: 'M', title: 'on Mac', cwd: 'F:/proj', macCwd: '/Users/me/work/proj', acct: -1, mac: 'la-a1', at: Date.now(), pid: null });
+    const m = tab({ id: 'M' }, 'on Mac'); out.push(menu(m), pick('swap').textContent); pick('fresh').click(); const mn = g.active; out.push([mn.mac, mn.dir()].join(','));
+    state.butler = 'C:/test'; out.push(menu(a)); delete state.butler; sheetOff(); $('#cmenu').hidden = true;
+    for (const c of [a, n, m, mn]) closeConv(c); state.sessions.pop();
+    return out.join(' | '); })()`),
+    'on,on,on | true,C:/test,1,,test | on,off,off | 换账号继续…用的是 Mac a1 的账号，换不了 | la-a1,F:/proj | off,on,on');
+  console.log('browser a conversation\'s ⋯ (新对话, 换账号, 结束) ok');
   // a file in a message of yours: a card opening it (its saved name found in the record's text, a Mac's path too), its
   // kind from its ending; the bubble's text as before (停止 compares it); one on its way: a card, no link yet
   assert.equal(await evaluate(`(() => { const raw = '看看这个\\n附件：/Users/me/work/.uploads/20261113T081500-a1b2c3-全文-中文-v16.pdf';

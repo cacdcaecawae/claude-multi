@@ -824,8 +824,9 @@ const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path
   list: '<path d="M4 7h16M4 12h16M4 17h16"/>', clip: '<path d="M20.5 11.2l-8 8a5.2 5.2 0 0 1-7.4-7.4l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.6 1.6 0 0 1-2.3-2.3l7.8-7.8"/>',
   auto: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>', light: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
   dark: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>', find: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>', plus: '<path d="M12 5v14M5 12h14"/>', refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
-  swap: '<path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/>', send: '<path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/>', stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>', end: '<path d="M12 4v7M7.4 6.6a7 7 0 1 0 9.2 0"/>',
+  send: '<path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/>', stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>',
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  more: '<circle cx="6" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/>',
   folder: '<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H19a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
   folderOpen: '<path d="M3.5 18V7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H18a1.5 1.5 0 0 1 1.5 1.5v1.5"/><path d="M3.5 18l2.6-6.4a1 1 0 0 1 .9-.6h14l-2.7 6.4a1 1 0 0 1-.9.6z"/>' };
 // an account's mark, n from 1: its number in a ring, the ring as full as its 5-hour window has left, dashed while unread.
@@ -1140,18 +1141,35 @@ function rowMenu(id, x, y) {
   // A GPT 聊天 one: renamed and deleted here, at any time (an answer on its way is stopped)
   const items = (s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
     ['del', '归档…', s.pid && '正在运行：先结束对话再归档']] : [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
-    ['swap', '换账号继续…', s.mac && `用的是 ${macName(s.mac)} 的账号，换不了`], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean)
-    .map(([k, l, off]) => `<button data-m="${k}"${off ? ' disabled' : ''}>${l}${off ? `<small>${esc(off)}</small>` : ''}</button>`).join('');
-  if (NARROW.matches) { $('#sheetIn').innerHTML = `<div class="stitle">${esc(s.title)}</div><div class="mlist">${items}</div>`; $('#sheetIn').onclick = menuPick; return $('#sheet').classList.add('on'); }
+    ['swap', '换账号继续…', s.mac && `用的是 ${macName(s.mac)} 的账号，换不了`], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean);
+  popMenu(s.title, items, x, y);
+}
+// [key, words, why it's off (or a note under it, note: true)] at x, y; a phone: a sheet
+function popMenu(title, list, x, y) {
+  const items = list.map(([k, l, off, note]) => `<button data-m="${k}"${off && !note ? ' disabled' : ''}>${l}${off ? `<small>${esc(off)}</small>` : ''}</button>`).join('');
+  if (NARROW.matches) { $('#sheetIn').innerHTML = `<div class="stitle">${esc(title)}</div><div class="mlist">${items}</div>`; $('#sheetIn').onclick = menuPick; return $('#sheet').classList.add('on'); }
   const m = $('#cmenu');
   m.innerHTML = items; m.hidden = false;
-  m.style.left = `${Math.min(x, innerWidth - m.offsetWidth - 8)}px`; m.style.top = `${Math.min(y, innerHeight - m.offsetHeight - 8)}px`;
+  m.style.left = `${Math.max(8, Math.min(x, innerWidth - m.offsetWidth - 8))}px`; m.style.top = `${Math.min(y, innerHeight - m.offsetHeight - 8)}px`;
+}
+// a conversation's ⋯: 新对话 (beside it, its folder and account), 换账号继续, 结束对话. Not a new one in the 管家's
+// folder: the newest one there is the 管家
+function paneMenu(c, b) {
+  const mac = c.mac || state?.sessions.find((x) => x.id === c.id)?.mac, cwd = c.dir(), r = b.getBoundingClientRect();
+  menuFor = { pane: c };
+  popMenu(c.title, [
+    ['fresh', '新对话', isButler({ cwd }) ? '管家的文件夹里不开新对话' : !cwd && !mac ? '不知道它的文件夹' : `在 ${base(cwd) || macName(mac)} 里，用${mac ? ` ${macName(mac)} 的账号` : c.gpt ? ` G${c.acct ?? '?'}` : `账号 ${c.acct ?? '?'}`}`, !isButler({ cwd }) && (cwd || mac)],
+    ['swap', '换账号继续…', c.gpt ? 'GPT 对话不能换账号' : mac && `用的是 ${macName(mac)} 的账号，换不了`],
+    ['end', '结束对话', !c.where() && '没有在运行'],
+  ], r.left, r.bottom + 4);
+  if (!NARROW.matches) $('#cmenu').style.left = `${Math.max(8, r.right - $('#cmenu').offsetWidth)}px`; // its right edge under the ⋯
 }
 async function menuPick(e) {
   const b = e.target.closest('[data-m]'), s = menuFor;
   if (!b || b.disabled || !s) return;
   $('#cmenu').hidden = true; sheetOff();
   const k = b.dataset.m;
+  if (s.pane) return k === 'fresh' ? s.pane.fresh() : k === 'swap' ? s.pane.swap() : s.pane.end();
   if (k === 'aside') return openSession(s.id, 'aside');
   if (k === 'swap') return swapFrom(s);
   if (k === 'rename') {
@@ -2005,8 +2023,7 @@ function makeConv(body, title) {
   el.className = 'pane hist';
   el.innerHTML = `<div class="crumbs"><span class="path"></span>
       <div class="seg"><button data-v="hist" class="on">对话</button><button data-v="term">终端</button></div>
-      ${c.mac ? '' : `<button class="ico" data-act="swap" title="换账号继续">${svg(I.swap, 1.8)}</button>`}
-      <button class="ico" data-act="end" title="结束对话（Ctrl+C）">${svg(I.end, 1.8)}</button></div>
+      <button class="ico" data-act="more" title="新对话、换账号继续、结束对话">${svg(I.more, 1.8)}</button></div>
     <div class="notice"><span></span><button class="btn primary" data-act="resume">接着聊</button></div>
     <div class="screen"></div><div class="msgs"></div>
     <div class="keys">${KEYS.map(([l], i) => `<button data-kb="${i}">${l}</button>`).join('')}</div>${SEND_BOX()}`;
@@ -2232,9 +2249,8 @@ function makeConv(body, title) {
     if (d.unatt) { atts.splice(+d.unatt, 1); drawAtts(); }
     else if (d.v) setView(d.v);
     else if (d.kb) input(KEYS[+d.kb][1]);
-    else if (d.act === 'swap') swap();
+    else if (d.act === 'more') paneMenu(c, b);
     else if (d.act === 'bset') bset(b);
-    else if (d.act === 'end') endIt();
     else if (d.act === 'resume') { if (c.id) resume(); else start(); } // a new one that never got a record: started again in its folder
     else if (d.key === 'next' || d.key === 'prev') { // several questions: the next or the one before (out of 「Type something」 first: there ← → move in the words)
       if (typeNow) input('\x1b[A');
@@ -2663,7 +2679,15 @@ function makeConv(body, title) {
   // fails later puts them back in this box, as for one typed here
   c.say = (text) => send(text);
   c.close = () => { c.closed = true; c.sleep(); ro.disconnect(); clearTimeout(liveT); clearTimeout(fitT); term?.dispose(); term = null; key = null; switching = 0; el.remove(); };
-  c.claim = claim; c.swap = swap;
+  c.claim = claim; c.swap = swap; c.end = endIt;
+  // ⋯'s 新对话: another one beside it, in its folder, on its account (a Mac's: that Mac, its folder here if it has one)
+  c.dir = () => (c.id && state?.sessions.find((x) => x.id === c.id)?.cwd) || body.dir || '';
+  c.fresh = () => {
+    const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null, cwd = c.dir(), mac = c.mac || s?.mac;
+    const n = mac ? makeConv({ mac, open: true, ...(cwd && !cwd.startsWith('/') && { dir: cwd }) }, base(cwd) || macName(mac))
+      : makeConv({ dir: cwd, acct: c.acct ?? (s ? s.acct + 1 : 1), gpt: c.gpt }, base(cwd) || '新对话');
+    addConv(c.g, n);
+  };
   c.where = () => (key && !c.ended ? kind : null); // 'pc' a window on the computer, 'pty' the web service
   c.focus = () => { if (view === 'hist') line.focus({ preventScroll: true }); else term?.focus(); };
   c.back = () => { if (shown && key) { if (stale(25000)) connect(true); else claim(); } }; // back to this screen after a while: the stream likely died meanwhile
