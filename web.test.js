@@ -246,7 +246,7 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate(`(() => {
     tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }], days: [], total: 3, usd: 0, today: '2000-01-02' }; renderTokens();
     const h = [...document.querySelectorAll('#view .cardHead')];
-    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg path[d^="M6.5 4h11"]') ? '+laptop' : x.querySelector('.mk svg') ? '+apple' : '')).join(' | '); })()`),
+    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg path[d^="M5.5 3h13"]') ? '+laptop' : x.querySelector('.mk svg') ? '+apple' : '')).join(' | '); })()`),
     '账号 1 | Mac mini+apple | Mac a1+laptop');
   console.log('browser 用量 Mac mini and a MacBook ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {

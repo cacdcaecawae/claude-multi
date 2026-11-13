@@ -519,8 +519,8 @@ $PAY = @{
   google_play_subscription = @('Google Play 订阅', 'M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z')
   stripe_subscription = $BANK_CARD; stripe_subscription_contracted = $BANK_CARD
 }
-# a MacBook's mark (a Mac entry with icon laptop), as the page draws it: a laptop, its screen open (F0: the screen a hole)
-$LAPTOP = 'F0 M6.5 4h11A1.5 1.5 0 0 1 19 5.5V15H5V5.5A1.5 1.5 0 0 1 6.5 4zM6.8 5.8v7.4h10.4V5.8zM1.5 16h21l-.7 1.9a1.6 1.6 0 0 1-1.5 1.1H3.7a1.6 1.6 0 0 1-1.5-1.1z'
+# a MacBook's mark (a Mac entry with icon laptop), as the page draws it: a laptop, Apple's mark on its screen (F0: the screen a hole, the mark in it)
+$LAPTOP = 'F0 M5.5 3h13A1.5 1.5 0 0 1 20 4.5V15.5H4V4.5A1.5 1.5 0 0 1 5.5 3zM5.5 4.5v9.5h13V4.5zM1 16.5h22l-.6 1.7a1.5 1.5 0 0 1-1.4 1H3a1.5 1.5 0 0 1-1.4-1zM12.224 7.629c-0.3 0 -0.763 -0.341 -1.251 -0.329c-0.645 0.009 -1.236 0.374 -1.568 0.952c-0.669 1.161 -0.173 2.877 0.48 3.821c0.32 0.459 0.698 0.976 1.198 0.96c0.48 -0.021 0.66 -0.312 1.243 -0.312c0.579 0 0.743 0.312 1.251 0.3c0.517 -0.008 0.846 -0.468 1.162 -0.932c0.365 -0.533 0.517 -1.051 0.525 -1.079c-0.012 -0.004 -1.006 -0.386 -1.018 -1.535c-0.008 -0.961 0.784 -1.42 0.821 -1.441c-0.452 -0.66 -1.145 -0.734 -1.387 -0.751c-0.632 -0.049 -1.161 0.344 -1.457 0.344zM13.291 6.66c0.266 -0.32 0.442 -0.767 0.393 -1.21c-0.381 0.016 -0.841 0.254 -1.116 0.575c-0.246 0.283 -0.459 0.739 -0.402 1.174c0.423 0.033 0.858 -0.217 1.125 -0.538'
 # An account at its limit while conversations run on it: one notice (per account, until it's off its limit again) that
 # they wait for the reset; a click opens the running ones, each with 换账号继续. Nothing switches by itself.
 $script:limitTold = @{}
