@@ -12,13 +12,15 @@ const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
-let histHang = false; // the next history read never answered (a phone's request left hanging)
+let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
 let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
+const histReads = []; // when each history read came
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/open') opens++;
-  if (url.pathname === '/api/history' && histHang) { histHang = false; return; } // left open, never answered
+  if (url.pathname === '/api/history') histReads.push(Date.now());
+  if (url.pathname === '/api/history' && histHang) { histHang = false; hung = res; return; } // left open, never answered
   if (url.pathname === '/api/project') { // 项目, kept as the service keeps them
     let b = ''; req.on('data', (d) => (b += d));
     return req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(require('./claude-multi').projectOp(state.projects ??= [], JSON.parse(b)))); });
@@ -366,18 +368,26 @@ const press = async (key, shift = false) => {
       const shown = !!c.el.querySelector('.hm.claude'); closeConv(c); return shown;
     } finally { AbortSignal.timeout = real; } })()`), true);
   assert.equal(histHang, false); // the hanging read did come
+  hung?.destroy(); hung = null; // (not left for the next test's reads)
   console.log('browser a hanging history read given up ok');
-  // the screen done before the record brings the answer (a Mac's comes 1–3 s later): 正在取回答… till it does
+  // the screen done before the record brings the answer (a Mac's comes a second or two later): the record read every
+  // ~0.3 s till it's in (the 1 s reads alone would make it wait), then back to every second
   termBusy = true; histFeed = [];
   await evaluate("window.hw = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, hw)");
   await until("hw.live === 'busy'");
   termBusy = false; // its stream opened again (as a page back from the background), the screen done
+  const reads = () => histReads.filter((t) => t > Date.now() - 1500).length;
   await evaluate("(() => { const real = Date.now; hw.sync(); try { Date.now = () => real() + 21000; hw.sync(); } finally { Date.now = real; } })()");
-  await until("hw.el.querySelector('.live')?.textContent.includes('正在取回答')");
+  await new Promise((ok) => setTimeout(ok, 1500));
+  assert.ok(reads() >= 4, `record read ${reads()} times in 1.5 s while the answer was awaited`);
   histFeed.push({ role: 'claude', text: '回答到了' });
-  await until("!!hw.el.querySelector('.hm.claude')?.textContent.includes('回答到了') && !hw.el.querySelector('.live').textContent.includes('正在取回答')");
+  await until("!!hw.el.querySelector('.hm.claude')?.textContent.includes('回答到了')");
+  await new Promise((ok) => setTimeout(ok, 500)); // (a quick read already on its way may still come)
+  const t0 = Date.now(); await new Promise((ok) => setTimeout(ok, 1500));
+  const after = histReads.filter((t) => t >= t0).length;
+  assert.ok(after <= 2, `record still read ${after} times in 1.5 s once the answer was in`);
   await evaluate('closeConv(hw)'); histFeed = null;
-  console.log('browser 正在取回答 till the record has it ok');
+  console.log('browser an answer fetched at once once its screen is done ok');
   // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
   assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
     a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);

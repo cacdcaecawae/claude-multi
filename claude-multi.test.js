@@ -1228,7 +1228,7 @@ if (SESSION0) {
       let session = { id: c.id }, conversationGen = 0, key = 'terminal', kind = 'pc', ptySize = null, mine = null, q = Promise.resolve();
       let atts = [], sending = false, stops = 0, lastSent = null, sent = [], liveHtml = '', typing = null, typeOpt = new Map();
       let menuNow = false, typeNow = false, typeTick = false, busyNow = false, view = 'hist', question = false;
-      let histNow = false, histEnd = null, histOldest = null, histGen = 0, nextId = 'A', unseen = false;
+      let histNow = false, histEnd = null, histOldest = null, histGen = 0, nextId = 'A', unseen = false, gotAt = 0, waitAns = 0, waitT = 0;
       const line = { value: '', style: {}, scrollHeight: 0 }, go = { dataset: {} }, messages = [], writes = [];
       const hist = { innerHTML: '', scrollHeight: 1000, scrollTop: 0, clientHeight: 100 };
       const localStorage = { setItem: (k,v) => store.set(k,v), getItem: k => store.get(k) ?? null, removeItem: k => store.delete(k) };

@@ -752,12 +752,12 @@ while True:
     live.sort(key=lambda j: j['pid'])
     if live != live_was: out({'live': live}); live_was = live
     beat += 1
-    if beat >= 15: out({'hb': 1}); beat = 0
+    if beat >= 50: out({'hb': 1}); beat = 0 # ~15 s
     if time.time() - sys_at >= 5:
         sys_at = time.time()
         try: out({'sys': sysnow()})
         except Exception: pass
-    if not more: time.sleep(1)
+    if not more: time.sleep(0.3) # an answer here within a second of its end (the page waits on it)
 `;
 // A file ConvertFrom-SecureString wrote (DPAPI, this Windows user, as hex) read back by .NET alone, no PowerShell module:
 // a 预热 started by the web service once found ConvertTo-SecureString's module failing to load ("The member AuditToString
