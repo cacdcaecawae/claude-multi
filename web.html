@@ -1166,12 +1166,14 @@ function popMenu(title, list, x, y) {
   m.style.left = `${Math.max(8, Math.min(x, innerWidth - m.offsetWidth - 8))}px`; m.style.top = `${Math.min(y, innerHeight - m.offsetHeight - 8)}px`;
 }
 // a conversation's ⋯: 新对话 (beside it, its folder and account), 换账号继续, 结束对话. Not a new one in the 管家's
-// folder: the newest one there is the 管家
+// folder (the newest one there is the 管家), nor from one looked at in 管家 mode (no tabs there to put it in)
 function paneMenu(c, b) {
   const mac = c.mac || state?.sessions.find((x) => x.id === c.id)?.mac, cwd = c.dir(), r = b.getBoundingClientRect();
+  const off = isButler({ cwd }) ? '管家的文件夹里不开新对话' : !c.g ? '在管家里看的对话：回到对话列表再开' : !cwd && !mac ? '不知道它的文件夹' : '';
+  const where = !mac ? `在 ${base(cwd)} 里，用${c.gpt ? ' G' : '账号 '}${c.acct ?? '?'}` : cwd && !cwd.startsWith('/') ? `在 ${base(cwd)} 里，用 ${macName(mac)} 的账号` : `在 ${macName(mac)} 的工作文件夹里`;
   menuFor = { pane: c };
   popMenu(c.title, [
-    ['fresh', '新对话', isButler({ cwd }) ? '管家的文件夹里不开新对话' : !cwd && !mac ? '不知道它的文件夹' : `在 ${base(cwd) || macName(mac)} 里，用${mac ? ` ${macName(mac)} 的账号` : c.gpt ? ` G${c.acct ?? '?'}` : `账号 ${c.acct ?? '?'}`}`, !isButler({ cwd }) && (cwd || mac)],
+    ['fresh', '新对话', off || where, !off],
     ['swap', '换账号继续…', c.gpt ? 'GPT 对话不能换账号' : mac && `用的是 ${macName(mac)} 的账号，换不了`],
     ['end', '结束对话', !c.where() && '没有在运行'],
   ], r.left, r.bottom + 4);
@@ -2720,8 +2722,8 @@ function makeConv(body, title) {
   // ⋯'s 新对话: another one beside it, in its folder, on its account (a Mac's: that Mac, its folder here if it has one)
   c.dir = () => (c.id && state?.sessions.find((x) => x.id === c.id)?.cwd) || body.dir || '';
   c.fresh = () => {
-    const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null, cwd = c.dir(), mac = c.mac || s?.mac;
-    const n = mac ? makeConv({ mac, open: true, ...(cwd && !cwd.startsWith('/') && { dir: cwd }) }, base(cwd) || macName(mac))
+    const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null, cwd = c.dir(), mac = c.mac || s?.mac, here = cwd && !cwd.startsWith('/');
+    const n = mac ? makeConv({ mac, open: true, ...(here && { dir: cwd }) }, here ? base(cwd) : macName(mac)) // not for a folder here: the Mac's own folder
       : makeConv({ dir: cwd, acct: c.acct ?? (s ? s.acct + 1 : 1), gpt: c.gpt }, base(cwd) || '新对话');
     n.joins = (state?.projects ?? []).filter((p) => c.id && p.ids.includes(c.id)).map((p) => p.id); // added once it has a record
     addConv(c.g, n);

@@ -271,9 +271,13 @@ const press = async (key, shift = false) => {
     state.sessions.push({ id: 'M', title: 'on Mac', cwd: 'F:/proj', macCwd: '/Users/me/work/proj', acct: -1, mac: 'la-a1', at: Date.now(), pid: null });
     const m = tab({ id: 'M' }, 'on Mac'); out.push(menu(m), pick('swap').textContent); pick('fresh').click(); const mn = g.active; out.push([mn.mac, mn.dir()].join(','));
     state.butler = 'C:/test'; out.push(menu(a)); delete state.butler; sheetOff(); $('#cmenu').hidden = true;
+    // one looked at in 管家 mode (in no group of tabs): none; a Mac's in no folder here: in the Mac's own, said so
+    const p = makeConv({ id: 'A' }, 'peeked'); paneMenu(p, p.el.querySelector('[data-act="more"]')); out.push(pick('fresh').textContent); p.close();
+    state.sessions.at(-1).cwd = '/Users/me/work'; out.push(menu(m).split(',')[0] + pick('fresh').textContent); sheetOff(); $('#cmenu').hidden = true;
     for (const c of [a, n, m, mn]) closeConv(c); state.sessions.pop();
     return out.join(' | '); })()`),
-    'on,on,on | true,C:/test,1,,test | on,off,off | 换账号继续…用的是 Mac a1 的账号，换不了 | la-a1,F:/proj | off,on,on');
+    'on,on,on | true,C:/test,1,,test | on,off,off | 换账号继续…用的是 Mac a1 的账号，换不了 | la-a1,F:/proj | off,on,on'
+    + ' | 新对话在管家里看的对话：回到对话列表再开 | on新对话在 Mac a1 的工作文件夹里');
   console.log('browser a conversation\'s ⋯ (新对话, 换账号, 结束) ok');
   // 项目: the grid lists yours (a conversation from any folder; one no longer listed skipped); its ＋ offers those not in it
   // and adds the one picked; a row's menu there takes one out; ⋯'s 新对话 from one in a 项目 joins it
