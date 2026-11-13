@@ -2602,15 +2602,18 @@ function saveUpload(data, ext, dir = UPLOADS, name = null) {
 // A file sent in a conversation, opened from the page (/api/file?n=its saved name here): its name as sent, and how the
 // browser gets it. A PDF, a picture or plain text is shown (text and pictures sandboxed); anything else is downloaded:
 // never shown as one of the page's own kind (HTML, SVG), which would run as this page with its key. null: not one of ours.
+// Where it is: the uploads, or a GPT 聊天's own folder (its files go there once sent; the saved name stays unique)
 const UPLOAD_NAME = /^(\d{8}T\d{6}-[0-9a-f]{6})-([^\\/]+)$/;
 const TEXT_EXT = new Set(['txt', 'md', 'csv', 'tsv', 'log', 'json', 'yaml', 'yml', 'ini', 'toml', 'tex', 'bib', 'py', 'js', 'ts', 'm', 'c', 'h', 'cpp', 'hpp', 'java', 'rs', 'go', 'sh', 'ps1']);
-function fileServed(n) {
+function fileServed(n, up = UPLOADS, oai = OAI) {
   const m = UPLOAD_NAME.exec(n ?? '');
   if (!m) return null;
   const name = m[2], ext = path.extname(name).slice(1).toLowerCase();
   const type = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[ext]
     ?? (TEXT_EXT.has(ext) ? 'text/plain; charset=utf-8' : null);
-  return { name, file: path.join(UPLOADS, n), headers: { 'content-type': type ?? 'application/octet-stream', 'x-content-type-options': 'nosniff',
+  let chats = []; try { chats = fs.readdirSync(oai); } catch {}
+  const file = [path.join(up, n), ...chats.map((d) => path.join(oai, d, n))].find((p) => fs.existsSync(p)) ?? path.join(up, n);
+  return { name, file, headers: { 'content-type': type ?? 'application/octet-stream', 'x-content-type-options': 'nosniff',
     'content-disposition': `${type ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`, 'cache-control': 'private, max-age=86400',
     ...(type && ext !== 'pdf' && { 'content-security-policy': 'sandbox' }) } }; // (a sandboxed PDF gets no viewer)
 }

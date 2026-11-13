@@ -11,8 +11,10 @@ const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title
   notes: [], gpt: [], oai: true, tickets: [], waits: [], usage: { accounts: [{ label: 'test', windows: [], runway: 2 }], rec: 0, open: true, projects: [] } };
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
+let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/api/open') opens++;
   if (url.pathname === '/api/project') { // 项目, kept as the service keeps them
     let b = ''; req.on('data', (d) => (b += d));
     return req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(require('./claude-multi').projectOp(state.projects ??= [], JSON.parse(b)))); });
@@ -31,6 +33,7 @@ const server = http.createServer((req, res) => {
     // Claude Code's copies (OSC 52): one in the output sent again on connecting, one live after it
     const osc = (t) => `event: data\ndata: ${JSON.stringify(`x\x1b]52;c;${Buffer.from(t).toString('base64')}\x07y`)}\n\n`;
     res.write(osc('旧的复制'));
+    if (termBusy) res.write(`event: data\ndata: ${JSON.stringify('\r\n✻ Thinking… (3s · esc to interrupt)\r\n')}\n\n`);
     setTimeout(() => res.write(osc('终端里复制的中文')), 300);
     return;
   }
@@ -303,6 +306,24 @@ const press = async (key, shift = false) => {
     return [a.className, a.dataset.ext, a.getAttribute('href'), d.textContent.replace(/\\s+/g, ''), !!p.querySelector('span.att.doc'), !p.querySelector('a')].join(' | '); })()`),
     'att pdf | PDF | /api/file?n=20261113T081500-a1b2c3-%E5%85%A8%E6%96%87-%E4%B8%AD%E6%96%87-v16.pdf | 看看这个附件：全文-中文-v16.pdf | true | true');
   console.log('browser 附件 cards ok');
+  // a picture waiting in the box: just the picture, not a message's card with its kind's square
+  assert.equal(await evaluate(`(() => { const d = document.createElement('div'); d.className = 'send';
+    d.innerHTML = '<div class="atts"><div class="att"><img alt=""></div></div>'; document.body.append(d);
+    const b = getComputedStyle(d.querySelector('.att'), '::before').content; d.remove(); return b; })()`), 'none');
+  console.log('browser box attachments without a card ok');
+  // a stream that fell behind (the end of an answer never came): its screen says answering, the service has had it
+  // idle 20 s: opened again once, the screen rebuilt, answering no more
+  termBusy = true;
+  await evaluate("window.hc = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, hc)");
+  await until("hc.live === 'busy'");
+  termBusy = false; const before = opens;
+  assert.equal(await evaluate(`(async () => { const real = Date.now; hc.sync();
+    try { Date.now = () => real() + 21000; hc.sync(); } finally { Date.now = real; }
+    for (let i = 0; i < 60 && hc.live === 'busy'; i++) await new Promise((ok) => setTimeout(ok, 100));
+    return hc.live; })()`), '');
+  assert.equal(opens - before, 1);
+  await evaluate('closeConv(hc)');
+  console.log('browser a stream behind reopened ok');
   // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
   assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
     a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);

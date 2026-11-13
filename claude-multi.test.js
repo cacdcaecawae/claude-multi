@@ -1529,6 +1529,13 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   for (const bad of ['../x.pdf', 'x.pdf', '20261113T081500-a1b2c3-../x.pdf', String.raw`20261113T081500-a1b2c3-a\b.pdf`, '20261113T081500-zzzzzz-a.pdf', '']) assert.equal(fileServed(bad), null, bad);
   const at = fileServed('20261113T081500-a1b2c3-a.pdf').file;
   assert.ok(at.endsWith(require('path').join('uploads', '20261113T081500-a1b2c3-a.pdf')), at);
+  // one sent in a GPT 聊天: moved into that chat's folder, found there by its saved name
+  const fs = require('fs'), path = require('path'), os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-files-'));
+  const up = path.join(tmp, 'uploads'), oai = path.join(tmp, 'oai'), n = '20261113T060145-8c06a5-全文-v16.pdf';
+  fs.mkdirSync(up); fs.mkdirSync(path.join(oai, 'oai-1'), { recursive: true }); fs.writeFileSync(path.join(oai, 'oai-1.json'), '{}'); fs.writeFileSync(path.join(oai, 'oai-1', n), 'x');
+  assert.equal(fileServed(n, up, oai).file, path.join(oai, 'oai-1', n));
+  assert.equal(fileServed('20261113T060145-8c06a5-gone.pdf', up, oai).file, path.join(up, '20261113T060145-8c06a5-gone.pdf')); // nowhere: the uploads (not there: 不在了)
+  fs.rmSync(tmp, { recursive: true, force: true });
   console.log('files opened ok');
 }
 // 项目: made, renamed (names unique), conversations added from anywhere (each once) and taken out; dropped, its
