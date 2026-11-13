@@ -72,3 +72,13 @@ $mark = X "<Path $ns Data='$($PAY.apple_subscription[1])' Width='14' Height='14'
 $st = $mark.Fill.GradientStops
 if ($st.Count -ne 12 -or "$($st[0].Color)" -ne '#FF61BB46' -or "$($st[11].Color)" -ne '#FF009DDC' -or $st[1].Offset -ne $st[2].Offset) { throw 'The rainbow mark is not six hard bands' }
 Write-Output 'island mac marks ok'
+# the conversation list: the GPT API chats (oai) left out (nothing here opens them), a list whatever the count
+function Run-Node($cmd, $cb) { & $cb $script:fakeOut }
+function Render-Chats {}
+$node = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Load-Chats' }, $true)
+. ([scriptblock]::Create($node.Extent.Text))
+$script:fakeOut = '[{"id":"a","cwd":"C:/x","acct":0},{"id":"oai-1","cwd":"","acct":-1,"oai":true}]'; Load-Chats
+if (@($script:chats).Count -ne 1 -or @($script:chats)[0].id -ne 'a') { throw 'Load-Chats kept a GPT chat' }
+$script:fakeOut = '[{"id":"oai-1","cwd":"","acct":-1,"oai":true}]'; Load-Chats
+if (-not ($script:chats -is [array]) -or $script:chats.Count -ne 0) { throw 'Load-Chats left no list when none remained' }
+Write-Output 'island chats without GPT chats ok'

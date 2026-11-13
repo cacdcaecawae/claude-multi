@@ -1628,7 +1628,7 @@ async function chatLook(ref) {
   const st = live ? statusOf(live) : null, menu = st === 'waiting' ? (await screenOf(s.id))?.menu : null;
   const ans = history(s.file).items.filter((m) => m.role === 'claude').pop()?.text ?? '（还没有回答）';
   const where = !s.pid ? '没在运行' : { busy: '正在回复', shell: '正在执行命令', waiting: '在等人回答', idle: '空闲' }[st] ?? '在运行';
-  let out = `「${s.title}」 ${s.id}\n账号 ${s.acct + 1} · ${s.cwd} · ${s.pid ? (s.web ? '网页上 · ' : '电脑窗口里 · ') : ''}${where}\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}`;
+  let out = `「${s.title}」 ${s.id}\n${s.mac ? s.who : `账号 ${s.acct + 1}`} · ${s.cwd} ·${s.pid ? (s.web ? '网页上 · ' : '电脑窗口里 · ') : ''}${where}\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}`;
   if (menu) out += `\n\n它在问${menu.tabs ? `（一次好几题：${menu.tabs}）` : ''}：\n${menu.ask}\n`
     + menu.opts.map((o) => `  ${o.n}. ${o.check == null ? '' : o.check ? '[✔] ' : '[ ] '}${o.label}${o.desc ? ' — ' + o.desc : ''}${o.n === menu.cur ? '  ← 光标在这' : ''}`).join('\n')
     + `\n（用户交代过怎么选的，用 claude-multi chat pick ${s.id} <选项号> 回答；没交代就转告用户）`;
@@ -1651,6 +1651,8 @@ async function chatSay(ref, text, before, ask) { // ask: a GPT 聊天 one's mode
   if (!text) throw new Error('要说什么？');
   const s = findChat(ref), t0 = Date.now();
   if (s.oai) return oaiSay(s, text, ask);
+  // its Claude runs there: one started for it here would never be found (waitLive reads this PC's accounts)
+  if (s.mac) throw new Error('Mac 上的对话管家还发不了消息，请用户在网页上打开它');
   if (s.gpt) { // a GPT one: its Codex in the web service (continued there if it isn't), up, and done with its turn first
     const { key } = await webPost('/api/open', { id: s.id, gpt: true, cols: 120, rows: 40 });
     const stuck = codexBlocked(await screenRows(key, { max: 20000, still: 1500 }));
@@ -1840,6 +1842,7 @@ function del(id) {
   if (s.mac) { // a Mac's: its record (and its folder, if any) into that Mac's Trash, over ssh (tried again on a drop); the copy here goes too
     const m = macOf(s.mac, reg), folder = path.basename(path.dirname(s.file));
     if (!m) { console.log('找不到它所在的 Mac'); process.exit(1); }
+    tokenStats(); // its replies counted first, as below: once its copy here goes, nothing has them (the watcher may drop it first)
     const cmd = `d=${m.config ? macSh(m.config) : '~/.claude'}/projects/${folder}; t=~/.Trash/claude-${id}; `
       + `mkdir -p "$t" && mv "$d/${id}.jsonl" "$t/" && { [ ! -d "$d/${id}" ] || mv "$d/${id}" "$t/"; }`;
     let r;
@@ -2401,7 +2404,7 @@ const WEB_KEY = path.join(ROOT, 'web-key');
 function webKey(fresh = false) { // made on first use; in the user's own folder, as each account's login is
   if (!fresh) try { const k = fs.readFileSync(WEB_KEY, 'utf8').trim(); if (k.length >= 32) return k; } catch {}
   const k = require('crypto').randomBytes(32).toString('base64url');
-  fs.writeFileSync(WEB_KEY, k);
+  fs.writeFileSync(`${WEB_KEY}.tmp`, k); fs.renameSync(`${WEB_KEY}.tmp`, WEB_KEY); // whole: a reader meanwhile never sees it empty (and makes its own)
   return k;
 }
 // true when given (from the link or the cookie) is the key; in constant time
@@ -2658,7 +2661,7 @@ function lead(items, lines, more = false) { // more: the record goes back furthe
 // for) and the subscriptions. What's pushed is encrypted for the phone alone (aes128gcm, RFC 8291).
 const PUSH = path.join(ROOT, 'push.json');
 const pushStore = () => { try { return JSON.parse(fs.readFileSync(PUSH, 'utf8')); } catch { return null; } };
-const savePush = (s) => fs.writeFileSync(PUSH, JSON.stringify(s));
+const savePush = (s) => { fs.writeFileSync(`${PUSH}.tmp`, JSON.stringify(s)); fs.renameSync(`${PUSH}.tmp`, PUSH); }; // whole: one cut short would read as none, and a new key drop every phone's subscription
 function pushKeys() { // made on first use
   const s = pushStore();
   if (s) return s;
@@ -3284,7 +3287,8 @@ async function web() {
   const api = {
     // the questions other conversations wait on, as their screens show them (管家 mode has them as cards): each read again
     // 3 s after the last read at most, one read for every page asking
-    'GET /api/asks': async () => Promise.all(sessions().filter((s) => s.wait && s.pid && !(BUTLER && sameDir(s.cwd, BUTLER))).map(async (s) => {
+    // (a Mac's only when it runs in this service: one in a terminal on the Mac can't be read, and asking ssh'd there each time)
+    'GET /api/asks': async () => Promise.all(sessions().filter((s) => s.wait && s.pid && !(BUTLER && sameDir(s.cwd, BUTLER)) && (!s.mac || where(s))).map(async (s) => {
       let a = asks.get(s.id);
       if (!a || Date.now() - a.at > 3000) asks.set(s.id, a = { at: Date.now(), menu: screenOf(s.id).then((r) => r?.menu ?? null, () => null) });
       return { id: s.id, title: s.title, acct: s.acct + 1, menu: await a.menu };

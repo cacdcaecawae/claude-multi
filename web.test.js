@@ -12,6 +12,7 @@ const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
+let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/open') opens++;
@@ -21,11 +22,11 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/api/oai/send') {
     let b = ''; req.on('data', (d) => (b += d));
-    return req.on('end', () => {
+    return req.on('end', () => (oaiHold ?? Promise.resolve()).then(() => { // oaiHold: one still on its way
       oaiSent = JSON.parse(b);
       oai = { items: [{ role: 'user', text: oaiSent.text, at: Date.now() }], busy: true, since: Date.now(), opts: { mode: oaiSent.mode, effort: oaiSent.effort } };
       res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ id: 'oai-1' }));
-    });
+    }));
   }
   if (url.pathname === '/api/term') {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -215,14 +216,28 @@ const press = async (key, shift = false) => {
     [true, '✓ 回复完成 · 用时 1 分 5 秒', '', 'send']);
   await evaluate('closeConv(focusG.active)');
   console.log('browser GPT chat ok');
+  // a GPT 聊天 message on its way stays in the draft (a phone's page dropped meanwhile gets it back); gone once through
+  let release; oaiHold = new Promise((ok) => (release = ok));
+  await evaluate("window.oc = makeOai('oai-1', 'Pro 你好'); addConv(focusG, oc)");
+  await until("!!document.querySelector('.pane.on.oai textarea') && document.querySelector('.pane.on.oai .go').dataset.m === 'send'");
+  await evaluate("(() => { const t = document.querySelector('.pane.on.oai textarea'); t.value = '留着这句'; t.dispatchEvent(new Event('input')); document.querySelector('.pane.on.oai .go').click(); })()");
+  await until("document.querySelector('.pane.on.oai textarea').value === ''");
+  assert.equal(await evaluate("localStorage.getItem('cm-draft:oai-1')"), '留着这句');
+  release(); oaiHold = null;
+  await until("localStorage.getItem('cm-draft:oai-1') === null");
+  await evaluate('closeConv(oc)'); oai = { items: [], busy: false };
+  // a table's cell with math in it: the formula, not its stand-in
+  assert.equal(await evaluate("(() => { const h = md('| 算法 | 复杂度 |\\n|---|---|\\n| 快排 | $O(n \\\\log n)$ |'); return [h.includes('|0|'), /<td>[^|]*katex/.test(h)].join(); })()"), 'false,true');
+  console.log('browser GPT draft kept while sending, math in a table ok');
 
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await evaluate("sideOn=false;drawSide();localStorage.setItem('cm-look','light');look()");
   await new Promise((r) => setTimeout(r, 150));
   // small to the eye (drawn 44 px, they hung off code blocks and stood tall over the conversation), a finger's size to the
-  // touch: a point just past the edge still lands on the button
+  // touch: a point just past the edge still lands on the button (brought into view first: where the history is scrolled
+  // to isn't what's checked, and the first message's button was sometimes above it)
   for (const [selector, past] of [['.hm.claude > .cpy', 7], ['.pane.on .seg button', 4]]) {
-    const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return [r.height,document.elementFromPoint(r.left+r.width/2,r.top-${past})===e]})()`);
+    const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return [r.height,document.elementFromPoint(r.left+r.width/2,r.top-${past})===e]})()`);
     assert.ok(r[0] <= 36 && r[1], selector + ': ' + r);
   }
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);

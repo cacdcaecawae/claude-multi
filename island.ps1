@@ -1106,8 +1106,9 @@ function Load-Chats {
   $script:chatsAt = Get-Date
   Run-Node 'sessions --json --all' { # the GPT ones too (gpt: true; acct, from 0, their G number)
     param($out)
-    # not @(...): PowerShell 5.1 hands back a JSON array as one item, which @() would wrap again
-    try { $script:chats = ConvertFrom-Json $out } catch { $script:chats = @() }
+    # not @(ConvertFrom-Json …): PowerShell 5.1 hands back a JSON array as one item, which @() would wrap again; in
+    # parentheses it's unrolled first. Not the GPT 聊天 ones (oai): no folder nor account, nothing here opens them
+    try { $script:chats = @((ConvertFrom-Json $out) | Where-Object { -not $_.oai }) } catch { $script:chats = @() }
     Render-Chats
   }
 }

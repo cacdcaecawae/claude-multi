@@ -2787,9 +2787,11 @@ function makeOai(id, title) {
     if (go.dataset.m !== m) { go.dataset.m = m; go.innerHTML = svg(I[m], 2); }
     go.title = stop ? '停止（这一条不要了）' : '发送'; go.classList.toggle('stop', stop);
   }
+  let going = ''; // a message on its way: kept in the draft till it's through (a phone's page dropped meanwhile gets it back), as a Claude one's
   const grow = () => { // its height to the words, the draft kept in this browser
     line.style.height = ''; if (line.scrollHeight) line.style.height = Math.min(line.scrollHeight, 200) + 'px';
-    if (c.id) try { if (line.value.trim()) localStorage.setItem('cm-draft:' + c.id, line.value); else localStorage.removeItem('cm-draft:' + c.id); } catch {}
+    const d = [going, line.value.trim()].filter(Boolean).join('\n');
+    if (c.id) try { if (d) localStorage.setItem('cm-draft:' + c.id, d); else localStorage.removeItem('cm-draft:' + c.id); } catch {}
   };
   if (c.id) try { line.value = localStorage.getItem('cm-draft:' + c.id) ?? ''; } catch {}
   line.addEventListener('input', () => { goMode(); grow(); });
@@ -2840,7 +2842,7 @@ function makeOai(id, title) {
     if (sending) { toast('上一条还在发，稍等一下'); return false; }
     if (busy) { toast('GPT 还在回答上一条，答完再发（也可以先停止）', 4000); return false; }
     sending = true;
-    if (text == null) { line.value = ''; atts = []; grow(); drawAtts(); }
+    if (text == null) { going = v; line.value = ''; atts = []; grow(); drawAtts(); }
     $p('.live').innerHTML = files.filter((a) => !a.file).map((a) => `<div class="hm img pending"><img src="${a.url}" alt=""></div>`).join('')
       + files.filter((a) => a.file).map((a) => `<div class="hm user pending">${userBody(`附件：${a.name}`, [], true)}</div>`).join('') + (v ? `<div class="hm user pending">${esc(v)}</div>` : '');
     hist.scrollTop = hist.scrollHeight;
@@ -2855,7 +2857,7 @@ function makeOai(id, title) {
       if (text == null) { line.value = [v, line.value.trim()].filter(Boolean).join('\n'); atts = [...files.filter((a) => !a.failed), ...atts]; grow(); drawAtts(); }
       toast(e.message, 5000);
       return false;
-    } finally { sending = false; goMode(); }
+    } finally { sending = false; if (going) { going = ''; grow(); } goMode(); }
   }
   async function stop() { try { await post('/api/oai/stop', { id: c.id }); } catch (e) { toast(e.message, 4000); } await refresh(); load(); }
   go.onclick = () => (go.classList.contains('stop') ? stop() : send());
@@ -3003,7 +3005,7 @@ async function upload(blob, mac) { // to the computer: where it was saved there
 // cells wrapping to the width as Claude Code's terminal draws it: rows of | cells |, the |---| line under the header
 // (a \| in a cell is a |). Lines of | without that line aren't a table: kept as they are, monospace.
 const table = (rows) => {
-  const cells = rows.trim().split('\n').map((r) => r.trim().replace(/^\||\|$/g, '').replace(/\\\|/g, '\0').split('|').map((c) => c.trim().replace(/\0/g, '|')));
+  const cells = rows.trim().split('\n').map((r) => r.trim().replace(/^\||\|$/g, '').replace(/\\\|/g, '\x01').split('|').map((c) => c.trim().replace(/\x01/g, '|'))); // not \0: math's stand-in
   if (!cells[1]?.every((c) => /^:?-+:?$/.test(c))) return `<div class="mono">${rows}</div>`;
   const [head] = cells.splice(0, 2);
   return `<div class="tbl"><table><thead><tr>${head.map((c) => `<th>${c}</th>`).join('')}</tr></thead>`
