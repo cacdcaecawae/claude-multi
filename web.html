@@ -350,7 +350,6 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .desk .item[data-open] { cursor: pointer; }
   .desk .item .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .desk .item .mk { margin: 0; }
-  .desk .item .pt { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #d97757; }
   .desk .counts { display: flex; gap: 6px; padding: 0 6px 6px; }
   .desk .counts span { flex: 1; text-align: center; padding: 4px 0; border-radius: 6px; background: var(--tint); font-size: 11px; color: var(--fg2); }
   .desk .counts b { display: block; font-size: 14px; color: var(--fgHi); }
@@ -2991,19 +2990,16 @@ async function shrink(f) {
   const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(b, 0, 0, cv.width, cv.height);
   return new Promise((ok) => cv.toBlob(ok, 'image/jpeg', 0.9));
 }
-// mac: for a conversation on the Mac mini, copied on there: its path there
-async function sendFile(f, mac) { // a file as it is, its name kept (Claude reads it by its path): where it was saved
-  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-name': encodeURIComponent(f.name), ...(mac && { 'x-mac': mac === true ? '1' : mac }) }, body: f });
-  const j = await r.json().catch(() => ({ err: r.status === 413 ? '文件太大了（最大 20 MB）' : `出错了（${r.status}）` }));
+// to the computer, where it was saved (mac: for a conversation on a Mac, copied on there: its path there). A picture as
+// its type; any other file as it is, its name kept (Claude reads it by its path)
+async function upload(blob, mac, name) {
+  const r = await fetch('/api/upload', { method: 'POST', body: blob,
+    headers: { 'content-type': name ? 'application/octet-stream' : blob.type, ...(name && { 'x-name': encodeURIComponent(name) }), ...(mac && { 'x-mac': mac === true ? '1' : mac }) } });
+  const j = await r.json().catch(() => ({ err: r.status === 413 ? (name ? '文件太大了（最大 20 MB）' : '图片太大了') : `出错了（${r.status}）` }));
   if (!r.ok) throw new Error(j.err || r.status);
   return j.path;
 }
-async function upload(blob, mac) { // to the computer: where it was saved there
-  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': blob.type, ...(mac && { 'x-mac': mac === true ? '1' : mac }) }, body: blob });
-  const j = await r.json().catch(() => ({ err: r.status === 413 ? '图片太大了' : `出错了（${r.status}）` }));
-  if (!r.ok) throw new Error(j.err || r.status);
-  return j.path;
-}
+const sendFile = (f, mac) => upload(f, mac, f.name);
 
 // enough Markdown for Claude's replies: code blocks, tables, inline code, bold, headings. A table drawn as one, its
 // cells wrapping to the width as Claude Code's terminal draws it: rows of | cells |, the |---| line under the header

@@ -327,6 +327,12 @@ const press = async (key, shift = false) => {
     d.innerHTML = '<div class="atts"><div class="att"><img alt=""></div></div>'; document.body.append(d);
     const b = getComputedStyle(d.querySelector('.att'), '::before').content; d.remove(); return b; })()`), 'none');
   console.log('browser box attachments without a card ok');
+  // a picture uploads as its type; any other file as it is, with its name (and, for a Mac's conversation, which Mac)
+  assert.equal(await evaluate(`(async () => { const real = window.fetch, got = [];
+    window.fetch = async (u, o) => { got.push([o.headers['content-type'], o.headers['x-name'] ?? '', o.headers['x-mac'] ?? ''].join(' ')); return new Response('{"path":"p"}'); };
+    try { await upload(new Blob(['x'], { type: 'image/png' })); await sendFile(new File(['x'], '论文 v1.pdf'), 'la-a1'); } finally { window.fetch = real; }
+    return got.join(' | '); })()`), 'image/png   | application/octet-stream %E8%AE%BA%E6%96%87%20v1.pdf la-a1');
+  console.log('browser uploads ok');
   // a stream that fell behind (the end of an answer never came): its screen says answering, the service has had it
   // idle 20 s: opened again once, the screen rebuilt, answering no more
   termBusy = true;

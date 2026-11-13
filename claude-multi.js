@@ -113,13 +113,13 @@ function shareMemory(extra = [], roots = [SHARED, ...load().profiles.map((p) => 
 // one added in one account or in plain claude was missing in the others. Kept as one set: what was added, changed or
 // removed in any of them since it was last seen there (mcp-shared.json: the set, and each file as last seen) goes
 // into the set, which is written to ~/.claude.json and to the config about to start; the others get it when they start.
+const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } }; // null: none, or not JSON
 function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profiles.map((p) => path.join(p.configDir, '.claude.json'))],
   stateFile = path.join(ROOT, 'mcp-shared.json')) {
-  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  const st = read(stateFile) ?? { set: {}, seen: {} }, set = st.set;
+  const st = readJson(stateFile) ?? { set: {}, seen: {} }, set = st.set;
   for (const f of files) {
-    const j = read(f), was = st.seen[f];
+    const j = readJson(f), was = st.seen[f];
     if (!j) continue; // missing, or caught mid-write: not a removal
     const m = j.mcpServers ?? {};
     for (const [k, v] of Object.entries(m)) if (!was || !same(v, was[k])) set[k] = v; // new there, or changed
@@ -127,7 +127,7 @@ function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profi
     st.seen[f] = m;
   }
   for (const f of [files[0], path.join(dir, '.claude.json')]) {
-    const j = read(f);
+    const j = readJson(f);
     if (!j) continue;
     try {
       if (!same(j.mcpServers ?? {}, set)) { // written only on a change: a Claude running there rewrites this file too
@@ -147,9 +147,8 @@ function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profi
 // is trusted in all: the config about to start gets every folder another one trusts.
 // extra: folders (as C:/a/b) trusted besides, as clicking Yes on their trust question does
 function shareTrust(dir, files = [path.join(HOME, '.claude.json'), ...load().profiles.map((p) => path.join(p.configDir, '.claude.json'))], extra = []) {
-  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const trusted = new Set([...extra, ...files.flatMap((f) => Object.entries(read(f)?.projects ?? {}).filter(([, v]) => v?.hasTrustDialogAccepted).map(([k]) => k))]);
-  const f = path.join(dir, '.claude.json'), j = read(f);
+  const trusted = new Set([...extra, ...files.flatMap((f) => Object.entries(readJson(f)?.projects ?? {}).filter(([, v]) => v?.hasTrustDialogAccepted).map(([k]) => k))]);
+  const f = path.join(dir, '.claude.json'), j = readJson(f);
   const add = j ? [...trusted].filter((k) => !j.projects?.[k]?.hasTrustDialogAccepted) : [];
   if (!add.length) return; // written only on a change: a Claude running there rewrites this file too
   j.projects ??= {};
@@ -1813,7 +1812,7 @@ async function reportTo(cmd, [id, ...a]) {
 // Before account p continues conversation s: its newest record (and side folder) moved into p's config dir.
 function copyTo(s, p) {
   const dst = path.join(p.configDir, 'projects', path.basename(path.dirname(s.file)));
-  if (path.resolve(dst).toLowerCase() === path.resolve(path.dirname(s.file)).toLowerCase()) return;
+  if (sameDir(dst, path.dirname(s.file))) return;
   fs.mkdirSync(dst, { recursive: true });
   fs.copyFileSync(s.file, path.join(dst, `${s.id}.jsonl`));
   const side = s.file.slice(0, -6);
@@ -3841,8 +3840,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // deleted ones keep theirs, without
   if (cache.v !== 4) dirty = true, cache = { v: 4, files: Object.fromEntries(Object.entries(cache.files ?? {}).filter(([f]) => !fs.existsSync(f))) };
   const num = (s, k) => +(s.match(new RegExp(`"${k}":(\\d+)`))?.[1] ?? 0);
-  const two = (n) => String(n).padStart(2, '0');
-  const day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; };
+  const day = (t) => ymd(new Date(t));
   const sum = (x) => x[2] + x[3] + x[4] + x[5] + x[6];
   const walk = (d, out = []) => {
     let es = [];
@@ -3957,7 +3955,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
 // [系统通知], a background task of its own; and the watchdog's Haiku questions (logged with their cost). Today, the
 // last 7 days, in all. ponytail: its records read whole each time (cached 30 s with the token counts); keep sizes if slow
 function butlerCost(roots = tokenRoots(), logFile = LOG, now = Date.now()) {
-  const two = (n) => String(n).padStart(2, '0'), day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; };
+  const day = (t) => ymd(new Date(t));
   const seen = new Map(), folder = projectFolder(BUTLER); // a reply (its id, its request) → [usd, kind, day], a copy (another account's) once
   for (const r of roots) {
     let files = []; try { files = fs.readdirSync(path.join(r.dir, folder)).filter((n) => n.endsWith('.jsonl')); } catch {}
