@@ -92,6 +92,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #act svg { width: 24px; height: 24px; }
   #act .label { display: none; }
   #act #gear { margin-top: auto; } /* at the bottom, as VS Code's (#act button set its margin) */
+  /* 设置 as your avatar: your name's first character in a circle (no name: the gear) */
+  .av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; line-height: 1; }
+  #meIn { width: 140px; }
   #badge { position: absolute; right: 2px; bottom: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
   #side { width: var(--sideW, 300px); flex: none; display: none; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); }
   #app.side #side { display: flex; }
@@ -639,6 +642,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     #act button { flex: 1; height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
     #act .label { display: block; font-size: 11px; }
     #act svg { width: 22px; height: 22px; }
+    #act .av { width: 22px; height: 22px; font-size: 12px; }
     #act button { width: auto; margin: 0; border-radius: 0; background: none !important; }
     #badge { right: calc(50% - 24px); top: 4px; bottom: auto; }
     #side { position: fixed; z-index: 6; left: 0; right: 0; top: calc(env(safe-area-inset-top) + 44px); bottom: calc(53px + env(safe-area-inset-bottom));
@@ -1013,7 +1017,7 @@ async function load(fresh) {
   readShown();
   bConv?.sync(); peek?.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
-  drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere();
+  drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere(); drawMe();
   if (document.visibilityState === 'visible') newNotes(); // its toast when you're back, not into a hidden page
   return ''; // read: no error
 }
@@ -1585,13 +1589,22 @@ function narrow() {
   drawTabs(focusG);
 }
 NARROW.addEventListener('change', () => { narrow(); drawSide(); });
-// 设置: 外观 (kept in this browser) and this device's notifications
+// 设置: your name (the service's, for every device), 外观 (kept in this browser) and this device's notifications
 const LOOKS = { auto: '跟随系统', light: '亮色', dark: '暗色' };
+// its button: your avatar (your name's first character), or the gear while there's no name
+const GEAR = $('#gear').innerHTML;
+function drawMe() {
+  const n = state?.user;
+  $('#gear').html = n ? `<span class="av">${esc([...n][0])}</span><span class="label">设置</span>` : GEAR;
+  $('#gear').title = n ? `${n} · 设置` : '设置';
+}
 function openSettings() {
   let island = null; // the computer's island: on, off, or not read yet
   const draw = () => {
     const now = look();
     $('#sheetIn').innerHTML = `<div class="shead"><span class="stitle">设置</span><button class="ico" data-x title="关闭">${svg(I.close)}</button></div>
+      <h3>你</h3>
+      <div class="setting"><span>名字</span><input type="text" id="meIn" maxlength="20" placeholder="头像上显示第一个字" value="${esc(state?.user ?? '')}" enterkeyhint="done"></div>
       <h3>外观</h3>
       <div class="setting"><span>主题</span><div class="seg">${Object.entries(LOOKS).map(([k, t]) => `<button data-look="${k}" title="${t}"${k === now ? ' class="on"' : ''}>${svg(I[k])}</button>`).join('')}</div></div>
       <h3>通知</h3>
@@ -1604,6 +1617,12 @@ function openSettings() {
       <div class="m" style="white-space:normal">还在开发中：替你看着所有对话、给它们派工单。打开后长按菊花图标进入。</div>`;
   };
   fetch('/api/island').then((r) => r.json()).then((j) => { island = j.on; draw(); }).catch(() => {});
+  // the name: saved once you leave the box (or Enter), the avatar at once
+  $('#sheetIn').onchange = (e) => {
+    if (e.target.id !== 'meIn') return;
+    post('/api/me', { name: e.target.value }).then((j) => { state.user = j.user; drawMe(); toast(j.user ? `名字改成了「${j.user}」` : '名字清掉了，左下角换回齿轮'); }, (err) => toast(`没改成：${err.message}`));
+  };
+  $('#sheetIn').onkeydown = (e) => { if (e.target.id === 'meIn' && e.key === 'Enter' && !e.isComposing) e.target.blur(); };
   $('#sheetIn').onclick = (e) => {
     const b = e.target.closest('button');
     if (!b) return;

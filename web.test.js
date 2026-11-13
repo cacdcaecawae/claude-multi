@@ -229,6 +229,14 @@ const press = async (key, shift = false) => {
   // a table's cell with math in it: the formula, not its stand-in
   assert.equal(await evaluate("(() => { const h = md('| 算法 | 复杂度 |\\n|---|---|\\n| 快排 | $O(n \\\\log n)$ |'); return [h.includes('|0|'), /<td>[^|]*katex/.test(h)].join(); })()"), 'false,true');
   console.log('browser GPT draft kept while sending, math in a table ok');
+  // 设置 as your avatar: your name's first character (none: the gear); the name in 设置
+  state.user = '刘洋'; await evaluate('load()');
+  assert.deepEqual(await evaluate("[document.querySelector('#gear .av')?.textContent, document.querySelector('#gear').title]"), ['刘', '刘洋 · 设置']);
+  await evaluate("document.querySelector('#gear').click()");
+  assert.equal(await evaluate("document.querySelector('#meIn').value"), '刘洋');
+  await evaluate('sheetOff()'); delete state.user; await evaluate('load()');
+  assert.equal(await evaluate("!!document.querySelector('#gear svg') && !document.querySelector('#gear .av')"), true);
+  console.log('browser avatar ok');
 
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await evaluate("sideOn=false;drawSide();localStorage.setItem('cm-look','light');look()");

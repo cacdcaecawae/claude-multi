@@ -3340,11 +3340,17 @@ async function web() {
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
       list.sort((a, b) => b.at - a.at);
       // the Macs (the Mac mini, more): 新对话 offers them
-      const macs = macList(load()).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
-      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      const reg = load(), macs = macList(reg).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
+      return { user: reg.user ?? null, usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects() };
     },
     'POST /api/project': (q, b) => editProjects((all) => projectOp(all, b)),
+    // your name, for the page's avatar (its first character; none: the gear), kept in the registry
+    'POST /api/me': (q, b) => {
+      const name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 20);
+      update((r) => { if (name) r.user = name; else delete r.user; });
+      return { user: name || null };
+    },
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
     'GET /api/tickets': () => ticketsNow(),
     'POST /api/ticket': (q, b) => editTickets((all) => ticketOp(all, b)),
