@@ -89,6 +89,7 @@
 - 收不回的事：删除、提交、推送、合并、发出去。
 - 换成更贵的模型，或者一次开好几个新对话。
 - 选择题没有推荐项，或者选项牵涉上面几类。
+- 工具权限确认（「Do you want to proceed?」「Do you want to make this edit…」「…allow…」这类）：一律转告用户，不 `chat pick`，`chat pick` 也会拒绝。上面「方案确认选推荐的」只指它问要不要按计划做（Would you like to proceed）。
 
 ## 规矩
 

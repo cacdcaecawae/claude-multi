@@ -3,6 +3,7 @@
 // folder?"). The page reads it off its terminal; the 管家's commands (claude-multi chat) off one rebuilt from the stream.
 (function (root) {
   // The options counted from ❯ up and down, nearest first, so a numbered list in the text above isn't taken for them.
+  // The last ❯ on the screen: a menu sits under the conversation, where a message of yours above it starts ❯ too.
   function parseScreen(rows) {
     rows = rows.map((r) => r.replace(/^\s*│|│\s*$/g, '')); // a boxed menu too
     const busy = rows.map((r) => /^\s*[✻✶✽✢✳·*]\s+(\S.*?…)\s*(?:\((.*)\))?\s*$/.exec(r)).filter(Boolean).pop();
@@ -10,7 +11,7 @@
     // "❯ 4. …" above it is a message of yours in the conversation (Claude draws ❯ before those too), or in the box
     // your own words, not a menu's cursor.
     const inBox = rows.some((r, i) => /^\s*─{20,}/.test(r) && /^\s*❯/.test(rows[i + 1] ?? '')); // its rule may carry the name
-    const opt = (i) => /^\s*(?:❯\s*)?(\d+)\.\s+(.*\S)/.exec(rows[i]), cur = inBox ? -1 : rows.findIndex((r) => /^\s*❯\s*\d+\.\s/.test(r));
+    const opt = (i) => /^\s*(?:❯\s*)?(\d+)\.\s+(.*\S)/.exec(rows[i]), cur = inBox ? -1 : rows.findLastIndex((r) => /^\s*❯\s*\d+\.\s/.test(r));
     let menu = null;
     if (cur >= 0) {
       const c = +opt(cur)[1], at = new Map([[c, cur]]);
@@ -38,7 +39,7 @@
     }
     // a menu without numbers, like "Do you trust this folder?" (❯ No, exit / Yes, I trust this folder), which Claude asks
     // in the home folder every time: its options are the rows around ❯ up to a blank one, "Enter to confirm" under them
-    const foot = rows.findIndex((r) => /Enter to confirm/.test(r)), c = rows.findIndex((r, i) => i < foot && /^\s*❯\s+\S/.test(r));
+    const foot = rows.findIndex((r) => /Enter to confirm/.test(r)), c = rows.findLastIndex((r, i) => i < foot && /^\s*❯\s+\S/.test(r));
     if (!menu && !inBox && c >= 0) {
       let a = c, z = c;
       while (a > 0 && rows[a - 1].trim()) a--;

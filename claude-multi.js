@@ -995,8 +995,8 @@ function removeGpt(n) {
   canRecycle();
   update((r) => { r.gpt = (r.gpt ?? []).filter((x) => x.id !== g.id); });
   log('gpt_removed', { profile_id: g.id });
-  try { unlinkAll(g.home); } catch {}
-  const r = recycle([g.home]);
+  let r = {}; // as remove: never deleted with a link still in it
+  try { unlinkAll(g.home); r = recycle([g.home]); } catch {}
   if (fs.existsSync(g.home)) console.log(`已移除 GPT 账号 ${g.label}，但文件夹没能放进回收站（${(r.stderr || '').trim().split('\n')[0] || '可能有 Codex 开着里面的文件'}），可以之后手动删：${g.home}`);
   else console.log(`已移除 GPT 账号 ${g.label}，文件夹在回收站里。`);
 }
@@ -1676,9 +1676,13 @@ async function chatSay(ref, text, before, ask) { // ask: a GPT 聊天 one's mode
 }
 // a single-choice question: from the option the cursor is on to the one chosen, then Enter (as the page's card does).
 // ask: the question it was picked on; another one up by now (the first answered) isn't answered with it.
+// a tool's permission (Claude Code's "Do you want to proceed?", "…make this edit…?", "…allow this connection?"), not a
+// plan's "Would you like to proceed?": yours to answer, never the 管家's
+const asksPermission = (ask) => /\bDo you want to\b/i.test(ask ?? '');
 async function pickOn(id, n, ask, by = 'butler') {
   const menu = (await screenOf(id))?.menu, o = menu?.opts.find((x) => x.n === Number(n));
   if (!menu) throw new Error('它现在没在问选择题');
+  if (by === 'butler' && asksPermission(menu.ask)) throw new Error('这是工具权限确认，要用户自己在网页上回答');
   if (ask != null && menu.ask !== ask) throw new Error('它问的已经变了，再看一下');
   if (menu.tabs || menu.opts.some((x) => x.check != null)) throw new Error('这是多选题，或者一次问了好几题，请用户在网页上点卡片回答');
   if (!o) throw new Error(`选项号要在 1 到 ${menu.opts.length} 之间`);
@@ -1891,8 +1895,8 @@ function remove(x) {
     if (r.active === p.id) r.active = r.profiles[0]?.id ?? null;
   });
   log('profile_removed', { profile_id: p.id });
-  try { unlinkAll(p.configDir); } catch {}
-  const r = recycle([p.configDir]);
+  let r = {}; // a link it couldn't take out: the folder stays (deleted for good past the Recycle Bin, it'd go through the link)
+  try { unlinkAll(p.configDir); r = recycle([p.configDir]); } catch {}
   if (fs.existsSync(p.configDir)) console.log(`已移除账号 ${p.label}，但文件夹没能放进回收站（${(r.stderr || '').trim().split('\n')[0] || '可能有程序开着里面的文件'}），可以之后手动删：${p.configDir}`);
   else console.log(`已移除账号 ${p.label}，文件夹在回收站里。`);
 }
@@ -1913,7 +1917,8 @@ function helpersBusy(tail, since = 0) {
     if (j.isSidechain) continue;
     const at = Date.parse(j.timestamp) || Date.now();
     const parts = Array.isArray(j.message?.content) ? j.message.content : [];
-    let text = typeof j.message?.content === 'string' ? j.message.content : typeof j.content === 'string' ? j.content : '';
+    // (a task's end delivered mid-turn comes as an attachment, its words in .prompt)
+    let text = typeof j.message?.content === 'string' ? j.message.content : typeof j.content === 'string' ? j.content : typeof j.attachment?.prompt === 'string' ? j.attachment.prompt : '';
     for (const p of parts) {
       if (p.type === 'text') text += p.text;
       if (p.type === 'tool_use') {
@@ -2848,7 +2853,7 @@ async function web() {
   // only till its Claude has written its session file (then it's listed with its pid): after a /clear or /resume there,
   // it runs another conversation, and this one, tapped, would open that
   const resuming = (id) => [...terms.values()].find((t) => t.resume === id && !t.gone
-    && !(t.pid && (t.mac ? macLive().some((j) => -j.pid === t.pid) : fs.existsSync(path.join(t.dir, 'sessions', `${t.pid}.json`)))));
+    && !(t.pid && (t.mac ? macLive({ id: t.mac }).some((j) => -j.pid === t.pid) : fs.existsSync(path.join(t.dir, 'sessions', `${t.pid}.json`)))));
   // `claude-multi <cmd> <id> …` for a conversation, apart from this process: what it printed, or that as the error
   const command = (what, id, ...more) => {
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error('没有这个对话');
@@ -4003,7 +4008,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { projectOp, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { asksPermission, projectOp, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

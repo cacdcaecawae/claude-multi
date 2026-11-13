@@ -59,6 +59,8 @@ assert.equal(helpersBusy([...spawn, idle, use('t2', 'SendMessage', { to: 'writer
 const bg = [use('b1', 'Bash', { run_in_background: true }), res('b1', 'Command running in background with ID: q1.')];
 assert.equal(helpersBusy(bg.join('\n')), true);
 assert.equal(helpersBusy([...bg, says('<task-notification>\n<tool-use-id>b1</tool-use-id>\n<status>completed</status>')].join('\n')), false);
+// its end delivered mid-turn, as Claude Code records it now: an attachment, its words in .prompt
+assert.equal(helpersBusy([...bg, JSON.stringify({ type: 'attachment', timestamp: ts, attachment: { type: 'queued_command', prompt: '<task-notification>\n<tool-use-id>b1</tool-use-id>\n<status>completed</status>' } })].join('\n')), false);
 assert.equal(helpersBusy([use('a1', 'Agent', { description: 'x' }), res('a1', 'the subagent finished: here is its report')].join('\n')), false); // foreground agent
 // stopped by Claude itself: no task-notification ever comes, its TaskStop result says so (as a ticket's worker did,
 // stopping its preview server: no "done" note, and the ticket never saw its turn end)
@@ -803,6 +805,12 @@ if (SESSION0) {
   assert.equal(parseScreen(['1. 签字', '2. 压缩', '3. 上传', rule, '❯ 4. 保存回执截图', rule]).menu, null);
   const h = parseScreen([rule, ' ☐ 优先级', '', '今天想先做哪件事？', '', '❯ 1. 写论文', '  2. 跑实验', '', 'Enter to select']).menu;
   assert.deepEqual([h.head, h.ask], ['优先级', '今天想先做哪件事？']); // one question's header, apart from it
+  // a numbered message of yours still on the screen over a permission menu: the menu's options, not your lines
+  const p = parseScreen(['❯ 1. 修登录', '  2. 更新文档', '', '● Bash(npm test)', rule, ' Do you want to proceed?', ' ❯ 1. Yes', '   2. Yes, and don\'t ask again', '   3. No', '', ' Esc to cancel']).menu;
+  assert.deepEqual([p.cur, p.ask, p.opts.map((o) => o.label).join('|')], [1, 'Do you want to proceed?', 'Yes|Yes, and don\'t ask again|No']);
+  // the 管家 never answers a tool's permission; a plan's approval it may
+  const { asksPermission } = require('./claude-multi');
+  assert.deepEqual([p.ask, 'Do you want to make this edit to a.js?', 'Do you want to allow this connection?', 'Would you like to proceed?', '今天想先做哪件事？'].map(asksPermission), [true, true, true, false, false]);
   console.log('screen ok');
 }
 
