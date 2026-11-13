@@ -519,6 +519,8 @@ $PAY = @{
   google_play_subscription = @('Google Play 订阅', 'M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z')
   stripe_subscription = $BANK_CARD; stripe_subscription_contracted = $BANK_CARD
 }
+# a MacBook's mark (a Mac entry with icon laptop), as the page draws it: a laptop, its screen open (F0: the screen a hole)
+$LAPTOP = 'F0 M6.5 4h11A1.5 1.5 0 0 1 19 5.5V15H5V5.5A1.5 1.5 0 0 1 6.5 4zM6.8 5.8v7.4h10.4V5.8zM1.5 16h21l-.7 1.9a1.6 1.6 0 0 1-1.5 1.1H3.7a1.6 1.6 0 0 1-1.5-1.1z'
 # An account at its limit while conversations run on it: one notice (per account, until it's off its limit again) that
 # they wait for the reset; a click opens the running ones, each with 换账号继续. Nothing switches by itself.
 $script:limitTold = @{}
@@ -659,10 +661,12 @@ function Render {
     $card.Add_MouseLeave({ param($s) $s.Tag.Opacity = 0; $s.Tag.Tag.Visibility = 'Collapsed' })
     [void]$Rows.Children.Add($card)
   }
-  # the Mac mini, when there is one: Claude on the Mac, in its folder there, run by the web service (claude-multi start
-  # mac: a tab joined to it, so the page and the phone have it too); its usage as read on the Mac, never recommended here
-  if ($d.mac) {
-    $m = $d.mac
+  # each Mac (the Mac mini, a MacBook's accounts): Claude on that Mac, in its folder there, run by the web service
+  # (claude-multi start <its id>: a tab joined to it, so the page and the phone have it too); its usage as read on the
+  # Mac, never recommended here. Its mark: Apple's, or a laptop for a MacBook's (icon laptop)
+  foreach ($m in @($d.macs)) {
+    if (-not $m) { continue }
+    $mark = if ($m.icon -eq 'laptop') { $LAPTOP } else { $PAY.apple_subscription[1] }
     $lines = if ($m.err -or -not @($m.windows).Count) { "<TextBlock Text='$(Esc $(if ($m.err) { $m.err } else { '额度还没读到' }))' Margin='0,8,0,0' FontSize='11' Foreground='#8CFFFFFF' TextWrapping='Wrap'/>" } else {
       foreach ($w in @($m.windows)) {
         $nm = if ($names[$w.k]) { $names[$w.k] } else { $w.k }
@@ -673,13 +677,13 @@ function Render {
       }
     }
     $card = X ("<Border $ns Background='#0AFFFFFF' CornerRadius='14' Padding='14,11,14,12' Margin='0,0,0,6'><StackPanel><DockPanel>" +
-      "<Button x:Name='Go' DockPanel.Dock='Right' Content='&#xE768;' ToolTip='在 Mac 上的 $(Esc $m.dir) 里启动 Claude' Margin='6,-6,-8,-6'/>" +
+      "<Button x:Name='Go' DockPanel.Dock='Right' Content='&#xE768;' ToolTip='在 $(Esc $m.label) 上的 $(Esc $m.dir) 里启动 Claude' Margin='6,-6,-8,-6'/>" +
       "<TextBlock DockPanel.Dock='Right' Text='$(Esc $m.plan)' FontSize='12' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
-      "<Path Data='$($PAY.apple_subscription[1])' Fill='#E6FFFFFF' Width='14' Height='14' Stretch='Uniform' Margin='0,-2,8,0' VerticalAlignment='Center'/>" + # Apple's mark, white on the dark panel
+      "<Path Data='$mark' Fill='#E6FFFFFF' Width='14' Height='14' Stretch='Uniform' Margin='0,-2,8,0' VerticalAlignment='Center'/>" + # its mark, white on the dark panel
       "<TextBlock Text='$(Esc $m.label)' FontSize='13' FontWeight='SemiBold' Foreground='#CCFFFFFF' Margin='0,0,12,0' VerticalAlignment='Center'/>" +
       "</DockPanel>$($lines -join '')</StackPanel></Border>")
     $go = $card.FindName('Go'); $go.Style = $win.FindResource('Icon')
-    $go.Tag = 'mac'; $go.Add_Click({ param($s) Show-Projects $s.Tag }) # a folder here first: its project folder there
+    $go.Tag = $m.id; $go.Add_Click({ param($s) Show-Projects $s.Tag }) # a folder here first: its project folder there
     [void]$Rows.Children.Add($card)
   }
   # last: a new account, logged in in a terminal window (claude-multi new); the island reads the accounts again once it's saved
@@ -719,25 +723,26 @@ function Render-Gpt($gs, $names) {
 }
 
 # --- launching ----------------------------------------------------------------------------------
-function Show-Projects([string]$n) { # n: an account's number, a GPT one's G1 (Codex then), or mac (the Mac mini)
-  $who = if ($n -eq 'mac') { $script:data.mac.label } elseif ($n -like 'G*') { "GPT $n · $(@($script:data.gpt)[[int]$n.Substring(1) - 1].label)" } else { $script:data.accounts[[int]$n - 1].label }
+function Show-Projects([string]$n) { # n: an account's number, a GPT one's G1 (Codex then), or a Mac's id (mac: the Mac mini)
+  $mm = @($script:data.macs) | Where-Object { $_ -and $_.id -ceq $n } | Select-Object -First 1 # (before G*: an id may begin with g)
+  $who = if ($mm) { $mm.label } elseif ($n -like 'G*') { "GPT $n · $(@($script:data.gpt)[[int]$n.Substring(1) - 1].label)" } else { $script:data.accounts[[int]$n - 1].label }
   $ProjTitle.Text = "用 $($who.Split('@')[0]) 启动到："
   $ProjList.Children.Clear()
   $list = @($script:data.projects) + ''
-  if ($n -eq 'mac') { $list = @('mac:') + $list } # the Mac's own folder first, for no folder here
+  if ($mm) { $list = @('mac:') + $list } # the Mac's own folder first, for no folder here
   foreach ($p in $list) {
     $b = New-Object Windows.Controls.Button
     $b.Style = $win.FindResource('Item')
     $b.Tag = @($n, $p)
     $b.Content = if ($p -eq 'mac:') {
-      X "<StackPanel $ns Orientation='Horizontal'><TextBlock Text='$(Esc (Split-Path $script:data.mac.dir -Leaf))' FontSize='13' FontWeight='SemiBold' MinWidth='120'/><TextBlock Text='就在 Mac 上，不对应这里的文件夹' FontSize='11' Foreground='#8CFFFFFF' Margin='14,1,0,0' VerticalAlignment='Center'/></StackPanel>"
+      X "<StackPanel $ns Orientation='Horizontal'><TextBlock Text='$(Esc (Split-Path $mm.dir -Leaf))' FontSize='13' FontWeight='SemiBold' MinWidth='120'/><TextBlock Text='就在 $(Esc $mm.label) 上，不对应这里的文件夹' FontSize='11' Foreground='#8CFFFFFF' Margin='14,1,0,0' VerticalAlignment='Center'/></StackPanel>"
     } elseif ($p) {
       X "<StackPanel $ns Orientation='Horizontal'><TextBlock Text='$(Esc (Split-Path $p -Leaf))' FontSize='13' FontWeight='SemiBold' MinWidth='120'/><TextBlock Text='$(Esc $p)' FontSize='11' Foreground='#8CFFFFFF' Margin='14,1,0,0' MaxWidth='330' TextTrimming='CharacterEllipsis' VerticalAlignment='Center'/></StackPanel>"
     } else { X "<TextBlock $ns Text='其他文件夹…' FontSize='13' Foreground='#B3FFFFFF'/>" }
     $b.Add_Click({
       param($s)
       $dir = $s.Tag[1]
-      if ($dir -eq 'mac:') { Open-Terminal $HOME 'start mac -'; Collapse; return }
+      if ($dir -eq 'mac:') { Open-Terminal $HOME "start $($s.Tag[0]) -"; Collapse; return }
       if (-not $dir) {
         $dlg = New-Object Windows.Forms.FolderBrowserDialog
         if ($dlg.ShowDialog() -ne 'OK') { return }
