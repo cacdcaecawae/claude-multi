@@ -2840,13 +2840,13 @@ async function shrink(f) {
 }
 // mac: for a conversation on the Mac mini, copied on there: its path there
 async function sendFile(f, mac) { // a file as it is, its name kept (Claude reads it by its path): where it was saved
-  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-name': encodeURIComponent(f.name), ...(mac && { 'x-mac': '1' }) }, body: f });
+  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-name': encodeURIComponent(f.name), ...(mac && { 'x-mac': mac === true ? '1' : mac }) }, body: f });
   const j = await r.json().catch(() => ({ err: r.status === 413 ? '文件太大了（最大 20 MB）' : `出错了（${r.status}）` }));
   if (!r.ok) throw new Error(j.err || r.status);
   return j.path;
 }
 async function upload(blob, mac) { // to the computer: where it was saved there
-  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': blob.type, ...(mac && { 'x-mac': '1' }) }, body: blob });
+  const r = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': blob.type, ...(mac && { 'x-mac': mac === true ? '1' : mac }) }, body: blob });
   const j = await r.json().catch(() => ({ err: r.status === 413 ? '图片太大了' : `出错了（${r.status}）` }));
   if (!r.ok) throw new Error(j.err || r.status);
   return j.path;

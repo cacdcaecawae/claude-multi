@@ -1328,7 +1328,7 @@ if (SESSION0) {
   const reg = { profiles: [], mac: { host: 'mini', dir: '~/Desktop/mine' } };
   const s = listSessions(reg).find((x) => x.id === id);
   assert.ok(s, 'the Mac one listed');
-  assert.deepEqual([s.mac, s.acct, s.pid, s.busy, s.who, s.title], [true, -1, -4321, true, 'Mac mini', '在 Mac 上改文件']);
+  assert.deepEqual([s.mac, s.acct, s.pid, s.busy, s.who, s.title], ['mac', -1, -4321, true, 'Mac mini', '在 Mac 上改文件']);
   assert.equal(listSessions({ profiles: [] }).some((x) => x.id === id), false); // no Mac set up: not listed
   // one in a project's folder there (mine/demo-sim): shown in the folder here it's for (folders.json), running where it runs
   const id2 = '1f1e2d3c-4b5a-4968-8776-655443322110', sub = path.join(dir, 'projects', '-Users-me-Desktop-mine-demo-sim');
@@ -1337,7 +1337,7 @@ if (SESSION0) {
     + JSON.stringify({ type: 'ai-title', aiTitle: '改 demo-sim' }) + String.fromCharCode(10));
   fs.writeFileSync(path.join(dir, 'folders.json'), JSON.stringify({ 'demo-sim': String.raw`F:\demo-sim` }));
   const s2 = listSessions(reg).find((x) => x.id === id2);
-  assert.deepEqual([s2.mac, s2.cwd, s2.macCwd], [true, String.raw`F:\demo-sim`, '/Users/me/Desktop/mine/demo-sim']);
+  assert.deepEqual([s2.mac, s2.cwd, s2.macCwd], ['mac',String.raw`F:\demo-sim`, '/Users/me/Desktop/mine/demo-sim']);
   assert.equal(listSessions(reg).find((x) => x.id === id).cwd, '/Users/me/Desktop/mine'); // the Mac's own folder: as it is
   // one in a subfolder of a project there that has another project's name: not that project's
   const id3 = '2f1e2d3c-4b5a-4968-8776-655443322110', sub3 = path.join(dir, 'projects', '-Users-me-Desktop-mine-x-demo-sim');
@@ -1351,7 +1351,7 @@ if (SESSION0) {
   fs.writeFileSync(path.join(dir, 'live.json'), '[]');
   assert.equal(listSessions(reg).find((x) => x.id === id).pid, null); // ended there
   const py = require('child_process').spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "watch", "exec")'],
-    { input: `DIR = "~"\nHAVE = {}\n${MAC_WATCH}`, encoding: 'utf8' });
+    { input: `DIR = "~"\nCFG = None\nHAVE = {}\n${MAC_WATCH}`, encoding: 'utf8' });
   if (py.error) console.log('(no python here: the Mac watcher not compiled)'); else assert.equal(py.status, 0, py.stderr);
   // and run (this PC's python, in a home of its own; async: the timing tests run meanwhile): a record of ours, one of its
   // subagents', each sent as it is; and one of another folder there, of which only each reply's id, model, time and usage
@@ -1372,7 +1372,7 @@ if (SESSION0) {
     const stop = setTimeout(() => w.kill(), 5000); // it runs till killed: once the other folder's line is out, or by then
     w.stdout.on('data', (d) => { out += d; if (/"o": "-other\/c2\.jsonl".*\n/.test(out)) w.kill(); });
     w.stderr.on('data', (d) => { err += d; });
-    w.stdin.end(`DIR = ${JSON.stringify(mine)}${nl}HAVE = {}${nl}OTHER = {}${nl}${MAC_WATCH}`);
+    w.stdin.end(`DIR = ${JSON.stringify(mine)}${nl}CFG = None${nl}HAVE = {}${nl}OTHER = {}${nl}${MAC_WATCH}`);
     w.on('exit', () => {
       clearTimeout(stop);
       const got = out.split(nl).filter(Boolean).map((l) => JSON.parse(l)), sent = (k) => Buffer.from(got.find((o) => o.f === k)?.d ?? '', 'base64').toString();
@@ -1388,7 +1388,7 @@ if (SESSION0) {
   // the names taken from the Mac: a record, a conversation's folder, a record of its subagents; nothing leading out
   {
     const src = /const macPath = .*/.exec(fs.readFileSync(path.join(__dirname, 'claude-multi.js'), 'utf8'))[0];
-    const macPath = new Function('path', 'MAC', `${src} return macPath;`)(path.posix, '/m');
+    const macPath = new Function('path', `${src} return macPath;`)(path.posix).bind(null, '/m');
     assert.equal(macPath('p/a.jsonl'), '/m/projects/p/a.jsonl');
     assert.equal(macPath('p/id/'), '/m/projects/p/id');
     assert.equal(macPath('p/id/subagents/agent-1.jsonl'), '/m/projects/p/id/subagents/agent-1.jsonl');
@@ -1425,7 +1425,7 @@ if (SESSION0) {
     const { tokenStats } = require('./claude-multi'), od = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cm-oth-'));
     fs.mkdirSync(path.join(od, 'others', 'p'), { recursive: true });
     fs.writeFileSync(path.join(od, 'others', 'p', 's.jsonl'), '{"type":"assistant","timestamp":"2026-11-09T11:18:30.593Z","requestId":"req_1","message":{"id":"msg_1","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":3,"output_tokens":4}}}\n');
-    const ts = tokenStats([{ id: 'mac', label: 'M', dir: path.join(od, 'projects'), mac: true }, { id: 'mac-other', label: '', dir: path.join(od, 'others'), other: true }], path.join(od, 'c.json'), path.join(od, 'no.log'));
+    const ts = tokenStats([{ id: 'mac', label: 'M', dir: path.join(od, 'projects'), mac: true }, { id: 'mac-other', of: 'mac', label: '', dir: path.join(od, 'others'), other: true }], path.join(od, 'c.json'), path.join(od, 'no.log'));
     assert.deepEqual([ts.total, ts.usd, ts.days.length, ts.accounts.length, ts.accounts[0].mac, ts.accounts[0].plus > 0], [0, 0, 0, 1, true, true]); // in no total: beside the Mac's
     fs.rmSync(od, { recursive: true, force: true });
   }
@@ -1443,6 +1443,37 @@ if (SESSION0) {
     console.log('mac password read ok');
   });
   console.log('mac mini ok');
+}
+// More Macs (the registry's macs, beside the Mac mini): each an account there, its own config dir. Listed from its own
+// copy (accounts\<id>) under its label, mac its id; started with that config dir, its sign-in looked up under the name
+// Claude Code files it by; an id that would name another folder here, or no host, left out.
+{
+  const fs = require('fs'), path = require('path');
+  const { listSessions, macList, macCmd, MAC_USAGE } = require('./claude-multi');
+  const la = { id: 'la-a1', host: 'mymac', dir: '~/work', config: '~/claude/a1', label: 'Mac a1', icon: 'laptop' };
+  const reg = { profiles: [], mac: { host: 'mini', dir: '~/Desktop/mine' },
+    macs: [la, { id: 'mac', host: 'x', dir: '~' }, { id: 'acct-1', host: 'x', dir: '~' }, { id: '../x', host: 'x', dir: '~' }, { id: 'nohost', dir: '~' }, { id: 'h', host: 'a b', dir: '~' }] };
+  assert.deepEqual(macList(reg).map((m) => [m.id, m.config, m.label]), [['mac', null, 'Mac mini'], ['la-a1', la.config, 'Mac a1']]);
+  const id = '3f1e2d3c-4b5a-4968-8776-655443322110', dir = path.join(TEST_HOME, '.claude-multi', 'accounts', 'la-a1', 'projects', '-Users-me-work');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.jsonl`), JSON.stringify({ type: 'user', cwd: '/Users/me/work', message: { role: 'user', content: 'hi' } }) + '\n'
+    + JSON.stringify({ type: 'ai-title', aiTitle: '在 Mac 上' }) + '\n');
+  fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'accounts', 'la-a1', 'live.json'), JSON.stringify([{ pid: 77, sessionId: id, status: 'idle', kind: 'interactive' }]));
+  const s = listSessions(reg).find((x) => x.id === id);
+  assert.deepEqual([s.mac, s.acct, s.pid, s.who, s.cwd], ['la-a1', -1, -77, 'Mac a1', '/Users/me/work']);
+  // started with its config dir, as its launcher sets it ($HOME's, the string its sign-in is filed under); continued: its sessions there
+  const script = (c) => Buffer.from(/echo (\S+) \| base64 -D/.exec(c)[1], 'base64').toString();
+  const fresh = script(macCmd({ into: 'cd x', name: 'cm-p3', config: la.config }));
+  assert.ok(fresh.includes(`'exec env CLAUDE_CONFIG_DIR="$HOME"/'\\''claude/a1'\\'' ~/.local/bin/claude'`), fresh);
+  const again = script(macCmd({ into: 'cd x', resume: id, name: 'cm-p4', config: la.config }));
+  assert.ok(again.includes(`grep -l '${id}' "$HOME"/'claude/a1'/sessions/*.json`), again);
+  const sh = require('child_process').spawnSync('sh', ['-n'], { input: again, encoding: 'utf8' });
+  if (!sh.error) assert.equal(sh.status, 0, sh.stderr);
+  // the keychain name: sha256 of its config dir, first 8 hex, as Claude Code 2.1.323 names a sign-in (checked on a real Mac) (Claude Code-credentials-85b28ada)
+  const svc = /^svc = .*$/m.exec(MAC_USAGE)[0];
+  const py = require('child_process').spawnSync('python', ['-c', `import hashlib, os\nCFG = '/Users/me/claude/a1'\n${svc}\nprint(svc)`], { encoding: 'utf8' });
+  if (!py.error) assert.equal(py.stdout.trim(), 'Claude Code-credentials-85b28ada', py.stderr);
+  console.log('more macs ok');
 }
 
 // the web service's process check runs beside, never waited on (waiting on PowerShell froze every terminal once a
