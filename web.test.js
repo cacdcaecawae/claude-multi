@@ -256,6 +256,24 @@ const press = async (key, shift = false) => {
     $('#cmenu').hidden = true; sheetOff(); swapFrom(state.sessions.at(-1)); const sheet = document.querySelector('#sheet').classList.contains('on');
     state.sessions.pop(); return said + ' / ' + sheet; })()`), 'true / 换账号继续…用的是 Mac a1 的账号，换不了 / false');
   console.log('browser 换账号 off for a Mac one ok');
+  // a file in a message of yours: a card opening it (its saved name found in the record's text, a Mac's path too), its
+  // kind from its ending; the bubble's text as before (停止 compares it); one on its way: a card, no link yet
+  assert.equal(await evaluate(`(() => { const raw = '看看这个\\n附件：/Users/me/work/.uploads/20261113T081500-a1b2c3-全文-中文-v16.pdf';
+    const m = { role: 'user', text: shownText(raw), files: filesOf(raw) }, d = document.createElement('div'); d.innerHTML = userHtml(m, '');
+    const a = d.querySelector('a.att'), p = document.createElement('div'); p.innerHTML = userBody('附件：x.docx', [], true);
+    return [a.className, a.dataset.ext, a.getAttribute('href'), d.textContent.replace(/\\s+/g, ''), !!p.querySelector('span.att.doc'), !p.querySelector('a')].join(' | '); })()`),
+    'att pdf | PDF | /api/file?n=20261113T081500-a1b2c3-%E5%85%A8%E6%96%87-%E4%B8%AD%E6%96%87-v16.pdf | 看看这个附件：全文-中文-v16.pdf | true | true');
+  console.log('browser 附件 cards ok');
+  // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
+  assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
+    a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);
+    let ctrlLeft = null; a.addEventListener('click', (e) => { if (e.ctrlKey) { ctrlLeft = !e.defaultPrevented; e.preventDefault(); } });
+    a.querySelector('img').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    const z = document.querySelector('#zoom'), up = !z.hidden && z.querySelector('img').getAttribute('src') === src && document.activeElement === z;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); const gone = z.hidden;
+    a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true })); const stayed = z.hidden;
+    a.remove(); return [up, gone, stayed, ctrlLeft].join(' | '); })()`), 'true | true | true | true');
+  console.log('browser picture shown big ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }

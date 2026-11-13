@@ -457,6 +457,15 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hm.user.cmd { align-self: center; margin-top: 8px; padding: 2px 8px; background: none; color: var(--fg3); font: 12px/1.5 var(--mono); }
   .hm.user.byb { background: color-mix(in srgb, #d97757 14%, var(--bg)); } .hm.user.byb .lab { color: #d97757; }
   .hm.user.pending { opacity: .5; }
+  /* a file in a message of yours: a card, its kind (its ending) in a colored square, its name; it opens the file */
+  .hm.user .atts { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 6px 0 2px; }
+  .att { display: flex; align-items: center; gap: 10px; max-width: min(320px, 100%); padding: 6px 12px 6px 6px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--fgHi); text-decoration: none; }
+  .hm a.att { color: var(--fgHi); } .hm a.att:hover { border-color: var(--accent); text-decoration: none; } /* not .hm a's link blue */
+  .att::before { content: attr(data-ext); flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 6px;
+    font-size: 10px; font-weight: 700; letter-spacing: .02em; color: #fff; background: var(--attc, #6e7681); }
+  .att.pdf { --attc: #d93a2b; } .att.doc { --attc: #2b6cd9; } .att.xls { --attc: #1f8a4c; } .att.ppt { --attc: #d9662b; } .att.zip { --attc: #8a6d3b; }
+  .att .ak { display: none; } .att .an { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   .hm.long:not(.open) .clip { max-height: 16.5em; overflow: hidden; -webkit-mask: linear-gradient(#000 55%, transparent); mask: linear-gradient(#000 55%, transparent); } /* 10 lines: a long message of yours, a huge answer */
   .hm .more { display: block; margin-top: 4px; font-size: 12.5px; color: var(--link); }
   .hm .more::after { content: '展开全部'; } .hm.open .more::after { content: '收起'; }
@@ -687,6 +696,10 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .opt.on { background: var(--accentBg); border-color: var(--accent); color: var(--fgHi); }
   .opt small { color: var(--fg2); font-size: 11.5px; margin-left: 4px; }
   .opt:disabled { opacity: .45; }
+  /* a picture clicked in a conversation: big, in the middle of the page; a click or Esc puts it away */
+  #zoom { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 3vmin; background: rgba(0,0,0,.82); cursor: zoom-out; outline: none; }
+  #zoom[hidden] { display: none; }
+  #zoom img { max-width: 100%; max-height: 94vh; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,.5); background: var(--bar); }
   .toast { position: fixed; z-index: 30; right: 12px; bottom: 34px; max-width: min(420px, calc(100vw - 24px)); background: var(--pop); border: 1px solid var(--popB);
     box-shadow: 0 4px 20px var(--shadow); border-radius: 8px; padding: 10px 14px; white-space: pre-wrap; display: none; }
   @media (max-width: 759px) { .toast { left: 50%; right: auto; transform: translateX(-50%); width: max-content; bottom: calc(80px + env(safe-area-inset-bottom)); } }
@@ -725,6 +738,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <span id="conn"></span><span class="grow"></span><span id="here"></span><button id="sAcct" title="看额度"></button></footer>
 <div class="sheet" id="sheet"><div class="in" id="sheetIn" role="dialog" aria-modal="true" aria-label="对话框" tabindex="-1"></div></div>
 <div class="toast" id="toast"></div>
+<div id="zoom" hidden tabindex="-1" role="dialog" aria-modal="true" aria-label="图片（点一下或按 Esc 关闭）"><img alt=""></div>
 <div id="offline" hidden>连不上电脑，正在重试…</div>
 <div id="cmenu" hidden></div>
 
@@ -769,8 +783,23 @@ Object.defineProperty(HTMLElement.prototype, 'html', { set(h) {
   if (f) this.querySelector(f.dataset.open != null ? `[data-open="${CSS.escape(f.dataset.open)}"]` : `[data-i="${CSS.escape(f.dataset.i)}"]`)?.focus({ preventScroll: true });
 } });
 // a message of yours as shown here: its [Image #N] out (the pictures show), a file's path as 附件： and its name, a paste unwrapped
-const shownText = (t) => t.replace(/\[Image #\d+\]\s*/g, '').replace(/^附件：.*?[\\/]\d{8}T\d{6}-[0-9a-f]{6}-(.+)$/gm, '附件：$1')
+const ATT = /^附件：.*?[\\/](\d{8}T\d{6}-[0-9a-f]{6}-(.+))$/gm; // a file's line: its saved name here, its name as sent
+const filesOf = (t) => [...t.matchAll(ATT)].map((x) => x[1]); // (read before shownText, which keeps only the names)
+const shownText = (t) => t.replace(/\[Image #\d+\]\s*/g, '').replace(ATT, '附件：$2')
   .replace(/<pasted_content id="[^"]*">\n?([\s\S]*?)\n?<\/pasted_content id="[^"]*">/g, '$1').trim();
+// A picture in a conversation, clicked: shown big in the middle of this page, not in a new tab (Ctrl/⌘/Shift or the middle
+// button still open one there). A click or Esc puts it away, and the focus goes back where it was.
+let zoomFrom = null;
+const zoomOff = () => { const z = $('#zoom'); if (z.hidden) return; z.hidden = true; z.querySelector('img').removeAttribute('src'); zoomFrom?.focus?.({ preventScroll: true }); zoomFrom = null; };
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a.hm.img');
+  if (!a || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  e.preventDefault(); e.stopPropagation();
+  const z = $('#zoom');
+  zoomFrom = document.activeElement; z.querySelector('img').src = a.getAttribute('href'); z.hidden = false; z.focus();
+}, true);
+$('#zoom').addEventListener('click', zoomOff);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#zoom').hidden) { e.preventDefault(); e.stopImmediatePropagation(); zoomOff(); } }, true);
 const toast = (t, ms = 2600) => { const e = $('#toast'); e.onclick = null; e.textContent = t; e.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = 'none'), ms); };
 // Claude Code's copy in a terminal (a selection, /copy): OSC 52, the text in base64, to the clipboard here. Where the
 // browser lets a page write it only on a tap (an iPhone), the bubble is that tap.
@@ -2244,7 +2273,7 @@ function makeConv(body, title) {
     // shown without them, and so your message sent here is found in the record (not shown twice)
     // a picture: fetched from the record by where it is in it; the [Image #N] standing for it in your words left out
     for (const m of r.items ?? []) if (m.role === 'img') m.src = `/api/image?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}&ref=${m.text}`;
-    for (const m of r.items ?? []) if (m.role === 'user') m.text = shownText(m.text);
+    for (const m of r.items ?? []) if (m.role === 'user') { m.files = filesOf(m.text); m.text = shownText(m.text); }
     return r;
   }
   async function loadHist() {
@@ -2340,7 +2369,7 @@ function makeConv(body, title) {
     typeTick = typeNow && here.check != null; // a multi-select's: what you write ticks it, no Enter after
     const took = busy && /(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0];
     const h = sent.map((s) => (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
-      + (s.text ? `<div class="hm user pending">${esc(s.text)}</div>` : '')).join('') + (menu
+      + (s.text ? `<div class="hm user pending">${userBody(s.text, [], true)}</div>` : '')).join('') + (menu
       ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${askHead(menu)}${askOpts(menu, (o) => `data-pick="${o.n}"`, (o) => typeNow && o.n === menu.cur)}
         ${typeNow ? '<div class="hint2">在下面的输入框里写你的回答，发送后填进这一项</div>' : ''}
         <div class="row2">${menu.tabs ? '<button data-key="prev">← 上一题</button><button data-key="next" class="push">下一题 →</button>' : ''}<button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
@@ -2717,7 +2746,7 @@ function makeOai(id, title) {
     if (!picked) { picked = true; opts = r.opts; drawOpts(); }
     if (now !== drawn) {
       drawn = now;
-      for (const m of r.items) { if (m.role === 'img') m.src = `/api/oai/file?id=${encodeURIComponent(c.id)}&ref=${m.text}`; if (m.role === 'user') m.text = shownText(m.text); }
+      for (const m of r.items) { if (m.role === 'img') m.src = `/api/oai/file?id=${encodeURIComponent(c.id)}&ref=${m.text}`; if (m.role === 'user') { m.files = filesOf(m.text); m.text = shownText(m.text); } }
       const box = $p('.hNew'); box.innerHTML = ''; box.$at = 0; addItems(box, r.items, true);
       $p('.hTop').textContent = r.items.length ? '对话开头' : '还没有消息，在下面发一条开始';
     }
@@ -2733,7 +2762,7 @@ function makeOai(id, title) {
     sending = true;
     if (text == null) { line.value = ''; atts = []; grow(); drawAtts(); }
     $p('.live').innerHTML = files.filter((a) => !a.file).map((a) => `<div class="hm img pending"><img src="${a.url}" alt=""></div>`).join('')
-      + files.filter((a) => a.file).map((a) => `<div class="hm user pending">附件：${esc(a.name)}</div>`).join('') + (v ? `<div class="hm user pending">${esc(v)}</div>` : '');
+      + files.filter((a) => a.file).map((a) => `<div class="hm user pending">${userBody(`附件：${a.name}`, [], true)}</div>`).join('') + (v ? `<div class="hm user pending">${esc(v)}</div>` : '');
     hist.scrollTop = hist.scrollHeight;
     try {
       const r = await post('/api/oai/send', { id: c.id, text: v, paths: await Promise.all(files.map((a) => a.up)), ...opts });
@@ -2797,7 +2826,23 @@ function userHtml(m, mark) {
   // out of the bubble's text (停止 compares it with what was sent)
   const long = cls !== 'cmd' && (words.split('\n').length > 12 || words.length > 800);
   return `<div class="hm user${cls ? ' ' + cls : ''}${long ? ' long' : ''}"${mark}>${lab ? `<span class="lab">${lab}</span>` : ''}${long
-    ? `<div class="clip">${md(words)}</div><button class="more" data-more></button>` : md(words)}</div>`;
+    ? `<div class="clip">${userBody(words, m.files)}</div><button class="more" data-more></button>` : userBody(words, m.files)}</div>`;
+}
+// A message's words, and its files (its 附件：name lines) as cards under them: the file's kind (its ending) in a colored
+// square, its name; a link that opens it once it's sent (files: their saved names, in order; one on its way has none).
+// The card's text stays 附件：name, its kind drawn by CSS: 停止 compares the bubble's text with what was sent.
+// plain: the words as they are (one on its way), not as Markdown
+function userBody(words, files = [], plain = false) {
+  const left = [...(files ?? [])], att = (l) => /^附件：(.+)$/.exec(l), lines = words.split('\n');
+  const text = lines.filter((l) => !att(l)).join('\n').trim();
+  const cards = lines.map(att).filter(Boolean).map(([, name]) => {
+    const k = left.findIndex((f) => f.endsWith(`-${name}`)), saved = k >= 0 ? left.splice(k, 1)[0] : null;
+    const ext = (/\.([a-z0-9]{1,5})$/i.exec(name)?.[1] ?? '').toUpperCase();
+    const kind = { PDF: 'pdf', DOC: 'doc', DOCX: 'doc', RTF: 'doc', XLS: 'xls', XLSX: 'xls', CSV: 'xls', PPT: 'ppt', PPTX: 'ppt', ZIP: 'zip', RAR: 'zip', '7Z': 'zip', GZ: 'zip' }[ext] ?? 'any';
+    const inner = `<span class="ak">附件：</span><span class="an">${esc(name)}</span>`, at = ` class="att ${kind}" data-ext="${esc(ext || '文件')}"`;
+    return saved ? `<a${at} href="/api/file?n=${encodeURIComponent(saved)}" target="_blank" title="打开 ${esc(name)}">${inner}</a>` : `<span${at}>${inner}</span>`;
+  }).join('');
+  return (text ? (plain ? esc(text) : md(text)) : '') + (cards ? `<div class="atts">${cards}</div>` : '');
 }
 function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies headed GPT; {mac: its id}: a Mac's one's, headed with its mark
   for (const m of items) {

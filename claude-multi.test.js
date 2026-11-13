@@ -1514,3 +1514,20 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual(head.match(/\x1b\[\?\d+[hl]/g).sort(), ['\x1b[?1003h', '\x1b[?1006h', '\x1b[?1049h', '\x1b[?2004l']);
   console.log('replay modes ok');
 }
+// A file sent in a conversation, opened from the page: a PDF shown (no sandbox: it'd get no viewer), text and pictures
+// shown sandboxed, the page's own kinds (HTML, SVG) and anything else downloaded; its name as sent; only a saved upload's name
+{
+  const { fileServed } = require('./claude-multi');
+  const h = (n) => fileServed(n)?.headers;
+  assert.deepEqual([h('20261113T081500-a1b2c3-全文-中文-v16.pdf')['content-type'], h('20261113T081500-a1b2c3-全文-中文-v16.pdf')['content-security-policy']], ['application/pdf', undefined]);
+  assert.equal(h('20261113T081500-a1b2c3-全文-中文-v16.pdf')['content-disposition'], `inline; filename*=UTF-8''${encodeURIComponent('全文-中文-v16.pdf')}`);
+  assert.deepEqual([h('20261113T081500-a1b2c3-a.txt')['content-type'], h('20261113T081500-a1b2c3-a.txt')['content-security-policy']], ['text/plain; charset=utf-8', 'sandbox']);
+  for (const bad of ['x.html', 'x.svg', 'x.htm', 'x.docx', 'x']) {
+    const x = h(`20261113T081500-a1b2c3-${bad}`);
+    assert.deepEqual([x['content-type'], x['content-disposition'].split(';')[0]], ['application/octet-stream', 'attachment'], bad);
+  }
+  for (const bad of ['../x.pdf', 'x.pdf', '20261113T081500-a1b2c3-../x.pdf', String.raw`20261113T081500-a1b2c3-a\b.pdf`, '20261113T081500-zzzzzz-a.pdf', '']) assert.equal(fileServed(bad), null, bad);
+  const at = fileServed('20261113T081500-a1b2c3-a.pdf').file;
+  assert.ok(at.endsWith(require('path').join('uploads', '20261113T081500-a1b2c3-a.pdf')), at);
+  console.log('files opened ok');
+}

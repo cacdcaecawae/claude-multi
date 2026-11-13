@@ -2565,6 +2565,21 @@ function saveUpload(data, ext, dir = UPLOADS, name = null) {
   fs.writeFileSync(file, data);
   return file;
 }
+// A file sent in a conversation, opened from the page (/api/file?n=its saved name here): its name as sent, and how the
+// browser gets it. A PDF, a picture or plain text is shown (text and pictures sandboxed); anything else is downloaded:
+// never shown as one of the page's own kind (HTML, SVG), which would run as this page with its key. null: not one of ours.
+const UPLOAD_NAME = /^(\d{8}T\d{6}-[0-9a-f]{6})-([^\\/]+)$/;
+const TEXT_EXT = new Set(['txt', 'md', 'csv', 'tsv', 'log', 'json', 'yaml', 'yml', 'ini', 'toml', 'tex', 'bib', 'py', 'js', 'ts', 'm', 'c', 'h', 'cpp', 'hpp', 'java', 'rs', 'go', 'sh', 'ps1']);
+function fileServed(n) {
+  const m = UPLOAD_NAME.exec(n ?? '');
+  if (!m) return null;
+  const name = m[2], ext = path.extname(name).slice(1).toLowerCase();
+  const type = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[ext]
+    ?? (TEXT_EXT.has(ext) ? 'text/plain; charset=utf-8' : null);
+  return { name, file: path.join(UPLOADS, n), headers: { 'content-type': type ?? 'application/octet-stream', 'x-content-type-options': 'nosniff',
+    'content-disposition': `${type ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`, 'cache-control': 'private, max-age=86400',
+    ...(type && ext !== 'pdf' && { 'content-security-policy': 'sandbox' }) } }; // (a sandboxed PDF gets no viewer)
+}
 
 // The start of a window's history: the reader keeps only what scrolls by from where it began (the screen then),
 // and the window's own history can't be read. So that it starts at a question of yours, the record fills in
@@ -3595,6 +3610,13 @@ async function web() {
         res.writeHead(200, { 'content-type': OAI_TYPES[path.extname(p).slice(1).toLowerCase()], 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
         return res.end(fs.readFileSync(p));
       }
+      // a file sent in a conversation (附件：… in a message of yours), for the page's card of it to open
+      if (req.method === 'GET' && url.pathname === '/api/file') {
+        const f = fileServed(url.searchParams.get('n'));
+        if (!f || !fs.existsSync(f.file)) return out(404, '这个附件已经不在了：发过的文件只留 7 天', text);
+        res.writeHead(200, f.headers);
+        return res.end(fs.readFileSync(f.file));
+      }
       // only from our own page: from the same origin, as JSON or a picture's own type (another site's page can't send
       // either cross-origin without asking first, and nothing here answers that)
       if (req.method === 'POST' && req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return out(403, { err: '来源不对' });
@@ -3942,7 +3964,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { macList, MAC_USAGE, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { macList, MAC_USAGE, fileServed, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
