@@ -1106,7 +1106,7 @@ function rowMenu(id, x, y) {
   // A GPT 聊天 one: renamed and deleted here, at any time (an answer on its way is stopped)
   const items = (s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
     ['del', '归档…', s.pid && '正在运行：先结束对话再归档']] : [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
-    ['swap', '换账号继续…'], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean)
+    ['swap', '换账号继续…', s.mac && `用的是 ${macName(s.mac)} 的账号，换不了`], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean)
     .map(([k, l, off]) => `<button data-m="${k}"${off ? ' disabled' : ''}>${l}${off ? `<small>${esc(off)}</small>` : ''}</button>`).join('');
   if (NARROW.matches) { $('#sheetIn').innerHTML = `<div class="stitle">${esc(s.title)}</div><div class="mlist">${items}</div>`; $('#sheetIn').onclick = menuPick; return $('#sheet').classList.add('on'); }
   const m = $('#cmenu');
@@ -1140,6 +1140,7 @@ async function menuPick(e) {
 // looked at (or 管家 mode gone into): no card, it would come up over that
 async function swapFrom(s) {
   if (s.gpt) return toast('GPT 对话不能换账号');
+  if (s.mac) return toast(`用的是 ${macName(s.mac)} 的账号，换不了`);
   let c = convOf(s.id);
   if (c) activate(c.g, c);
   else if (s.pid) { await openSession(s.id); c = convOf(s.id); }
@@ -1970,7 +1971,7 @@ function makeConv(body, title) {
   el.className = 'pane hist';
   el.innerHTML = `<div class="crumbs"><span class="path"></span>
       <div class="seg"><button data-v="hist" class="on">对话</button><button data-v="term">终端</button></div>
-      <button class="ico" data-act="swap" title="换账号继续">${svg(I.swap, 1.8)}</button>
+      ${c.mac ? '' : `<button class="ico" data-act="swap" title="换账号继续">${svg(I.swap, 1.8)}</button>`}
       <button class="ico" data-act="end" title="结束对话（Ctrl+C）">${svg(I.end, 1.8)}</button></div>
     <div class="notice"><span></span><button class="btn primary" data-act="resume">接着聊</button></div>
     <div class="screen"></div><div class="msgs"></div>
@@ -2405,6 +2406,8 @@ function makeConv(body, title) {
   // by asking for the conversation until it runs under another key. One not running is simply started on that account.
   function swap(to) { // to: the account already picked (the 管家's card)
     if (c.gpt) return toast('GPT 对话不能换账号');
+    const mac = c.mac || state?.sessions.find((x) => x.id === c.id)?.mac; // a Mac's runs on that Mac's account: none of these
+    if (mac) return toast(`用的是 ${macName(mac)} 的账号，换不了`);
     const accts = state?.usage?.accounts ?? [], rec = state?.usage?.rec, cur = (c.acct ?? 1) - 1;
     if (!c.id || !state?.sessions.some((x) => x.id === c.id)) return toast('这个对话还没有消息，不用换账号');
     if (accts.length < 2) return toast('只有一个账号');

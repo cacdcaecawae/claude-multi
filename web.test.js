@@ -249,6 +249,13 @@ const press = async (key, shift = false) => {
     return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg linearGradient stop[stop-color="#61BB46"]') ? '+rainbow' : x.querySelector('.mk svg') ? '+apple' : '')).join(' | '); })()`),
     '账号 1 | Mac mini+apple | Mac a1+rainbow');
   console.log('browser 用量 Mac mini and a MacBook ok');
+  // 换账号继续 on a Mac's: off in the list's menu, saying whose account it runs on; asked for anyway, a note, no card
+  assert.equal(await evaluate(`(() => { const id = '0f1e2d3c-4b5a-4968-8776-000000000001';
+    state.sessions.push({ id, title: 'on Mac', cwd: '/Users/me/work', acct: -1, mac: 'la-a1', at: Date.now(), pid: null });
+    rowMenu(id, 10, 10); const b = [...document.querySelectorAll('[data-m="swap"]')].pop(), said = [b.disabled, b.textContent].join(' / ');
+    $('#cmenu').hidden = true; sheetOff(); swapFrom(state.sessions.at(-1)); const sheet = document.querySelector('#sheet').classList.contains('on');
+    state.sessions.pop(); return said + ' / ' + sheet; })()`), 'true / 换账号继续…用的是 Mac a1 的账号，换不了 / false');
+  console.log('browser 换账号 off for a Mac one ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }
