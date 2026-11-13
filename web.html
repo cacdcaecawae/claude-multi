@@ -192,6 +192,13 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   details.dir[open] .fc, details.dir:not([open]) .fo { display: none; }
   .row.one { min-height: 30px; padding-left: 4px; }
   .row.newp { width: calc(100% - 16px); color: var(--fg2); text-align: left; } /* 项目 view's 新建项目 */
+  /* 项目 view: each one a card, its name over its conversations, its ⋯ and ＋ always there */
+  details.proj { margin: 6px 8px 0; border: 1px solid var(--cardB); border-radius: 10px; background: var(--bg); overflow: hidden; }
+  details.proj + details.proj { margin-top: 8px; }
+  details.proj > summary { height: 38px; padding: 0 10px 0 12px; font-size: 14px; font-weight: 600; color: var(--fgHi); }
+  details.proj[open] > summary { border-bottom: 1px solid var(--border); }
+  details.proj .row { margin: 2px 4px; } details.proj .empty { padding: 12px; }
+  @media (hover: hover) { details.proj > summary:not(:hover) .fnew { visibility: visible; } }
   .ico.on { background: var(--sel); color: var(--fgHi); }
   .ico .bdot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
   .sideHead .ico { position: relative; }
@@ -1108,6 +1115,7 @@ function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
   const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run', proj = listMode === 'proj';
   const groupDot = (list) => nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : ''); // a folded group's: its rows' most urgent
+  $('#sideTitle').textContent = proj ? '项目' : '对话';
   // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
   const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', 'Claude'], ['gpt', 'GPT']].map(([k, l]) => `<button data-kind="${k}"${k === listKind ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : '';
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${lead(x)}
@@ -1128,7 +1136,7 @@ function renderChats() {
     $('#view').html = kindBar + `<button class="row one newp" data-newp><i class="ac0">${svg(I.plus)}</i><span class="main t">新建项目</span></button>`
       + (P.map(({ p, list }) => sec('p:' + p.id, `<i>${svg(I.grid)}</i><span class="t">${esc(p.name)}</span>${groupDot(list)}
         <button class="ico fnew" data-pmenu="${p.id}" title="重命名、删除项目">${svg(I.more)}</button><button class="ico fnew" data-padd="${p.id}" title="添加对话">${svg(I.plus)}</button>`,
-        list.length ? list.map(chatRow).join('') : '<div class="empty">还没有对话，点项目名右边的 ＋ 添加</div>', 'dir')).join('')
+        list.length ? list.map(chatRow).join('') : '<div class="empty">还没有对话，点右上角的 ＋ 添加</div>', 'dir proj')).join('')
         || '<div class="empty">还没有项目：建一个，把不同文件夹里的对话放进去</div>');
   } else {
     const dirs = new Map(), oai = S.filter((x) => x.oai); // the GPT 聊天 ones, folder-less: a group of their own on top

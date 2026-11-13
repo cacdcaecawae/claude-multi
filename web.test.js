@@ -285,15 +285,15 @@ const press = async (key, shift = false) => {
     const out = [], wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), pick = (k) => [...document.querySelectorAll('[data-m]')].filter((b) => b.dataset.m === k).pop();
     await projPost({ op: 'new', name: '论文' }); await projPost({ op: 'add', id: 1, conv: ['A', 'gone-1'] }); await load();
     menuAt = 0; side = 'chats'; listMode = 'dirs'; renderChats(); document.querySelector('#sideActs [data-proj]').click();
-    out.push([listMode, document.querySelector('#sideActs [data-proj]').classList.contains('on'), !!document.querySelector('#view [data-newp]'),
-      [...document.querySelectorAll('#view [data-sec="p:1"] [data-open]')].map((r) => r.dataset.open).join()].join(','));
+    out.push([listMode, document.querySelector('#sideActs [data-proj]').classList.contains('on'), !!document.querySelector('#view [data-newp]'), $('#sideTitle').textContent,
+      document.querySelector('#view [data-sec="p:1"]').classList.contains('proj'), [...document.querySelectorAll('#view [data-sec="p:1"] [data-open]')].map((r) => r.dataset.open).join()].join(','));
     state.sessions.push({ id: 'C', title: 'other folder', cwd: 'F:/other', acct: 0, at: Date.now(), pid: null });
     findSheet(projOf(1)); out.push([...document.querySelectorAll('#findList [data-open]')].map((r) => r.dataset.open).join());
     document.querySelector('#findList [data-open="C"]').click(); await wait(400); sheetOff(); out.push(projOf(1).ids.join());
     menuAt = 0; rowMenu('A', 10, 10, '1'); pick('out').click(); await wait(400); out.push(projOf(1).ids.join()); $('#cmenu').hidden = true; sheetOff();
     const c = makeConv({ id: 'C' }, 'other folder'); addConv(focusG, c); c.fresh(); const n = focusG.active; out.push(n.joins.join());
-    closeConv(n); closeConv(c); await projPost({ op: 'drop', id: 1 }); listMode = 'dirs'; await load();
-    return out.join(' | '); })()`), 'proj,true,true,A | C | A,gone-1,C | gone-1,C | 1');
+    closeConv(n); closeConv(c); await projPost({ op: 'drop', id: 1 }); listMode = 'dirs'; await load(); out.push($('#sideTitle').textContent);
+    return out.join(' | '); })()`), 'proj,true,true,项目,true,A | C | A,gone-1,C | gone-1,C | 1 | 对话');
   console.log('browser 项目 ok');
   // a file in a message of yours: a card opening it (its saved name found in the record's text, a Mac's path too), its
   // kind from its ending; the bubble's text as before (停止 compares it); one on its way: a card, no link yet
