@@ -2349,8 +2349,10 @@ function makeConv(body, title) {
     else if (term) { if (kind === 'pc') sizeFont(); else claim(); if (FINE) term.focus(); } // shown: measure again
     drawTxt();
   }
+  // given up after 15 s: one read at a time, and one left hanging (a phone's network, a page put away mid-read) kept
+  // every next read from going, the 对话 view frozen while its terminal went on
   async function histGet(qs) { // by the terminal's key once it's open (a new conversation has no id), else the id
-    const r = await (await fetch(`/api/history?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}${c.gpt ? '&gpt=1' : ''}${qs}`)).json();
+    const r = await (await fetch(`/api/history?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}${c.gpt ? '&gpt=1' : ''}${qs}`, { signal: AbortSignal.timeout(15000) })).json();
     if (r.err) throw new Error(r.err);
     // a long paste is recorded as Claude Code hands it to the model, in <pasted_content id="N"> … </pasted_content id="N">:
     // shown without them, and so your message sent here is found in the record (not shown twice)
@@ -2398,7 +2400,7 @@ function makeConv(body, title) {
       }
       drawLive(first); topNote();
       if (first && hist.scrollTop < 300) loadOlder(); // too little to scroll yet: fill from before
-    } catch (e) { if (g === histGen && first) hist.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    } catch (e) { if (g === histGen && first) hist.innerHTML = `<div class="empty">${esc(e.name === 'TimeoutError' ? '网络慢，正在重新读取…' : e.message)}</div>`; }
     finally { if (g === histGen) histNow = false; }
   }
   function topNote() {

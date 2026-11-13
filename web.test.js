@@ -12,10 +12,12 @@ const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
+let histHang = false; // the next history read never answered (a phone's request left hanging)
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/open') opens++;
+  if (url.pathname === '/api/history' && histHang) { histHang = false; return; } // left open, never answered
   if (url.pathname === '/api/project') { // 项目, kept as the service keeps them
     let b = ''; req.on('data', (d) => (b += d));
     return req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(require('./claude-multi').projectOp(state.projects ??= [], JSON.parse(b)))); });
@@ -354,6 +356,16 @@ const press = async (key, shift = false) => {
   assert.equal(opens - before, 1);
   await evaluate('closeConv(hc)');
   console.log('browser a stream behind reopened ok');
+  // a history read left hanging (a phone's network): given up, the next read goes, the 对话 view isn't frozen
+  histHang = true;
+  assert.equal(await evaluate(`(async () => { const real = AbortSignal.timeout; AbortSignal.timeout = () => real.call(AbortSignal, 300); // its 15 s, short here
+    try {
+      const c = makeConv({ id: '${historyId}' }, 'hang'); addConv(focusG, c);
+      for (let i = 0; i < 60 && !c.el.querySelector('.hm.claude'); i++) await new Promise((ok) => setTimeout(ok, 100));
+      const shown = !!c.el.querySelector('.hm.claude'); closeConv(c); return shown;
+    } finally { AbortSignal.timeout = real; } })()`), true);
+  assert.equal(histHang, false); // the hanging read did come
+  console.log('browser a hanging history read given up ok');
   // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
   assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
     a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);
