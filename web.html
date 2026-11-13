@@ -191,6 +191,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   details.dir > summary i { display: grid; color: var(--fg2); } details.dir > summary svg { width: 16px; height: 16px; }
   details.dir[open] .fc, details.dir:not([open]) .fo { display: none; }
   .row.one { min-height: 30px; padding-left: 4px; }
+  .row.newp { width: calc(100% - 16px); color: var(--fg2); text-align: left; } /* 项目 view's 新建项目 */
   .ico.on { background: var(--sel); color: var(--fgHi); }
   .ico .bdot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
   .sideHead .ico { position: relative; }
@@ -826,6 +827,7 @@ const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path
   dark: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>', find: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>', plus: '<path d="M12 5v14M5 12h14"/>', refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
   send: '<path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/>', stop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>',
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  grid: '<rect x="4.5" y="4.5" width="6" height="6" rx="1.2"/><rect x="13.5" y="4.5" width="6" height="6" rx="1.2"/><rect x="4.5" y="13.5" width="6" height="6" rx="1.2"/><rect x="13.5" y="13.5" width="6" height="6" rx="1.2"/>',
   more: '<circle cx="6" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/>',
   folder: '<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H19a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
   folderOpen: '<path d="M3.5 18V7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H18a1.5 1.5 0 0 1 1.5 1.5v1.5"/><path d="M3.5 18l2.6-6.4a1 1 0 0 1 .9-.6h14l-2.7 6.4a1 1 0 0 1-.9.6z"/>' };
@@ -866,7 +868,7 @@ let deskW = saved.deskW ?? null, deskRW = saved.deskRW ?? null; // the 管家's 
 const secs = saved.secs ?? {}; // its 操作台's sections opened or closed by you (by data-sec), the rest as the page has them
 let state = null, tokens = null, tokensNow = null, tokensAt = 0, tokensErr = '', groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
-let listMode = saved.listMode === 'run' ? 'run' : 'dirs'; // 对话: by folder, or (the bell) 提示 and the running ones
+let listMode = ['run', 'proj'].includes(saved.listMode) ? saved.listMode : 'dirs'; // 对话: by folder, (the bell) 提示 and the running ones, or (the grid) by 项目
 let listKind = ['claude', 'gpt'].includes(saved.listKind) ? saved.listKind : 'all'; // which kind of conversation it lists, with GPT accounts
 let butler = !!saved.butler, bConv = null, peek = null; // 管家 mode (the spark), and its conversation once there is one
 $('#app').classList.toggle('butler', butler);
@@ -1104,13 +1106,14 @@ const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" tabindex="0" r
     <div class="main"><div class="t">${x.mac ? '' : mark(x.gpt, x.acct + 1)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
 function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
-  const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run';
+  const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run', proj = listMode === 'proj';
+  const groupDot = (list) => nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : ''); // a folded group's: its rows' most urgent
   // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
   const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', 'Claude'], ['gpt', 'GPT']].map(([k, l]) => `<button data-kind="${k}"${k === listKind ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : '';
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${esc(x.prompt || x.title)}">${lead(x)}
     <div class="main t">${x.mac ? '' : mark(x.gpt, x.acct + 1)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
-  $('#sideActs').html = `<button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
+  $('#sideActs').html = `<button class="ico${proj ? ' on' : ''}" data-proj title="${proj ? '回到按文件夹' : '按项目'}">${svg(I.grid)}</button><button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   if (bell) {
     $('#view').html = kindBar + (notes.length ? sec('notes', `<span>提示<b class="count">${notes.length}</b></span><button class="link" data-readall>全部已读</button>`,
@@ -1118,13 +1121,22 @@ function renderChats() {
           <div class="main"><div class="t">${esc(n.title || n.project || 'Claude')}</div><div class="m">${esc(n.project)} · ${esc(n.msg)}</div></div>
           <span class="when">${ago(n.at)}</span></div>`).join('')) : '')
       + sec('run', `<span>运行中<b class="count">${run.length}</b></span>`, run.length ? run.map(chatRow).join('') : '<div class="empty">没有在运行的对话</div>');
+  } else if (proj) { // your 项目, by their newest conversation; each one's from any folder (its folder under its title)
+    const by = new Map(S.map((x) => [x.id, x]));
+    const P = (state.projects ?? []).map((p) => ({ p, list: p.ids.map((i) => by.get(i)).filter(Boolean).sort((a, b) => b.at - a.at) }))
+      .sort((a, b) => (b.list[0]?.at ?? b.p.at) - (a.list[0]?.at ?? a.p.at));
+    $('#view').html = kindBar + `<button class="row one newp" data-newp><i class="ac0">${svg(I.plus)}</i><span class="main t">新建项目</span></button>`
+      + (P.map(({ p, list }) => sec('p:' + p.id, `<i>${svg(I.grid)}</i><span class="t">${esc(p.name)}</span>${groupDot(list)}
+        <button class="ico fnew" data-pmenu="${p.id}" title="重命名、删除项目">${svg(I.more)}</button><button class="ico fnew" data-padd="${p.id}" title="添加对话">${svg(I.plus)}</button>`,
+        list.length ? list.map(chatRow).join('') : '<div class="empty">还没有对话，点项目名右边的 ＋ 添加</div>', 'dir')).join('')
+        || '<div class="empty">还没有项目：建一个，把不同文件夹里的对话放进去</div>');
   } else {
     const dirs = new Map(), oai = S.filter((x) => x.oai); // the GPT 聊天 ones, folder-less: a group of their own on top
     for (const x of S) if (!x.oai) dirs.set(x.cwd, [...(dirs.get(x.cwd) ?? []), x]);
-    $('#view').html = kindBar + (oai.length ? sec('oai', `<i class="mk" style="color:var(--gpt)">${OPENAI}</i><span class="t">GPT 聊天</span>${nd(oai.some((x) => chatMark(x) === 'ask') ? 'ask' : oai.some(chatMark) ? 'done' : '')}
+    $('#view').html = kindBar + (oai.length ? sec('oai', `<i class="mk" style="color:var(--gpt)">${OPENAI}</i><span class="t">GPT 聊天</span>${groupDot(oai)}
         <button class="ico fnew" data-newoai title="新的 GPT 聊天">${svg(I.plus)}</button>`, oai.map(line).join(''), 'dir') : '')
       + (dirs.size ? [...dirs].map(([cwd, list]) => sec('d:' + cwd,
-      `<i class="fc">${svg(I.folder)}</i><i class="fo">${svg(I.folderOpen)}</i><span class="t" title="${esc(cwd)}">${esc(base(cwd) || cwd)}</span>${nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : '')}
+      `<i class="fc">${svg(I.folder)}</i><i class="fo">${svg(I.folderOpen)}</i><span class="t" title="${esc(cwd)}">${esc(base(cwd) || cwd)}</span>${groupDot(list)}
         <button class="ico fnew" data-newin="${esc(cwd)}" title="在这里开新对话（用推荐的账号）">${svg(I.plus)}</button>`,
       list.map(line).join(''), 'dir')).join('') : oai.length ? '' : '<div class="empty">还没有对话</div>');
   }
@@ -1132,16 +1144,17 @@ function renderChats() {
 }
 // A conversation's menu: right-click its row, or hold it on a phone (a sheet there). 在右侧打开, 重命名, 换账号继续,
 // 删除; a running one is renamed from inside it (/rename) and deleted once ended: those say so instead
-let menuFor = null, menuAt = 0;
-function rowMenu(id, x, y) {
+let menuFor = null, menuAt = 0, menuIn = null; // menuIn: the 项目 its row is under (移出这个项目)
+function rowMenu(id, x, y, inProj) {
   const s = state?.sessions.find((v) => v.id === id);
   if (!s || (NARROW.matches && Date.now() - menuAt < 1000)) return; // held on Android: its own contextmenu and the hold both
-  menuFor = s; menuAt = Date.now();
+  menuFor = s; menuAt = Date.now(); menuIn = inProj ?? null;
   // a GPT one: not renamed nor moved to another account here; deleted is archived (Codex's own, undone with codex unarchive).
   // A GPT 聊天 one: renamed and deleted here, at any time (an answer on its way is stopped)
   const items = (s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
     ['del', '归档…', s.pid && '正在运行：先结束对话再归档']] : [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
     ['swap', '换账号继续…', s.mac && `用的是 ${macName(s.mac)} 的账号，换不了`], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean);
+  if (menuIn != null) items.splice(-1, 0, ['out', '移出这个项目']); // before 删除
   popMenu(s.title, items, x, y);
 }
 // [key, words, why it's off (or a note under it, note: true)] at x, y; a phone: a sheet
@@ -1170,6 +1183,13 @@ async function menuPick(e) {
   $('#cmenu').hidden = true; sheetOff();
   const k = b.dataset.m;
   if (s.pane) return k === 'fresh' ? s.pane.fresh() : k === 'swap' ? s.pane.swap() : s.pane.end();
+  if (s.proj) { // a 项目's ⋯
+    const p = s.proj;
+    if (k === 'prename') { const name = prompt('项目的新名字', p.name)?.trim(); if (name && name !== p.name) projPost({ op: 'rename', id: p.id, name }); }
+    else if (confirm(`删除项目「${p.name}」？\n只删这个分组，里面的对话不动，还在原来的文件夹里。`)) projPost({ op: 'drop', id: p.id });
+    return;
+  }
+  if (k === 'out') return projPost({ op: 'out', id: menuIn, conv: [s.id] });
   if (k === 'aside') return openSession(s.id, 'aside');
   if (k === 'swap') return swapFrom(s);
   if (k === 'rename') {
@@ -1201,13 +1221,17 @@ async function swapFrom(s) {
   if (c && !c.closed && !butler && focusG?.active === c) c.swap();
 }
 $('#cmenu').onclick = menuPick;
-$('#view').oncontextmenu = (e) => { const r = e.target.closest('[data-open]'); if (r) { e.preventDefault(); rowMenu(r.dataset.open, e.clientX, e.clientY); } };
+// 项目: a change, the list read again after it (what failed, said); the one a row is under, in 项目 view
+const projPost = (b) => post('/api/project', b).then((r) => { load(); return r; }, (e) => { toast(e.message, 4000); return null; });
+const projOf = (id) => state?.projects?.find((p) => p.id === Number(id));
+const rowProj = (r) => r.closest('[data-sec^="p:"]')?.dataset.sec.slice(2);
+$('#view').oncontextmenu = (e) => { const r = e.target.closest('[data-open]'); if (r) { e.preventDefault(); rowMenu(r.dataset.open, e.clientX, e.clientY, rowProj(r)); } };
 { // held on a phone: 0.5 s without moving (a scroll takes the finger: pointercancel)
   let hold = null;
   const drop = () => { clearTimeout(hold?.t); hold = null; };
   $('#view').addEventListener('pointerdown', (e) => {
     const r = e.pointerType === 'touch' && e.target.closest('[data-open]');
-    if (r) { const { clientX: x, clientY: y } = e; hold = { x, y, t: setTimeout(() => rowMenu(r.dataset.open, x, y), 500) }; }
+    if (r) { const { clientX: x, clientY: y } = e; hold = { x, y, t: setTimeout(() => rowMenu(r.dataset.open, x, y, rowProj(r)), 500) }; }
   });
   $('#view').addEventListener('pointermove', (e) => { if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10) drop(); });
   for (const t of ['pointerup', 'pointercancel']) $('#view').addEventListener(t, drop);
@@ -1232,6 +1256,13 @@ $('#side').onclick = (e) => {
   }
   if (b.matches('[data-newoai]')) { e.preventDefault(); return addConv(focusG, makeOai(null, '新对话')); }
   if (b.matches('[data-bell]')) { listMode = listMode === 'run' ? 'dirs' : 'run'; save(); return renderChats(); }
+  if (b.matches('[data-proj]')) { listMode = listMode === 'proj' ? 'dirs' : 'proj'; save(); return renderChats(); }
+  if (b.matches('[data-newp]')) { const name = prompt('新项目的名字')?.trim(); return name && projPost({ op: 'new', name }); }
+  if (b.matches('[data-padd]')) { e.preventDefault(); return findSheet(projOf(b.dataset.padd)); } // not the fold
+  if (b.matches('[data-pmenu]')) {
+    e.preventDefault(); const p = projOf(b.dataset.pmenu), r = b.getBoundingClientRect();
+    menuFor = { proj: p }; return popMenu(p.name, [['prename', '重命名…'], ['pdrop', '删除项目…']], r.left, r.bottom + 4);
+  }
   if (b.matches('[data-refresh]')) {
     if (side === 'usage') return refreshUsage();
     if (side === 'chats') return load().then((err) => toast(err ? `刷新失败：${err}` : '列表已刷新'));
@@ -1762,20 +1793,25 @@ function newSheet() {
 // 搜索对话 (Ctrl+K, or the magnifier over the list), as VS Code's quick open: every word typed in its title, its last
 // message or its folder; ↑ ↓ and Enter (Ctrl+Enter: to the side), or a click. Only the list under the box is drawn again,
 // the newest 100 found (ponytail: a cap, not paging: more than that, a word more narrows it)
-function findSheet() {
+// into: a 项目 (its ＋): the one picked goes into it instead, those in it already not offered; the sheet stays for the next
+function findSheet(into) {
   if (!state) return toast('还在加载，稍等');
-  $('#sheetIn').innerHTML = '<input type="text" id="findIn" placeholder="搜索对话：标题、最后一句话、文件夹" enterkeyhint="go" autocomplete="off"><div id="findList"></div>';
+  $('#sheetIn').innerHTML = `${into ? `<div class="stitle">添加到「${esc(into.name)}」</div>` : ''}<input type="text" id="findIn" placeholder="搜索对话：标题、最后一句话、文件夹" enterkeyhint="go" autocomplete="off"><div id="findList"></div>`;
   const box = $('#findIn'), list = $('#findList');
   let hits = [], at = 0;
   const pick = () => { list.querySelector('.sel')?.classList.remove('sel'); list.children[at]?.classList.add('sel'); list.children[at]?.scrollIntoView({ block: 'nearest' }); };
   const draw = () => {
     const words = box.value.toLowerCase().split(/\s+/).filter(Boolean);
-    hits = state.sessions.filter((x) => !isButler(x) && words.every((w) => `${x.title}\n${x.prompt ?? ''}\n${x.cwd}`.toLowerCase().includes(w))).slice(0, 100);
+    hits = state.sessions.filter((x) => !isButler(x) && !into?.ids.includes(x.id) && words.every((w) => `${x.title}\n${x.prompt ?? ''}\n${x.cwd}`.toLowerCase().includes(w))).slice(0, 100);
     at = 0;
     list.innerHTML = hits.map(chatRow).join('') || '<div class="empty">没有找到</div>';
     pick();
   };
-  const open = (i, aside) => { const x = hits[i]; if (!x) return; sheetOff(); openSession(x.id, aside ? 'aside' : undefined); };
+  const open = async (i, aside) => {
+    const x = hits[i]; if (!x) return;
+    if (into) { const p = await projPost({ op: 'add', id: into.id, conv: [x.id] }); if (p) { into = p; draw(); toast(`已加到「${p.name}」`); } return; }
+    sheetOff(); openSession(x.id, aside ? 'aside' : undefined);
+  };
   box.oninput = draw;
   box.onkeydown = (e) => {
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && hits.length) { e.preventDefault(); at = (at + (e.key === 'ArrowDown' ? 1 : hits.length - 1)) % hits.length; pick(); }
@@ -2314,6 +2350,7 @@ function makeConv(body, title) {
           line.value = d?.text ?? saved ?? '';
           atts = (d?.atts ?? []).filter((a) => !a.failed); sent = d?.sent ?? []; lastSent = d?.lastSent ?? null;
         } else { session.id = r.id; drafts.delete(null); }
+        if (r.id && c.joins) { for (const p of c.joins) post('/api/project', { op: 'add', id: p, conv: [r.id] }).catch(() => {}); c.joins = null; } // ⋯'s 新对话: in its origin's 项目
         c.id = r.id; grow(); drawAtts(); redraw(); markRows(); save();
         if (!first) { histEnd = histOldest = null; histGen++; histNow = false; liveHtml = ''; hist.innerHTML = ''; return loadHist(); }
       }
@@ -2686,6 +2723,7 @@ function makeConv(body, title) {
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null, cwd = c.dir(), mac = c.mac || s?.mac;
     const n = mac ? makeConv({ mac, open: true, ...(cwd && !cwd.startsWith('/') && { dir: cwd }) }, base(cwd) || macName(mac))
       : makeConv({ dir: cwd, acct: c.acct ?? (s ? s.acct + 1 : 1), gpt: c.gpt }, base(cwd) || '新对话');
+    n.joins = (state?.projects ?? []).filter((p) => c.id && p.ids.includes(c.id)).map((p) => p.id); // added once it has a record
     addConv(c.g, n);
   };
   c.where = () => (key && !c.ended ? kind : null); // 'pc' a window on the computer, 'pty' the web service

@@ -2184,6 +2184,30 @@ const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus'
 // file. Where one stands is worked out from those facts (stageOf), never from words the 管家 wrote.
 const TICKETS = path.join(ROOT, 'tickets.json');
 function readTickets(f = TICKETS) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return []; } }
+// 项目: your own groups of conversations, from any folder, account or Mac (the page's 项目 view), [{id, name, at, ids}].
+// Only the web service writes the file. A conversation not in the list stays in its project (a look can miss one).
+const PROJECTS = path.join(ROOT, 'projects.json');
+function readProjects(f = PROJECTS) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return []; } }
+// one change: new {name}, rename {id, name}, drop {id}, add / out {id, conv: [conversation ids]}
+function projectOp(all, b, now = Date.now()) {
+  const p = b.op === 'new' ? null : all.find((x) => x.id === Number(b.id));
+  if (b.op !== 'new' && !p) throw new Error('没有这个项目');
+  if (b.op === 'new' || b.op === 'rename') {
+    const name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!name) throw new Error('项目要有名字');
+    if (all.some((x) => x !== p && x.name === name)) throw new Error(`已经有叫「${name}」的项目了`);
+    if (p) { p.name = name; return p; }
+    const n = { id: Math.max(0, ...all.map((x) => x.id)) + 1, name, at: now, ids: [] };
+    all.push(n);
+    return n;
+  }
+  if (b.op === 'drop') { all.splice(all.indexOf(p), 1); return { id: p.id }; } // its conversations stay where they are
+  const ids = [].concat(b.conv ?? []).map(String);
+  if (!ids.length || ids.some((i) => !/^[\w-]{1,80}$/.test(i))) throw new Error('缺少对话 id');
+  if (b.op === 'add') { p.ids = [...new Set([...p.ids, ...ids])]; return p; }
+  if (b.op === 'out') { p.ids = p.ids.filter((i) => !ids.includes(i)); return p; }
+  throw new Error('不认识的操作');
+}
 const REPORT_WORDS = ['做完', '卡住', '失败', '不用做']; // what a worker reports (claude-multi report N <word> …); ask is apart
 // one change, as the service makes it: new, give (to a conversation), report (a worker's word or question), end. What
 // you asked for is never changed: no op touches it.
@@ -3220,6 +3244,7 @@ async function web() {
   // its tickets, as the 操作台 shows them: the open ones, what waits on you first, then the last 5 ended. Only this service
   // writes them (written whole, then swapped in: a crash mid-write leaves the old file)
   const editTickets = (fn) => { const all = readTickets(), r = fn(all); fs.writeFileSync(`${TICKETS}.tmp`, JSON.stringify(all, null, 1)); fs.renameSync(`${TICKETS}.tmp`, TICKETS); return r; };
+  const editProjects = (fn) => { const all = readProjects(), r = fn(all); fs.writeFileSync(`${PROJECTS}.tmp`, JSON.stringify(all, null, 1)); fs.renameSync(`${PROJECTS}.tmp`, PROJECTS); return r; };
   const ticketsNow = (list = [...sessions(), ...gptSessions()]) => { // a ticket's conversation: Claude's or GPT's
     const all = readTickets().map((t) => { const s = list.find((x) => x.id === t.conv); return { ...t, ev: undefined, stage: stageOf(t, s), convTitle: s?.title ?? null }; });
     const open = all.filter((t) => !t.end).sort((a, b) => STAGE_ORDER.indexOf(a.stage[1]) - STAGE_ORDER.indexOf(b.stage[1]) || a.id - b.id);
@@ -3288,8 +3313,9 @@ async function web() {
       // the Macs (the Mac mini, more): 新对话 offers them
       const macs = macList(load()).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
       return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
-        tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow() };
+        tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects() };
     },
+    'POST /api/project': (q, b) => editProjects((all) => projectOp(all, b)),
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
     'GET /api/tickets': () => ticketsNow(),
     'POST /api/ticket': (q, b) => editTickets((all) => ticketOp(all, b)),
@@ -3964,7 +3990,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { macList, MAC_USAGE, fileServed, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { projectOp, macList, MAC_USAGE, fileServed, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

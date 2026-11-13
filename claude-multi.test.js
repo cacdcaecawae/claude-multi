@@ -1531,3 +1531,24 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.ok(at.endsWith(require('path').join('uploads', '20261113T081500-a1b2c3-a.pdf')), at);
   console.log('files opened ok');
 }
+// 项目: made, renamed (names unique), conversations added from anywhere (each once) and taken out; dropped, its
+// conversations untouched; nonsense refused
+{
+  const { projectOp } = require('./claude-multi');
+  const all = [], op = (b) => projectOp(all, b, 1);
+  assert.equal(op({ op: 'new', name: '  声速场   论文 ' }).id, 1);
+  assert.equal(op({ op: 'new', name: '工具' }).id, 2);
+  assert.throws(() => op({ op: 'new', name: '工具' }), /已经有/);
+  assert.throws(() => op({ op: 'new', name: ' ' }), /名字/);
+  assert.deepEqual(op({ op: 'add', id: 1, conv: ['a-1', 'b-2', 'a-1'] }).ids, ['a-1', 'b-2']);
+  assert.deepEqual(op({ op: 'add', id: '1', conv: 'c-3' }).ids, ['a-1', 'b-2', 'c-3']);
+  assert.deepEqual(op({ op: 'out', id: 1, conv: ['b-2'] }).ids, ['a-1', 'c-3']);
+  assert.equal(op({ op: 'rename', id: 1, name: '声速场' }).name, '声速场');
+  assert.throws(() => op({ op: 'rename', id: 1, name: '工具' }), /已经有/);
+  assert.throws(() => op({ op: 'add', id: 1, conv: ['../x'] }), /对话 id/);
+  assert.throws(() => op({ op: 'add', id: 9, conv: ['a-1'] }), /没有这个项目/);
+  op({ op: 'drop', id: 2 });
+  assert.equal(op({ op: 'new', name: '再一个' }).id, 2);
+  assert.deepEqual(all.map((p) => [p.id, p.name, p.ids.join()]), [[1, '声速场', 'a-1,c-3'], [2, '再一个', '']]);
+  console.log('projects ok');
+}

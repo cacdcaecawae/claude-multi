@@ -13,6 +13,10 @@ const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/api/project') { // 项目, kept as the service keeps them
+    let b = ''; req.on('data', (d) => (b += d));
+    return req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(require('./claude-multi').projectOp(state.projects ??= [], JSON.parse(b)))); });
+  }
   if (url.pathname === '/api/oai/send') {
     let b = ''; req.on('data', (d) => (b += d));
     return req.on('end', () => {
@@ -271,6 +275,22 @@ const press = async (key, shift = false) => {
     return out.join(' | '); })()`),
     'on,on,on | true,C:/test,1,,test | on,off,off | 换账号继续…用的是 Mac a1 的账号，换不了 | la-a1,F:/proj | off,on,on');
   console.log('browser a conversation\'s ⋯ (新对话, 换账号, 结束) ok');
+  // 项目: the grid lists yours (a conversation from any folder; one no longer listed skipped); its ＋ offers those not in it
+  // and adds the one picked; a row's menu there takes one out; ⋯'s 新对话 from one in a 项目 joins it
+  assert.equal(await evaluate(`(async () => {
+    const out = [], wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), pick = (k) => [...document.querySelectorAll('[data-m]')].filter((b) => b.dataset.m === k).pop();
+    await projPost({ op: 'new', name: '论文' }); await projPost({ op: 'add', id: 1, conv: ['A', 'gone-1'] }); await load();
+    menuAt = 0; side = 'chats'; listMode = 'dirs'; renderChats(); document.querySelector('#sideActs [data-proj]').click();
+    out.push([listMode, document.querySelector('#sideActs [data-proj]').classList.contains('on'), !!document.querySelector('#view [data-newp]'),
+      [...document.querySelectorAll('#view [data-sec="p:1"] [data-open]')].map((r) => r.dataset.open).join()].join(','));
+    state.sessions.push({ id: 'C', title: 'other folder', cwd: 'F:/other', acct: 0, at: Date.now(), pid: null });
+    findSheet(projOf(1)); out.push([...document.querySelectorAll('#findList [data-open]')].map((r) => r.dataset.open).join());
+    document.querySelector('#findList [data-open="C"]').click(); await wait(400); sheetOff(); out.push(projOf(1).ids.join());
+    menuAt = 0; rowMenu('A', 10, 10, '1'); pick('out').click(); await wait(400); out.push(projOf(1).ids.join()); $('#cmenu').hidden = true; sheetOff();
+    const c = makeConv({ id: 'C' }, 'other folder'); addConv(focusG, c); c.fresh(); const n = focusG.active; out.push(n.joins.join());
+    closeConv(n); closeConv(c); await projPost({ op: 'drop', id: 1 }); listMode = 'dirs'; await load();
+    return out.join(' | '); })()`), 'proj,true,true,A | C | A,gone-1,C | gone-1,C | 1');
+  console.log('browser 项目 ok');
   // a file in a message of yours: a card opening it (its saved name found in the record's text, a Mac's path too), its
   // kind from its ending; the bubble's text as before (停止 compares it); one on its way: a card, no link yet
   assert.equal(await evaluate(`(() => { const raw = '看看这个\\n附件：/Users/me/work/.uploads/20261113T081500-a1b2c3-全文-中文-v16.pdf';
