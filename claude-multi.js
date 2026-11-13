@@ -798,18 +798,20 @@ except Exception as e: out({'err': '网络错误：%s' % e, 'temp': True})
 // (the Mac's login shell is zsh): the keychain unlocked (a Claude that tmux starts later keeps the login of the one that
 // started it, its link gone or not), into its folder; resume: one running in that tmux joined (one in a terminal there
 // refused), else a new one; its pid and tmux session said in an OSC, then joined. {sess}: that session joined again.
-// ponytail: Homebrew's tmux on Apple silicon; on an Intel Mac it's /usr/local/bin/tmux
-const MAC_TMUX = '/opt/homebrew/bin/tmux';
+// Its tmux: Homebrew's, else one built into ~/.local (a Mac without Homebrew: a MacBook's), as $T.
+// shortcut: Homebrew's on Apple silicon only; an Intel Mac's is /usr/local/bin/tmux
+const MAC_TMUX = 'T=/opt/homebrew/bin/tmux; [ -x "$T" ] || T="$HOME"/.local/bin/tmux';
 // config: the config dir there (null: ~/.claude), set in the command tmux runs (its server, one per Mac, keeps the
 // environment of whoever started it)
 function macCmd({ into = '', resume = null, sess = null, name = '', cols = 100, rows = 30, config = null }) {
-  const tm = `${MAC_TMUX} -u -f /dev/null -L cm`;
-  if (sess) return `exec ${tm} attach -t ${sq(sess)}`;
+  const tm = '"$T" -u -f /dev/null -L cm';
+  if (sess) return `${MAC_TMUX}; exec ${tm} attach -t ${sq(sess)}`;
   const env = config ? `env CLAUDE_CONFIG_DIR=${macSh(config)} ` : '';
   const sh = [
     'security unlock-keychain -p "$LC_MACKC" >/dev/null 2>&1; unset LC_MACKC',
     `${into} || exit`,
-    `[ -x ${MAC_TMUX} ] || { echo 'Mac 上没有 tmux：在 Mac 上运行 brew install tmux'; exit 3; }`,
+    MAC_TMUX,
+    `[ -x "$T" ] || { echo 'Mac 上没有 tmux：在 Mac 上运行 brew install tmux'; exit 3; }`,
     `t() { ${tm} "$@"; }`,
     'S= P=',
     ...(resume ? [`for f in $(grep -l ${sq(resume)} ${config ? macSh(config) : '~/.claude'}/sessions/*.json 2>/dev/null); do`,

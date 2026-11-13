@@ -1403,7 +1403,12 @@ if (SESSION0) {
   assert.ok(!fresh.includes('grep -l') && fresh.includes("S='cm-p1'") && fresh.indexOf('unset LC_MACKC') < fresh.indexOf('start-server'));
   const again = script(macCmd({ into: 'cd x', resume: id, name: 'cm-p2' }));
   assert.ok(again.includes(`grep -l '${id}' ~/.claude/sessions/*.json`) && again.includes(`'exec ~/.local/bin/claude --resume ${id}'`));
-  assert.equal(macCmd({ sess: 'cm-p1' }), "exec /opt/homebrew/bin/tmux -u -f /dev/null -L cm attach -t 'cm-p1'");
+  assert.equal(macCmd({ sess: 'cm-p1' }), `T=/opt/homebrew/bin/tmux; [ -x "$T" ] || T="$HOME"/.local/bin/tmux; exec "$T" -u -f /dev/null -L cm attach -t 'cm-p1'`);
+  // its tmux: Homebrew's, else ~/.local's (built there on a Mac without Homebrew); none: said so
+  {
+    const r = require('child_process').spawnSync('sh', ['-c', `${/^T=.*$/m.exec(fresh)[0]}; echo "$T"`], { env: { ...process.env, HOME: '/no-such-home' }, encoding: 'utf8' });
+    if (!r.error) assert.equal(r.stdout.trim(), '/no-such-home/.local/bin/tmux'); // (no Homebrew here)
+  }
   const sh = require('child_process').spawnSync('sh', ['-n'], { input: again, encoding: 'utf8' });
   if (sh.error) console.log('(no sh here: the Mac script not parsed)'); else assert.equal(sh.status, 0, sh.stderr);
   // the PC project's CLAUDE.md after the Mac folder's: packed into the start's sh; none there, or too big: only the old one taken out
