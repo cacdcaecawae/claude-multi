@@ -1160,7 +1160,7 @@ if (SESSION0) {
   assert.equal((await opened({ key: 'B', pid: 22 })).pid, 22);
   let pid = null, binding = null, written = null, looked = 0;
   const chatNew = vm.runInNewContext(fn(js, 'chatNew') + ';chatNew;', {
-    path, fs: { existsSync: () => true, statSync: () => ({ isDirectory: () => true }) }, HOME: 'home',
+    path, isDir: () => true, HOME: 'home',
     sameDir: (a, b) => a === b, inLive: () => false, load: () => ({ profiles: [{ configDir: 'acct' }] }), shareTrust() {},
     webPost: async () => ({ key: 'B', pid }), untilReady: async () => {}, blog() {}, console: { log() {} },
     waitLive: async (match) => { looked++; return [{ pid: 11, sessionId: 'A' }, { pid: 22, sessionId: 'B' }].find(match); },
@@ -1584,6 +1584,10 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.equal((await dirsIn(path.parse(tmp).root)).up, '');
   assert.equal((await dirsIn('')).dirs[0], os.homedir());
   await assert.rejects(dirsIn(path.join(tmp, 'gone')), /打不开/);
+  // a network folder: not looked at (\\?\ + a folder here is there, so only the guard says no)
+  const { isDir } = require('./claude-multi');
+  assert.deepEqual([isDir(tmp), isDir('\\\\?\\' + tmp), isDir('//?/' + tmp), isDir(undefined), isDir('')], [true, false, false, false, false]);
+  await assert.rejects(dirsIn('\\\\?\\' + tmp), /网络/);
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log('folders to pick ok');
 })();

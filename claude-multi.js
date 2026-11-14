@@ -1705,7 +1705,7 @@ async function chatPick(ref, n) {
 }
 async function chatNew(dir, text, n, before, gpt = false) {
   dir = path.resolve(dir ?? '');
-  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`没有这个文件夹：${dir}`);
+  if (!isDir(dir)) throw new Error(`没有这个文件夹：${dir}`);
   if (sameDir(dir, HOME)) throw new Error('主文件夹 Claude 每次都要问是否信任，换一个具体的文件夹');
   if (inLive(dir)) throw new Error(LIVE_NO);
   if (!text) throw new Error('要给它第一句话');
@@ -2205,6 +2205,10 @@ const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus'
 // file. Where one stands is worked out from those facts (stageOf), never from words the 管家 wrote.
 const TICKETS = path.join(ROOT, 'tickets.json');
 function readTickets(f = TICKETS) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return []; } }
+// A folder here, as 新对话 and 浏览 take one: not a network one (\\host\share, //host/share: only looking there makes
+// Windows connect to that computer and offer it this login's hash), and there
+const netPath = (d) => /^[\\/]{2}/.test(String(d ?? ''));
+const isDir = (d) => !netPath(d) && fs.existsSync(d) && fs.statSync(d).isDirectory();
 // 新对话's 浏览: the folders in p by name, dot ones last (no files, links, or Windows' $Recycle.Bin and the like), and
 // the one above ('' at a drive's top); no p: the home folder and this computer's drives. Read without blocking the
 // service: a slow or gone drive holds this answer only.
@@ -2213,6 +2217,7 @@ async function dirsIn(p) {
     const drives = process.platform !== 'win32' ? ['/'] : (await Promise.all([...'CDEFGHIJKLMNOPQRSTUVWXYZ'].map((l) => fs.promises.access(`${l}:\\`).then(() => `${l}:\\`, () => null)))).filter(Boolean);
     return { path: '', up: null, dirs: [HOME, ...drives] };
   }
+  if (netPath(p)) throw new Error('网络上的文件夹（\\ 开头）不能浏览');
   const at = path.resolve(p), up = path.dirname(at);
   let es; try { es = await fs.promises.readdir(at, { withFileTypes: true }); } catch { throw new Error(`打不开 ${at}`); }
   const names = es.filter((e) => e.isDirectory() && !e.name.startsWith('$') && e.name !== 'System Volume Information').map((e) => e.name)
@@ -3497,7 +3502,7 @@ async function web() {
       if (b.dir != null) b.dir = String(b.dir).trim().replace(/^"(.*)"$/, '$1'); // a typed path, maybe as Explorer's 复制为路径 quotes it
       if (b.gpt) { // a GPT one: {id} its Codex here, or continued here on its own account (a GPT one changes none); {dir, acct}
         if (!b.id) {
-          if (!b.dir || !fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
+          if (!isDir(b.dir)) throw new Error('文件夹不存在');
           return { key: startGpt(Number(b.acct) || 1, b.dir, null, cols, rows).key, kind: 'pty' };
         }
         const t = gptLive().find((x) => x.gpt.id === b.id);
@@ -3510,7 +3515,7 @@ async function web() {
         return { key: startGpt(s.acct + 1, s.cwd, s.id, cols, rows).key, kind: 'pty' };
       }
       if (b.mac && !b.id) { // {mac: its id (true: the Mac mini), dir?}: one started on that Mac, for that folder here (its project folder there), or in the Mac's folder
-        if (b.dir && (!fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory())) throw new Error('文件夹不存在');
+        if (b.dir && !isDir(b.dir)) throw new Error('文件夹不存在');
         return opened(startMac(b.mac === true ? 'mac' : String(b.mac), b.dir ? { pc: path.resolve(b.dir) } : {}, cols, rows));
       }
       if (b.id) {
@@ -3538,7 +3543,7 @@ async function web() {
       if (b.dir && sameDir(b.dir, BUTLER) && !butlerOn()) throw new Error(BUTLER_SHUT);
       const p = reg.profiles[b.acct - 1];
       if (!p) throw new Error('没有这个账号');
-      if (!b.dir || !fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
+      if (!isDir(b.dir)) throw new Error('文件夹不存在');
       // the 管家 is one: two screens starting it at once (it isn't listed before its first message) get the same
       const one = sameDir(b.dir, BUTLER) && [...terms.values()].find((t) => t.kind === 'pty' && !t.gone && sameDir(t.cwd, BUTLER));
       if (one) return opened(one);
@@ -4042,7 +4047,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { asksPermission, projectOp, dirsIn, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
