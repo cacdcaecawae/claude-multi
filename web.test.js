@@ -15,8 +15,9 @@ let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (
 let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
 let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
 const histReads = []; // when each history read came
-// 新对话's 浏览: the folders in each one (a path: its own), and the home folder and drives at the top ('')
-const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'D:/'] }, 'D:/': { path: 'D:/', up: '', dirs: ['D:/work', 'D:/.cache'] }, 'D:/work': { path: 'D:/work', up: 'D:/', dirs: [] } };
+// 新对话's 浏览: each folder's folders and files (a path: its own), and the places at the top ('')
+const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'C:/Users/ly/Desktop', 'D:/'], files: [] },
+  'D:/': { path: 'D:/', up: '', dirs: ['D:/work', 'D:/.cache'], files: ['a.civa'] }, 'D:/work': { path: 'D:/work', up: 'D:/', dirs: [], files: [] } };
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -281,24 +282,40 @@ const press = async (key, shift = false) => {
     document.querySelector('#sheetIn [data-a="1"]').click(); const c = on(); sheetOff(); state.usage.projects = [];
     return [a, b, said, la, c].join(' | '); })()`), 'F:/proj |  | true | /true | F:/proj');
   console.log('browser 新对话 Mac mini in mine, and a second Mac ok');
-  // 新对话's 浏览: a folder typed that isn't there: the home folder and the drives; one clicked: gone into, the one
-  // picked; ↑ back up; one with none in it said so; 收起 puts the list away (here with / for \, the page doesn't mind)
+  // 新对话's 浏览: a window (wider than a sheet). A folder typed that isn't there: it opens on 此电脑 (the places: home,
+  // 桌面, the drives), nothing to 选择 yet; a click goes into a folder (its folders, then its files dimmed, not
+  // clickable); one empty said so; ↑ back up; a path typed with Enter: gone to, one not there said so; 选择: back to
+  // 新对话 with it; 浏览 again opens there; 取消 and Esc: back, the folder as it was (here with / for \, the page doesn't mind)
   {
-    const names = () => evaluate("[...document.querySelectorAll('#sheetIn .dirs .opt')].map((b) => b.textContent).join(' | ')");
-    const dirIn = () => evaluate("document.querySelector('#dirIn').value");
-    const into = (p) => evaluate(`document.querySelector('#sheetIn .dirs [data-in="${p}"]').click()`);
-    await evaluate("newSheet(); const i = document.querySelector('#dirIn'); i.value = 'Z:/nope'; i.dispatchEvent(new Event('input')); document.querySelector('#browse').click()");
-    await until("document.querySelectorAll('#sheetIn .dirs .opt').length === 2");
-    assert.deepEqual([await names(), await dirIn()], ['C:/Users/ly | D:/', 'Z:/nope']);
-    await into('D:/'); await until("document.querySelector('#dirIn').value === 'D:/'");
-    assert.equal(await names(), '↑ 上一级 | work | .cache');
-    await into('D:/work'); await until("document.querySelector('#dirIn').value === 'D:/work'");
-    assert.equal(await evaluate("document.querySelector('#sheetIn .dirs').textContent"), '↑ 上一级这里面没有文件夹');
-    await into('D:/'); await until("document.querySelector('#dirIn').value === 'D:/'");
-    await evaluate("document.querySelector('#browse').click()");
-    assert.deepEqual([await evaluate("!!document.querySelector('#sheetIn .dirs')"), await dirIn()], [false, 'D:/']);
+    const names = () => evaluate("[...document.querySelectorAll('.pkList .pkRow')].map((b) => (b.tagName === 'BUTTON' ? '' : '-') + b.textContent).join(' | ')");
+    const pkPath = () => evaluate("document.querySelector('#pkPath').value");
+    const into = (p) => evaluate(`document.querySelector('.pkList [data-in="${p}"]').click()`);
+    await evaluate("{ newSheet(); const i = document.querySelector('#dirIn'); i.value = 'Z:/nope'; i.dispatchEvent(new Event('input')); document.querySelector('#browse').click() }");
+    await until("!!document.querySelector('.pkList')");
+    assert.deepEqual([await names(), await pkPath(), await evaluate("document.querySelector('#pkOk').disabled"), await evaluate("document.querySelector('#sheet').classList.contains('wide')")],
+      ['ly | 桌面 | D:', '', true, true]);
+    assert.equal(await evaluate("[...document.querySelectorAll('.pkSide .pkRow')].map((b) => b.textContent).join(' | ')"), 'ly | 桌面 | D:');
+    await into('D:/'); await until("document.querySelector('#pkPath').value === 'D:/'");
+    assert.deepEqual([await names(), await evaluate("document.querySelector('.pkSide .pkRow.on')?.textContent")], ['work | .cache | -a.civa', 'D:']);
+    await into('D:/work'); await until("document.querySelector('#pkPath').value === 'D:/work'");
+    assert.equal(await evaluate("document.querySelector('.pkList').textContent.trim()"), '这里是空的');
+    await evaluate("document.querySelector('[data-pkup]').click()"); await until("document.querySelector('#pkPath').value === 'D:/'");
+    await evaluate("{ const p = document.querySelector('#pkPath'); p.value = 'D:/work'; p.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) }");
+    await until("document.querySelector('#pkPath').value === 'D:/work'");
+    await evaluate("{ const p = document.querySelector('#pkPath'); p.value = 'Z:/nope'; p.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) }");
+    await until("[...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('打不开'))");
+    assert.equal(await evaluate("document.querySelector('.pkSide .pkRow.on') ? 'on' : 'none'"), 'none'); // still in D:/work
+    await evaluate("document.querySelector('#pkOk').click()");
+    assert.deepEqual([await evaluate("document.querySelector('#dirIn').value"), await evaluate("!!document.querySelector('.pkList')"), await evaluate("document.querySelector('#sheet').classList.contains('wide')")], ['D:/work', false, false]);
+    await evaluate("document.querySelector('#browse').click()"); await until("document.querySelector('#pkPath')?.value === 'D:/work'");
+    await evaluate("document.querySelector('[data-pkup]').click()"); await until("document.querySelector('#pkPath').value === 'D:/'");
+    await evaluate("document.querySelector('#pkNo').click()");
+    assert.equal(await evaluate("document.querySelector('#dirIn').value"), 'D:/work');
+    await evaluate("document.querySelector('#browse').click()"); await until("!!document.querySelector('.pkList')");
+    await evaluate("document.querySelector('[data-pkx]').focus(); document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    assert.deepEqual([await evaluate("document.querySelector('#sheet').classList.contains('on')"), await evaluate("document.querySelector('#dirIn')?.value")], [true, 'D:/work']);
     await evaluate('sheetOff()');
-    console.log('browser 新对话 folders to pick ok');
+    console.log('browser 新对话 folder window ok');
   }
   // 用量: each Mac's records (listed last) under its name and its mark (Apple's; the old rainbow one for the MacBook), not as one more 账号 n
   assert.equal(await evaluate(`(() => {

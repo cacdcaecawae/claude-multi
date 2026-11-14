@@ -671,7 +671,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     .cpy::before, .att button::before, .seg button::before, .send .bset::before { content: ''; position: absolute; inset: -9px; }
     .att button::before { inset: -12px; } .seg button::before { inset: -8px 0; } .send .bset::before { inset: -9px -6px; }
     .seg button { padding: 3px 10px; font-size: 13px; }
-    .sheet .ico, .sheet .btn, .sheet .opt { min-width: 44px; min-height: 44px; }
+    .sheet .ico, .sheet .btn, .sheet .opt { min-width: 44px; min-height: 44px; } .pkRow { min-height: 44px; }
     .msgs { padding: 12px 14px 16px; }
     .hm { font-size: 15px; } .hm.tool { font-size: 12.5px; } .hm.sub { font-size: 13.5px; }
     .hm th, .hm td { padding: 4px 7px; min-width: 3.5em; }
@@ -710,8 +710,28 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .opt:disabled { opacity: .45; }
   .dirRow { display: flex; gap: 6px; }
   .dirRow input { flex: 1; min-width: 0; }
-  .dirs { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; margin-top: 6px; }
-  .dirs .opt { text-align: left; flex: none; }
+  /* 浏览's window: wider than a sheet; the places at its left, the folder's list beside (on a phone: the places in a row above) */
+  @media (min-width: 760px) { .sheet.wide .in { width: min(860px, calc(100% - 32px)); } }
+  .pkBar { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+  .pkBar input { flex: 1; min-width: 0; }
+  .pk { display: flex; gap: 8px; height: min(52vh, 460px); margin: 8px 0 10px; }
+  .pkSide { width: 160px; flex: none; overflow: auto; display: flex; flex-direction: column; gap: 1px; padding-right: 8px; border-right: 1px solid var(--popB); }
+  .pkSide .m { margin: 6px 8px 2px; }
+  .pkList { flex: 1; min-width: 0; overflow: auto; border: 1px solid var(--inputB); border-radius: 6px; background: var(--input); padding: 4px; }
+  .pkRow { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border-radius: 4px; text-align: left; white-space: nowrap; color: var(--fg); }
+  .pkRow span { overflow: hidden; text-overflow: ellipsis; }
+  .pkRow svg { width: 18px; height: 18px; flex: none; color: var(--orange); }
+  .pkRow.file, .pkRow.file svg { color: var(--fg3); }
+  .pkRow.on { background: var(--accentBg); color: var(--fgHi); }
+  @media (hover: hover) { button.pkRow:hover { background: var(--btnH); } }
+  .pkNone { padding: 8px; }
+  .pkFoot { display: flex; gap: 8px; align-items: center; }
+  .pkFoot .m { flex: 1; }
+  @media (max-width: 759px) {
+    .pk { flex-direction: column; height: 62vh; }
+    .pkSide { width: auto; flex-direction: row; overflow-x: auto; padding: 0 0 6px; border-right: 0; border-bottom: 1px solid var(--popB); }
+    .pkSide .m { display: none; } .pkSide .pkRow { width: auto; flex: none; }
+  }
   /* a picture clicked in a conversation: big, in the middle of the page; a click or Esc puts it away */
   #zoom { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 3vmin; background: rgba(0,0,0,.82); cursor: zoom-out; outline: none; }
   #zoom[hidden] { display: none; }
@@ -844,6 +864,7 @@ const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   grid: '<rect x="4.5" y="4.5" width="6" height="6" rx="1.2"/><rect x="13.5" y="4.5" width="6" height="6" rx="1.2"/><rect x="4.5" y="13.5" width="6" height="6" rx="1.2"/><rect x="13.5" y="13.5" width="6" height="6" rx="1.2"/>',
   more: '<circle cx="6" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/>',
+  file: '<path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4"/>',
   folder: '<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H19a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
   folderOpen: '<path d="M3.5 18V7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H18a1.5 1.5 0 0 1 1.5 1.5v1.5"/><path d="M3.5 18l2.6-6.4a1 1 0 0 1 .9-.6h14l-2.7 6.4a1 1 0 0 1-.9.6z"/>' };
 // an account's mark, n from 1: its number in a ring, the ring as full as its 5-hour window has left, dashed while unread.
@@ -915,7 +936,7 @@ function pickAcct(s) {
     $('#sheet').classList.add('on');
   });
 }
-const sheetOff = () => { $('#sheet').classList.remove('on', 'mid'); $('#sheetIn').onclick = null; $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') sheetOff(); }; };
+const sheetOff = () => { $('#sheet').classList.remove('on', 'mid', 'wide'); $('#sheetIn').onclick = null; $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') sheetOff(); }; };
 // The keyboard: a sheet up takes the focus (its first control, unless it put it in one itself) and gives it back to where it
 // was once it goes; Esc puts it away as a tap outside it does (a choice waiting on it answered "none"). A row or a tab
 // reached with Tab opens with Enter or Space, as clicked.
@@ -1787,18 +1808,41 @@ function newSheet() {
   const u = state.usage, dirs = u.projects ?? [], gp = state.gpt ?? [];
   // with a GPT account or an OpenAI key: Claude or GPT; under GPT, Codex (its accounts) or 聊天 (with the key: neither
   // account nor folder), whichever there are
-  let gptOn = false, chat = !gp.length, acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? '', look = null, seq = 0;
-  // 浏览: this computer's folders, a click into one at a time (its folders then shown), the one gone into the one picked;
-  // first the folder typed or picked, one that isn't there: the home folder and the drives
+  let gptOn = false, chat = !gp.length, acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? '', pick = null, places = null, seq = 0;
+  // 浏览: a window as Windows' own: the places on its left (最近, the home folder, 桌面 文档 下载, the drives), the
+  // folder's folders and, dimmed, its files; a click goes into a folder, 选择 takes the one it's in. It opens on the
+  // folder typed or picked; one that isn't there: 此电脑 (the places)
+  const get = (p) => fetch('/api/dirs?' + new URLSearchParams({ path: p })).then((r) => r.json()).catch(() => ({ err: '连不上' }));
   const browse = async (p) => {
-    const n = ++seq;
-    let r; try { r = await (await fetch('/api/dirs?' + new URLSearchParams({ path: p }))).json(); } catch { r = { err: '连不上' }; }
-    if (n !== seq || !$('#sheet').classList.contains('on') || !$('#dirIn')) return; // a later click's, or the sheet put away
-    if (r.err) return !look && p ? browse('') : toast(r.err);
-    look = r; if (r.path) dir = r.path;
-    draw();
+    const n = ++seq, [r, top] = await Promise.all([get(p), places || !p ? null : get('')]);
+    if (n !== seq || !$('#sheet').classList.contains('on')) return; // a later click's, or put away meanwhile
+    if (!places && !(top ?? r).err) places = top ?? r;
+    if (r.err) return !pick && p ? browse('') : toast(r.err);
+    pick = r; draw();
+  };
+  const PLACE = { Desktop: '桌面', Documents: '文档', Downloads: '下载' }, place = (d) => PLACE[base(d)] ?? (base(d) || d);
+  const drawPick = () => {
+    const row = (d, name, on) => `<button class="pkRow${on ? ' on' : ''}" data-in="${esc(d)}" title="${esc(d)}">${svg(I.folder)}<span>${esc(name)}</span></button>`;
+    $('#sheetIn').innerHTML = `<div class="pkWrap"><div class="shead"><span class="stitle">选择文件夹</span><button class="ico" data-pkx title="关闭">${svg(I.close)}</button></div>
+      <div class="pkBar"><button class="ico" data-pkup title="上一级"${pick.up == null ? ' disabled' : ''}>${svg(I.send)}</button>
+        <input type="text" id="pkPath" value="${esc(pick.path)}" placeholder="此电脑：选一个位置，或输入路径按回车" enterkeyhint="go" autocomplete="off"></div>
+      <div class="pk"><div class="pkSide">${dirs.length ? `<div class="m">最近</div>${dirs.map((d) => row(d, base(d), d === pick.path)).join('')}` : ''}
+        <div class="m">位置</div>${(places?.dirs ?? []).map((d) => row(d, place(d), d === pick.path)).join('')}</div>
+        <div class="pkList">${pick.dirs.map((d) => row(d, pick.path ? base(d) : place(d))).join('')}${pick.files.map((f) => `<div class="pkRow file">${svg(I.file)}<span>${esc(f)}</span></div>`).join('')}
+          ${pick.dirs.length || pick.files.length ? '' : '<div class="m pkNone">这里是空的</div>'}</div></div>
+      <div class="pkFoot"><span class="m" title="${esc(pick.path)}">${pick.path ? `选这个：${esc(pick.path)}` : '先进到一个文件夹里'}</span>
+        <button class="btn" id="pkNo">取消</button><button class="btn primary" id="pkOk"${pick.path ? '' : ' disabled'}>选择</button></div></div>`;
+    const back = (to) => { seq++; if (to != null) dir = to; pick = null; draw(); }; // seq: a look still on its way, dropped
+    document.querySelectorAll('[data-in]').forEach((b) => (b.onclick = () => browse(b.dataset.in)));
+    $('[data-pkup]').onclick = () => browse(pick.up);
+    $('#pkPath').onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) browse(e.target.value.trim().replace(/^"(.*)"$/, '$1')); };
+    $('#pkNo').onclick = $('[data-pkx]').onclick = () => back();
+    $('#pkOk').onclick = () => back(pick.path);
+    $('.pkWrap').onkeydown = (e) => { if (e.key === 'Escape') { e.stopPropagation(); back(); } }; // Esc: back to 新对话, not out of it
   };
   const draw = () => {
+    $('#sheet').classList.toggle('wide', !!pick);
+    if (pick) return drawPick();
     // the Macs last among Claude's accounts (acct: a Mac's id): its own folder there, no folder to pick here
     const gpt = gptOn && !chat, oai = gptOn && chat, mac = gptOn ? null : macOf(acct) ?? null;
     const accts = gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
@@ -1813,8 +1857,7 @@ function newSheet() {
         用你的 OpenAI key 按用量计费，Pro 难的问题一次要想几分钟，答好了会通知你。</div>`
       : `<div class="m" style="margin-top:12px">账号</div><div class="opts">${accts.join('')}</div>
       <div class="m">文件夹</div><div class="opts">${mac ? `<button class="opt ${dir ? '' : 'on'}" data-d="" title="不对应你电脑上的文件夹">${esc(base(mac.dir))}</button>` : ''}${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
-      <div class="dirRow"><input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径"><button class="btn" id="browse">${look ? '收起' : '浏览'}</button></div>
-      ${look ? `<div class="dirs">${look.up != null ? `<button class="opt" data-in="${esc(look.up)}">↑ 上一级</button>` : ''}${look.dirs.map((d) => `<button class="opt" data-in="${esc(d)}" title="${esc(d)}">${esc(look.path ? base(d) : d)}</button>`).join('') || '<div class="m">这里面没有文件夹</div>'}</div>` : ''}
+      <div class="dirRow"><input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径"><button class="btn" id="browse">浏览…</button></div>
       ${mac ? `<div class="m" style="margin-top:8px;white-space:normal">${dir ? `在 ${esc(mac.label)} 上的 ${esc(mac.dir)}/${esc(base(dir))} 里运行，用那边的账号，通过 ssh 改你电脑上这个文件夹里的文件。`
         : `直接在 ${esc(mac.label)} 上的 ${esc(mac.dir)} 里运行，用那边的账号，不对应你电脑上的文件夹。`}</div>` : ''}`}
       <div class="btns" style="margin-top:14px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="start" style="flex:2">开始</button></div>`;
@@ -1826,11 +1869,10 @@ function newSheet() {
       if (macOf(b.dataset.a)) { if (!macOf(acct)) dir = ''; acct = b.dataset.a; } else { acct = +b.dataset.a; dir ||= dirs[0] ?? ''; }
       draw();
     }));
-    document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { dir = b.dataset.d; if (look && dir) browse(dir); else draw(); }));
-    document.querySelectorAll('[data-in]').forEach((b) => (b.onclick = () => browse(b.dataset.in)));
+    document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { dir = b.dataset.d; draw(); }));
     if (!oai) {
       $('#dirIn').oninput = (e) => (dir = e.target.value.trim().replace(/^"(.*)"$/, '$1'));
-      $('#browse').onclick = () => { if (look) { look = null; draw(); } else browse(dir); };
+      $('#browse').onclick = () => browse(dir);
     }
     $('#cancel').onclick = sheetOff;
     $('#start').onclick = () => {

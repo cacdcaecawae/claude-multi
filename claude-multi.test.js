@@ -1580,9 +1580,12 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   for (const d of ['b', '.hid', 'a', '$Recycle.Bin']) fs.mkdirSync(path.join(tmp, d));
   fs.writeFileSync(path.join(tmp, 'f.txt'), '');
   const r = await dirsIn(tmp);
-  assert.deepEqual([r.path, r.up, r.dirs], [tmp, path.dirname(tmp), ['a', 'b', '.hid'].map((n) => path.join(tmp, n))]);
+  assert.deepEqual([r.path, r.up, r.dirs, r.files], [tmp, path.dirname(tmp), ['a', 'b', '.hid'].map((n) => path.join(tmp, n)), ['f.txt']]);
   assert.equal((await dirsIn(path.parse(tmp).root)).up, '');
-  assert.equal((await dirsIn('')).dirs[0], os.homedir());
+  fs.mkdirSync(path.join(os.homedir(), 'Desktop'), { recursive: true }); // the test's home: a 桌面, no 文档
+  const top = await dirsIn('');
+  assert.deepEqual(top.dirs.slice(0, 2), [os.homedir(), path.join(os.homedir(), 'Desktop')]);
+  assert.ok(!top.dirs.includes(path.join(os.homedir(), 'Documents')) && top.dirs.length > 2, 'the drives after');
   await assert.rejects(dirsIn(path.join(tmp, 'gone')), /打不开/);
   // a network folder: not looked at (\\?\ + a folder here is there, so only the guard says no)
   const { isDir } = require('./claude-multi');

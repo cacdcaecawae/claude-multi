@@ -2209,21 +2209,23 @@ function readTickets(f = TICKETS) { try { return JSON.parse(fs.readFileSync(f, '
 // Windows connect to that computer and offer it this login's hash), and there
 const netPath = (d) => /^[\\/]{2}/.test(String(d ?? ''));
 const isDir = (d) => !netPath(d) && fs.existsSync(d) && fs.statSync(d).isDirectory();
-// 新对话's 浏览: the folders in p by name, dot ones last (no files, links, or Windows' $Recycle.Bin and the like), and
-// the one above ('' at a drive's top); no p: the home folder and this computer's drives. Read without blocking the
-// service: a slow or gone drive holds this answer only.
+// 新对话's 浏览: the folders in p by name, dot ones last (no links, nor Windows' $Recycle.Bin and the like), its files'
+// names (shown dimmed, to know the folder by), and the one above ('' at a drive's top); no p: the places (the home
+// folder, its 桌面 文档 下载, the drives). Read without blocking the service: a slow or gone drive holds this answer only.
 async function dirsIn(p) {
+  const there = (d) => fs.promises.access(d).then(() => d, () => null);
   if (!p) {
-    const drives = process.platform !== 'win32' ? ['/'] : (await Promise.all([...'CDEFGHIJKLMNOPQRSTUVWXYZ'].map((l) => fs.promises.access(`${l}:\\`).then(() => `${l}:\\`, () => null)))).filter(Boolean);
-    return { path: '', up: null, dirs: [HOME, ...drives] };
+    const drives = process.platform !== 'win32' ? ['/'] : [...'CDEFGHIJKLMNOPQRSTUVWXYZ'].map((l) => `${l}:\\`);
+    const dirs = await Promise.all([HOME, ...['Desktop', 'Documents', 'Downloads'].map((n) => path.join(HOME, n)), ...drives].map(there));
+    return { path: '', up: null, dirs: dirs.filter(Boolean), files: [] };
   }
   if (netPath(p)) throw new Error('网络上的文件夹（\\ 开头）不能浏览');
   const at = path.resolve(p), up = path.dirname(at);
   let es; try { es = await fs.promises.readdir(at, { withFileTypes: true }); } catch { throw new Error(`打不开 ${at}`); }
-  const names = es.filter((e) => e.isDirectory() && !e.name.startsWith('$') && e.name !== 'System Volume Information').map((e) => e.name)
-    .sort((a, b) => (a[0] === '.') - (b[0] === '.') || a.localeCompare(b, 'zh'));
-  // shortcut: a folder's first 500 only; past that, typed
-  return { path: at, up: up === at ? '' : up, dirs: names.slice(0, 500).map((n) => path.join(at, n)) };
+  const names = (f) => es.filter(f).map((e) => e.name).sort((a, b) => (a[0] === '.') - (b[0] === '.') || a.localeCompare(b, 'zh'));
+  const dirs = names((e) => e.isDirectory() && !e.name.startsWith('$') && e.name !== 'System Volume Information');
+  // shortcut: a folder's first 500 folders and 500 files only; past that, typed
+  return { path: at, up: up === at ? '' : up, dirs: dirs.slice(0, 500).map((n) => path.join(at, n)), files: names((e) => e.isFile()).slice(0, 500) };
 }
 // 项目: your own groups of conversations, from any folder, account or Mac (the page's 项目 view), [{id, name, at, ids}].
 // Only the web service writes the file. A conversation not in the list stays in its project (a look can miss one).
