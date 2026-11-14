@@ -2205,6 +2205,21 @@ const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus'
 // file. Where one stands is worked out from those facts (stageOf), never from words the 管家 wrote.
 const TICKETS = path.join(ROOT, 'tickets.json');
 function readTickets(f = TICKETS) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return []; } }
+// 新对话's 浏览: the folders in p by name, dot ones last (no files, links, or Windows' $Recycle.Bin and the like), and
+// the one above ('' at a drive's top); no p: the home folder and this computer's drives. Read without blocking the
+// service: a slow or gone drive holds this answer only.
+async function dirsIn(p) {
+  if (!p) {
+    const drives = process.platform !== 'win32' ? ['/'] : (await Promise.all([...'CDEFGHIJKLMNOPQRSTUVWXYZ'].map((l) => fs.promises.access(`${l}:\\`).then(() => `${l}:\\`, () => null)))).filter(Boolean);
+    return { path: '', up: null, dirs: [HOME, ...drives] };
+  }
+  const at = path.resolve(p), up = path.dirname(at);
+  let es; try { es = await fs.promises.readdir(at, { withFileTypes: true }); } catch { throw new Error(`打不开 ${at}`); }
+  const names = es.filter((e) => e.isDirectory() && !e.name.startsWith('$') && e.name !== 'System Volume Information').map((e) => e.name)
+    .sort((a, b) => (a[0] === '.') - (b[0] === '.') || a.localeCompare(b, 'zh'));
+  // shortcut: a folder's first 500 only; past that, typed
+  return { path: at, up: up === at ? '' : up, dirs: names.slice(0, 500).map((n) => path.join(at, n)) };
+}
 // 项目: your own groups of conversations, from any folder, account or Mac (the page's 项目 view), [{id, name, at, ids}].
 // Only the web service writes the file. A conversation not in the list stays in its project (a look can miss one).
 const PROJECTS = path.join(ROOT, 'projects.json');
@@ -3345,6 +3360,7 @@ async function web() {
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects() };
     },
     'POST /api/project': (q, b) => editProjects((all) => projectOp(all, b)),
+    'GET /api/dirs': (q) => dirsIn(q.get('path') ?? ''),
     // your name, for the page's avatar (its first character; none: the gear), kept in the registry
     'POST /api/me': (q, b) => {
       const name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 20);
@@ -4026,7 +4042,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { asksPermission, projectOp, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { asksPermission, projectOp, dirsIn, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

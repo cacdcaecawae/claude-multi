@@ -1573,6 +1573,20 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual(all.map((p) => [p.id, p.name, p.ids.join()]), [[1, '声速场', 'a-1,c-3'], [2, '再一个', '']]);
   console.log('projects ok');
 }
+// 新对话's 浏览: a folder's folders (no files; dot ones last; $Recycle.Bin and the like not) and the one above; a drive's
+// top: '' above; none asked: the home folder first; one not there: said so
+(async () => {
+  const { dirsIn } = require('./claude-multi'), path = require('path'), os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-dirs-'));
+  for (const d of ['b', '.hid', 'a', '$Recycle.Bin']) fs.mkdirSync(path.join(tmp, d));
+  fs.writeFileSync(path.join(tmp, 'f.txt'), '');
+  const r = await dirsIn(tmp);
+  assert.deepEqual([r.path, r.up, r.dirs], [tmp, path.dirname(tmp), ['a', 'b', '.hid'].map((n) => path.join(tmp, n))]);
+  assert.equal((await dirsIn(path.parse(tmp).root)).up, '');
+  assert.equal((await dirsIn('')).dirs[0], os.homedir());
+  await assert.rejects(dirsIn(path.join(tmp, 'gone')), /打不开/);
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log('folders to pick ok');
+})();
 // A Mac's usage read at most every 5 minutes (each read an ssh there and a request from it to Anthropic): read again
 // within that, the first read's; 刷新 (fresh) reads now. (A Mac with no password saved here: no ssh at all.)
 {

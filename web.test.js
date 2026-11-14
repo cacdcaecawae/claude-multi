@@ -15,6 +15,8 @@ let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (
 let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
 let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
 const histReads = []; // when each history read came
+// 新对话's 浏览: the folders in each one (a path: its own), and the home folder and drives at the top ('')
+const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'D:/'] }, 'D:/': { path: 'D:/', up: '', dirs: ['D:/work', 'D:/.cache'] }, 'D:/work': { path: 'D:/work', up: 'D:/', dirs: [] } };
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -49,7 +51,8 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/open' ? { key: 'fixture', pid: 123, kind: 'pty' }
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
       : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: histFeed ? histFeed.splice(0) : [{ role: 'claude', text: long }] }
-      : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' } : {};
+      : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' }
+      : url.pathname === '/api/dirs' ? dirs[url.searchParams.get('path')] ?? { err: '打不开' } : {};
     res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(data));
   }
   const relative = url.pathname === '/' ? 'web.html' : url.pathname.startsWith('/lib/') ? 'node_modules/' + url.pathname.slice(5) : url.pathname.slice(1);
@@ -278,6 +281,25 @@ const press = async (key, shift = false) => {
     document.querySelector('#sheetIn [data-a="1"]').click(); const c = on(); sheetOff(); state.usage.projects = [];
     return [a, b, said, la, c].join(' | '); })()`), 'F:/proj |  | true | /true | F:/proj');
   console.log('browser 新对话 Mac mini in mine, and a second Mac ok');
+  // 新对话's 浏览: a folder typed that isn't there: the home folder and the drives; one clicked: gone into, the one
+  // picked; ↑ back up; one with none in it said so; 收起 puts the list away (here with / for \, the page doesn't mind)
+  {
+    const names = () => evaluate("[...document.querySelectorAll('#sheetIn .dirs .opt')].map((b) => b.textContent).join(' | ')");
+    const dirIn = () => evaluate("document.querySelector('#dirIn').value");
+    const into = (p) => evaluate(`document.querySelector('#sheetIn .dirs [data-in="${p}"]').click()`);
+    await evaluate("newSheet(); const i = document.querySelector('#dirIn'); i.value = 'Z:/nope'; i.dispatchEvent(new Event('input')); document.querySelector('#browse').click()");
+    await until("document.querySelectorAll('#sheetIn .dirs .opt').length === 2");
+    assert.deepEqual([await names(), await dirIn()], ['C:/Users/ly | D:/', 'Z:/nope']);
+    await into('D:/'); await until("document.querySelector('#dirIn').value === 'D:/'");
+    assert.equal(await names(), '↑ 上一级 | work | .cache');
+    await into('D:/work'); await until("document.querySelector('#dirIn').value === 'D:/work'");
+    assert.equal(await evaluate("document.querySelector('#sheetIn .dirs').textContent"), '↑ 上一级这里面没有文件夹');
+    await into('D:/'); await until("document.querySelector('#dirIn').value === 'D:/'");
+    await evaluate("document.querySelector('#browse').click()");
+    assert.deepEqual([await evaluate("!!document.querySelector('#sheetIn .dirs')"), await dirIn()], [false, 'D:/']);
+    await evaluate('sheetOff()');
+    console.log('browser 新对话 folders to pick ok');
+  }
   // 用量: each Mac's records (listed last) under its name and its mark (Apple's; the old rainbow one for the MacBook), not as one more 账号 n
   assert.equal(await evaluate(`(() => {
     tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }], days: [], total: 3, usd: 0, today: '2000-01-02' }; renderTokens();
