@@ -917,6 +917,7 @@ if (FINE) {
     if (!on?.isConnected) return hide();
     const r = on.getBoundingClientRect(), row = on.matches('.row');
     tip.classList.toggle('two', tip.textContent.includes('\n'));
+    tip.style.left = tip.style.top = '0px'; // measured where it has room: by the window's right edge it wraps narrow
     const w = tip.offsetWidth, h = tip.offsetHeight;
     let x = row ? r.right + 8 : r.left + r.width / 2 - w / 2, y = row ? r.top : r.bottom + 6;
     if (y + h > innerHeight - 8) y = row ? innerHeight - h - 8 : r.top - h - 6;
@@ -931,6 +932,9 @@ if (FINE) {
     if (!el?.title.trim()) return;
     take(el); timer = setTimeout(place, 450);
   });
+  // a title set anew on the one hovered (发送 / 停止 as the conversation goes): taken too, else the browser's shows beside the card
+  new MutationObserver(() => { if (on?.hasAttribute('title')) on.title.trim() ? (take(on), tip.classList.contains('show') && place()) : hide(); })
+    .observe(document.body, { subtree: true, attributes: true, attributeFilter: ['title'] });
   // left: the mouse out of it (not a redraw taking it away under the mouse), or out of the page
   document.addEventListener('mouseout', (e) => { if (on && (!e.relatedTarget || on.isConnected && on.contains(e.target) && !on.contains(e.relatedTarget))) hide(); });
   for (const t of ['mousedown', 'keydown', 'wheel']) addEventListener(t, hide, true);
@@ -1181,9 +1185,12 @@ const lead = (x) => (x.mac ? `<i class="ac0" title="${esc(macName(x.mac))}">${ma
 const hint = (x, ...more) => esc([...new Set([x.title, ...more].filter(Boolean))].join('\n')); // a row's card: its title, then what's not the same
 const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.cwd)}">${lead(x)}
     <div class="main"><div class="t">${x.mac ? '' : mark(x.gpt, x.acct + 1)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
+// conversations 删除'd (or 归档'd) from here: out of the list at once, not after the server's answer (a Mac's waits on ssh to
+// it, seconds); one that failed comes back
+const deleting = new Set();
 function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
-  const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run', proj = listMode === 'proj';
+  const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && !deleting.has(x.id) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run', proj = listMode === 'proj';
   const groupDot = (list) => nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : ''); // a folded group's: its rows' most urgent
   $('#sideTitle').textContent = proj ? '项目' : '对话';
   // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
@@ -1279,11 +1286,12 @@ async function menuPick(e) {
   } else if (k === 'del') {
     if (!confirm(s.gpt && !s.oai ? `归档「${s.title}」？\n归档后不在列表里显示，在 Codex 里用 codex unarchive 能找回。`
       : `删除「${s.title}」？\n${s.oai && s.busy ? '正在回答的那一条会停下。' : ''}对话记录会移到电脑的回收站，可以找回。`)) return;
+    deleting.add(s.id); drawSide(); toast(`正在${s.gpt && !s.oai ? '归档' : '删除'}「${s.title}」…`, 120000);
     try {
       toast((await post('/api/delete', { id: s.id, gpt: s.gpt, oai: s.oai })).said);
       const c = convOf(s.id); if (c) closeConv(c);
       try { localStorage.removeItem('cm-draft:' + s.id); } catch {}
-    } catch (er) { toast(er.message, 4000); }
+    } catch (er) { deleting.delete(s.id); toast(er.message, 4000); }
   }
   load();
 }
