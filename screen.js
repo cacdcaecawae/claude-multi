@@ -21,7 +21,9 @@
       // each option: the rows under it up to the next one (a blank row or a rule ends them) are its description; "[ ]"
       // or "[✔]" before it, a multi-select's check box. The question: the rows above the options up to a rule, the tabs
       // of several questions at once (← ☐ Color ☐ Fruit ✔ Submit →) shown apart.
-      const rule = (r) => /[─━]{3}/.test(r) && !/[^\s─━╭╮╰╯├┤]/.test(r), idx = [...at].sort((x, y) => x[0] - y[0]);
+      // (a rule: a row of it, or a long run of it in a row: the menu's own rule can share its row with what the screen kept
+      // of the line before, a turn's status and its cost, and the question took that row and all above it)
+      const rule = (r) => (/[─━]{3}/.test(r) && !/[^\s─━╭╮╰╯├┤]/.test(r)) || /[─━]{20}/.test(r), idx = [...at].sort((x, y) => x[0] - y[0]);
       if (at.size >= 2 && top != null) {
         const opts = idx.map(([n, i], k) => {
           const desc = [];

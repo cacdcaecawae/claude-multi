@@ -820,6 +820,11 @@ if (SESSION0) {
   assert.equal(parseScreen(['1. 签字', '2. 压缩', '3. 上传', rule, '❯ 4. 保存回执截图', rule]).menu, null);
   const h = parseScreen([rule, ' ☐ 优先级', '', '今天想先做哪件事？', '', '❯ 1. 写论文', '  2. 跑实验', '', 'Enter to select']).menu;
   assert.deepEqual([h.head, h.ask], ['优先级', '今天想先做哪件事？']); // one question's header, apart from it
+  // the menu's rule on one row with what the screen kept of the line before (a turn's status and cost): the question is
+  // only what's under it (/model's took the end of the answer above too)
+  const sm = parseScreen(['- /statechart 在本机跑不起来。', '· 本轮约 $0.27，约占 5', '✻ Sautéed for 40s · done 6:37 AM   小时额度 0.8% ' + rule,
+    ' Select model', ' Switch between Claude models.', '', ' ❯ 1. Default (recommended)', '   2. Opus 5.5', '', ' Enter to confirm']).menu;
+  assert.deepEqual([sm.ask, sm.opts.map((o) => o.label).join('|')], ['Select model\nSwitch between Claude models.', 'Default (recommended)|Opus 5.5']);
   // a numbered message of yours still on the screen over a permission menu: the menu's options, not your lines
   const p = parseScreen(['❯ 1. 修登录', '  2. 更新文档', '', '● Bash(npm test)', rule, ' Do you want to proceed?', ' ❯ 1. Yes', '   2. Yes, and don\'t ask again', '   3. No', '', ' Esc to cancel']).menu;
   assert.deepEqual([p.cur, p.ask, p.opts.map((o) => o.label).join('|')], [1, 'Do you want to proceed?', 'Yes|Yes, and don\'t ask again|No']);
