@@ -905,29 +905,33 @@ $('#act .logo').insertAdjacentHTML('afterbegin', `<span class="sp">${SPARK}<svg 
 const NARROW = matchMedia('(max-width: 759px)');
 const FINE = matchMedia('(pointer: fine)').matches, FONT = FINE ? 14 : 13; // FINE: a computer's mouse and keyboard
 // a computer: the hints (title) as the page's own card after a moment's hover, the title kept aside (data-tip) meanwhile so the
-// browser's square one stays away, and put back when the mouse leaves; a row's beside it, the rest under the thing
+// browser's square one stays away, and put back when the mouse leaves; a row's beside it, the rest under the thing. The side
+// bar redrawn under the mouse (every 5 s when something in it changed) keeps the card up, on the new copy, not hidden and shown again
 if (FINE) {
   const tip = document.createElement('div'); tip.id = 'tip'; document.body.append(tip);
   let on = null, timer = 0;
   const hide = () => { clearTimeout(timer); tip.classList.remove('show'); if (on && !on.hasAttribute('title')) on.title = on.dataset.tip; on = null; };
+  const take = (el) => { on = el; tip.textContent = el.dataset.tip = el.title; el.removeAttribute('title'); };
+  const place = () => {
+    if (!on?.isConnected) return hide();
+    const r = on.getBoundingClientRect(), row = on.matches('.row');
+    tip.classList.toggle('two', tip.textContent.includes('\n'));
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let x = row ? r.right + 8 : r.left + r.width / 2 - w / 2, y = row ? r.top : r.bottom + 6;
+    if (y + h > innerHeight - 8) y = row ? innerHeight - h - 8 : r.top - h - 6;
+    tip.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px'; tip.style.top = Math.max(8, y) + 'px';
+    tip.classList.add('show');
+  };
   document.addEventListener('mouseover', (e) => {
     const el = e.target.closest?.('[title]');
-    if (on && on.contains(e.target) && !(el && on.contains(el))) return; // still over the one it's for
-    const again = tip.classList.contains('show') && tip.textContent === el?.title; // the same thing drawn anew under the mouse
+    if (on?.isConnected && on.contains(e.target) && !(el && on.contains(el))) return; // still over the one it's for
+    if (on && !on.isConnected && tip.classList.contains('show') && el?.title.trim()) return take(el), place(); // its new copy
     hide();
     if (!el?.title.trim()) return;
-    on = el; tip.textContent = el.dataset.tip = el.title; el.removeAttribute('title');
-    timer = setTimeout(() => {
-      const r = on.getBoundingClientRect(), row = on.matches('.row');
-      tip.classList.toggle('two', tip.textContent.includes('\n'));
-      const w = tip.offsetWidth, h = tip.offsetHeight;
-      let x = row ? r.right + 8 : r.left + r.width / 2 - w / 2, y = row ? r.top : r.bottom + 6;
-      if (y + h > innerHeight - 8) y = row ? innerHeight - h - 8 : r.top - h - 6;
-      tip.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px'; tip.style.top = Math.max(8, y) + 'px';
-      tip.classList.add('show');
-    }, again ? 0 : 450);
+    take(el); timer = setTimeout(place, 450);
   });
-  document.addEventListener('mouseout', (e) => { if (on && !on.contains(e.relatedTarget)) hide(); });
+  // left: the mouse out of it (not a redraw taking it away under the mouse), or out of the page
+  document.addEventListener('mouseout', (e) => { if (on && (!e.relatedTarget || on.isConnected && on.contains(e.target) && !on.contains(e.relatedTarget))) hide(); });
   for (const t of ['mousedown', 'keydown', 'wheel']) addEventListener(t, hide, true);
   addEventListener('blur', hide);
 }
