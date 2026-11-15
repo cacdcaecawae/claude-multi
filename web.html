@@ -38,7 +38,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     --a1: #0a84ff; --gpt: #19c37d; --apple: #f5f5f7; color-scheme: dark; --ink: #ececec; --onInk: #0d0d0d; --bubble: #303030;
     --fgHi: #f5f5f5; --msg: #ececec; --tint: rgba(255,255,255,.07); --btn: #2f2f2f; --btnH: #3a3a3a; --badge: #4a4a4a; --badgeFg: #f5f5f5;
     --pop: #2a2a2a; --popB: #3a3a3a; --accentH: #2b8ef0; --accentBg: rgba(255,255,255,.09); --errFg: #ffa198; --cellB: #3a3a3a;
-    --split: #3a3a3a; --term: #1f1f1f; --act: #181818; --purple: #b180d7; --shadow: rgba(0,0,0,.5); --lift: rgba(0,0,0,.25); --frame: #171a1e; --cardB: #303030; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
+    --split: #3a3a3a; --term: #1f1f1f; --act: #181818; --purple: #b180d7; --shadow: rgba(0,0,0,.5); --lift: rgba(0,0,0,.25); --frame: #171a1e; --side: #1c1f23; --cardB: #303030; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
     --ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; --mono: "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
     --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 4l4 4-4 4' fill='none' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E"); }
   :root[data-theme=light] { color-scheme: light; --bg: #ffffff; --bar: #f9f9f9; --act: #f9f9f9; --border: #ececec; --hover: rgba(0,0,0,.04); --sel: rgba(0,0,0,.065); --input: #ffffff;
@@ -46,7 +46,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     --accentBg: rgba(0,0,0,.06); --link: #1769e0; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.05);
     --btn: #f0f0f0; --btnH: #e5e5e5; --badge: #e5e5e5; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #e5e5e5; --cellB: #e3e3e3; --ink: #0d0d0d; --onInk: #ffffff; --bubble: #f4f4f4;
     --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
-    --a1: #0066cc; --gpt: #0b8a5c; --apple: #000; --split: #e0e0e0; --purple: #8250df; --shadow: rgba(0,0,0,.12); --lift: rgba(0,0,0,.04); --frame: #f0f6f9; --cardB: #e8e8e8; }
+    --a1: #0066cc; --gpt: #0b8a5c; --apple: #000; --split: #e0e0e0; --purple: #8250df; --shadow: rgba(0,0,0,.12); --lift: rgba(0,0,0,.04); --frame: #f0f6f9; --side: #f9fcfd; --cardB: #e8e8e8; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 14px/1.45 var(--ui); }
   /* opened from the home screen, iOS 26 makes the page shorter than the screen by the status bar (WebKit bug 301108):
@@ -602,13 +602,14 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #here .ok { color: var(--green); } #here .warn { color: var(--orange); } #here .bad { color: var(--red); }
   #sAcct:hover { background: var(--tint); }
 
-  /* a computer: as the Codex app, the activity bar and the side bar on the window frame itself (a faint blue, as Codex), each group of tabs a
-     white card with a thin border and round corners on it; the gaps between them are the sashes */
+  /* a computer: as the Codex app, the activity bar on the window frame itself (a faint blue, as Codex), the side bar and each group of tabs a
+     card with a thin border and round corners on it (the side bar a shade off white); the gaps between them are the sashes */
   @media (min-width: 760px) {
     html, body { background: var(--frame); }
     #app { padding: 6px 6px 0 0; }
     .group { border: 1px solid var(--cardB); border-radius: 12px; overflow: hidden; }
-    #act, #side { border: 0; background: var(--frame); }
+    #act { border: 0; background: var(--frame); }
+    #side { border: 1px solid var(--cardB); border-radius: 12px; overflow: hidden; background: var(--side); } /* a card of its own, a shade off the white */
     #act { padding-bottom: 6px; }
     #editor { background: none; }
     .group { background: var(--bg); }
