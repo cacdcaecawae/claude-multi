@@ -746,6 +746,34 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* a picture clicked in a conversation: big, in the middle of the page; a click or Esc puts it away */
   #zoom { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 3vmin; background: rgba(0,0,0,.82); cursor: zoom-out; outline: none; }
   #zoom[hidden] { display: none; }
+  /* / in a conversation's box: its commands and skills over it */
+  .slash { position: absolute; left: 20px; right: 20px; bottom: calc(100% - 2px); z-index: 3; max-height: min(330px, 46vh); overflow: auto; padding: 6px;
+    border-radius: 14px; background: var(--pop); border: 1px solid var(--popB); box-shadow: 0 10px 30px var(--shadow); }
+  .slash[hidden] { display: none; }
+  .slash button { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 6px 10px; border-radius: 8px; text-align: left; white-space: nowrap; overflow: hidden; }
+  .slash button.on { background: var(--sel); }
+  .slash b { flex: none; font-weight: 600; color: var(--fgHi); } .slash i { flex: none; font-style: normal; font-size: 12px; color: var(--fg3); }
+  .slash span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--fg2); }
+  /* 预览: a path of this PC in a reply, opened beside the conversation (a phone: the whole screen) */
+  .hm code.peek { cursor: pointer; color: var(--link); } .hm code.peek:hover { text-decoration: underline; }
+  #peek { position: fixed; inset: 0; z-index: 28; display: flex; justify-content: flex-end; background: rgba(0,0,0,.25); }
+  #peek[hidden] { display: none; }
+  .pvIn { display: flex; flex-direction: column; width: min(960px, 72vw); height: 100%; background: var(--bg); border-left: 1px solid var(--cardB); box-shadow: -12px 0 40px var(--shadow); }
+  .pvHead { display: flex; flex: none; align-items: center; gap: 6px; height: 50px; padding: 0 10px; border-bottom: 1px solid var(--border); }
+  .pvHead [hidden] { display: none; }
+  .pvName { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.3; }
+  .pvName b, .pvName small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pvName b { font-weight: 600; color: var(--fgHi); } .pvName small { font-size: 11.5px; color: var(--fg3); }
+  .pvBody { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 4px 0; }
+  .pvBody iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+  .pvBody:has(.pvMedia) { display: grid; place-items: center; padding: 0; overflow: hidden; }
+  .pvBody img.pvMedia, .pvBody video.pvMedia { max-width: calc(100% - 32px); max-height: calc(100% - 32px); object-fit: contain; }
+  .pvBody audio.pvMedia { width: calc(100% - 64px); }
+  .pvWait { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; text-align: center; font-size: 13px; color: var(--fg2); background: var(--bg); }
+  .pvWait a { color: var(--link); }
+  .pvRow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 18px; text-align: left; color: var(--fg); }
+  .pvRow:hover { background: var(--hover); } .pvRow svg { flex: none; width: 16px; height: 16px; color: var(--fg3); }
+  .pvRow span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 759px) { .pvIn { width: 100%; border-left: 0; } }
   #zoom img { max-width: 100%; max-height: 94vh; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,.5); background: var(--bar); }
   .toast { position: fixed; z-index: 30; right: 12px; bottom: 34px; max-width: min(420px, calc(100vw - 24px)); background: var(--pop); border: 1px solid var(--popB);
     box-shadow: 0 8px 28px var(--shadow); border-radius: 12px; padding: 10px 14px; white-space: pre-wrap; display: none; }
@@ -868,6 +896,7 @@ const about = (u) => (u > 0 && u < 1 ? '' : '约 ') + usd(u);
 const base = (p) => String(p ?? '').split(/[\\/]/).filter(Boolean).pop() ?? '';
 const svg = (d, w = 1.6) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M12 4.5v15"/>', close: '<path d="M7 7l10 10M17 7L7 17"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>', out: '<path d="M14 4.5h5.5V10M19.5 4.5L11 13M18 14v4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18V7a1.5 1.5 0 0 1 1.5-1.5H10"/>',
   list: '<path d="M4 7h16M4 12h16M4 17h16"/>', clip: '<path d="M20.5 11.2l-8 8a5.2 5.2 0 0 1-7.4-7.4l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.6 1.6 0 0 1-2.3-2.3l7.8-7.8"/>',
   auto: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>', light: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>',
   dark: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>', find: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>', plus: '<path d="M12 5v14M5 12h14"/>', refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
@@ -2274,11 +2303,43 @@ function makeConv(body, title) {
   // its height to the words (not while hidden: it would be 0); every change of the words goes through grow, so the
   // draft is kept there, in this browser by conversation: a phone's page dropped in the background comes back with it.
   // A message on its way stays in it, before what's typed since (as a failed send puts it back), till its Enter is through
+  // / at the start of the box: the commands and skills Claude Code lists for this conversation (its account and folder;
+  // asked once, the first time), those whose name has what's typed (beginning with it first); ↑↓ choose, Tab or a click
+  // takes one (its name and a space, for what goes after), Enter takes it and sends one typed out in full, Esc leaves it.
+  // A Mac's or a GPT one's: none (its list isn't asked for there)
+  const slash = document.createElement('div'); slash.className = 'slash'; slash.hidden = true; slash.setAttribute('role', 'listbox'); $p('.send').append(slash);
+  let cmds = null, asking = null, slashQ = '', picked = 0, offered = [];
+  const askCmds = () => asking ??= fetch('/api/commands?' + new URLSearchParams(c.id ? { id: c.id } : { dir: c.dir(), acct: c.acct ?? '' }))
+    .then(async (r) => { const j = await r.json(); if (!r.ok) throw Object.assign(new Error(j.err), { old: r.status === 404 }); cmds = j.commands ?? []; slashDraw(); })
+    .catch((e) => { cmds = []; if (e.old) toast('/ 的命令列表要等网页服务重启后才有', 3000); setTimeout(() => { cmds = asking = null; }, 60000); });
+  function slashDraw() {
+    const m = /^\/(\S*)$/.exec(line.value);
+    if (!m || c.gpt || c.mac) return void (slash.hidden = true);
+    if (!cmds) { askCmds(); return void (slash.hidden = true); }
+    const q = m[1].toLowerCase(), has = (x) => x.name.toLowerCase().includes(q);
+    if (q !== slashQ) { slashQ = q; picked = 0; }
+    offered = [...cmds.filter((x) => x.name.toLowerCase().startsWith(q)), ...cmds.filter((x) => has(x) && !x.name.toLowerCase().startsWith(q))].slice(0, 60);
+    if (!offered.length) return void (slash.hidden = true);
+    picked = Math.min(picked, offered.length - 1);
+    slash.innerHTML = offered.map((x, i) => `<button data-slash="${i}" role="option"${i === picked ? ' class="on" aria-selected="true"' : ''}><b>/${esc(x.name)}</b>${x.hint ? `<i>${esc(x.hint)}</i>` : ''}<span>${esc(x.desc)}</span></button>`).join('');
+    slash.hidden = false;
+    slash.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+  }
+  const slashTake = (i, send) => {
+    const x = offered[i];
+    if (!x) return;
+    line.value = `/${x.name} `; slash.hidden = true; line.focus(); grow(); goMode();
+    if (send) go.click();
+  };
+  slash.onmousedown = (e) => e.preventDefault(); // the box keeps the focus
+  slash.onclick = (e) => { const b = e.target.closest('[data-slash]'); if (b) slashTake(+b.dataset.slash); };
+  line.addEventListener('blur', () => { slash.hidden = true; });
+  line.addEventListener('focus', () => slashDraw());
   const fitLine = () => { line.style.height = ''; if (line.scrollHeight) line.style.height = Math.min(line.scrollHeight, 200) + 'px'; };
   const draftKey = () => 'cm-draft:' + c.id;
   let going = '';
   const grow = () => {
-    fitLine();
+    fitLine(); slashDraw();
     const d = [going, line.value.trim()].filter(Boolean).join('\n');
     if (c.id) try { if (d) localStorage.setItem(draftKey(), d); else localStorage.removeItem(draftKey()); } catch {}
   };
@@ -2437,6 +2498,11 @@ function makeConv(body, title) {
     }
   }
   line.onkeydown = (e) => {
+    if (!slash.hidden && !e.isComposing) { // the / list up: its keys
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); picked = (picked + (e.key === 'ArrowDown' ? 1 : offered.length - 1)) % offered.length; return slashDraw(); }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); return slashTake(picked, e.key === 'Enter' && offered[picked]?.name.toLowerCase() === slashQ); }
+      if (e.key === 'Escape') { e.preventDefault(); slash.hidden = true; return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim() || atts.length) go.click(); } // only sends (pictures alone too); Shift+Enter: a new line
     if (e.key === 'Escape' && busyNow) stop(); // as in Claude: Esc stops it
     // a question up and nothing typed: an option's number picks it, as in Claude's terminal (not while writing in 「Type something」)
@@ -2529,6 +2595,7 @@ function makeConv(body, title) {
         gotAt = Date.now(); waitAns = 0; // (an answer waited for: in)
         const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
         addItems($p('.hNew'), r.items, c.gpt || (c.mac && { mac: c.mac }));
+        if (!first) for (const m of r.items) if (m.role === 'claude') peekWarm(m.text); // an Office file it names: its PDF made before it's opened
         const flat = (s) => s.replace(/\s+/g, ' '); // a paste's new lines may come back as \r\n
         // the record's message, or one with it inside (typed on after text left in Claude's input box): no longer waiting
         const took = (s, m) => flat(s.text) === flat(m.text) || (s.text && flat(m.text).includes(flat(s.text)));
@@ -3195,6 +3262,8 @@ const link = (m, words, u) => {
 // red as written (throwOnError: false); without KaTeX loaded, as written.
 const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]*?[^$\s])\$(?!\d)/g; // no lookbehind: an older Safari fails to read the whole script on one
 const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
+// a path of this PC as Claude writes one in `code` (D:\… or D:/…): opened by 预览 (preview)
+const PEEKABLE = /^[A-Za-z]:[\\/][^<>|?*\n]*$/;
 // a line as a list's item (- or *, indented by its spaces), a rule (---) or a quote (> ): a block of its own, its line's end
 // taken with it (else pre-wrap draws an empty line after it); an item's wrapped lines start under its words, not its dot
 const BLOCKS = /^( *)[-*] (.*)\n?|^ *(?:-{3,}|\*{3,}) *(?:\n|$)|^&gt; ?(.*)\n?/gm;
@@ -3205,11 +3274,70 @@ function md(t) {
     if (i % 2) return `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${esc(p.replace(/\n$/, ''))}</pre></div>`;
     const math = [];
     p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
-    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (PEEKABLE.test(c) ? `<code class="peek" data-peek="${c}" title="点开预览">${c}</code>` : `<code>${c}</code>`))
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)
       .replace(/\u0000(\d+)\u0000/g, (_, k) => tex(...math[k]));
   }).join('');
 }
+// 预览: a path of this PC in a reply opened beside the conversation, as Claude's and Codex's apps do: a file as the browser
+// shows it (an Office one as the PDF Office makes of it here: the first time a few seconds; one named in a reply that came
+// in while the page was open is made already), one it can't show to download; a folder as its folders and files, each
+// opened in turn (← one up). Esc, ✕ or a click outside closes it
+const OFFICE = /\.(pptx?|docx?|xlsx?|rtf)$/i, warmed = new Set();
+const peekWarm = (text) => {
+  for (const [, p] of String(text).matchAll(/`([A-Za-z]:[\\/][^`\n]*)`/g)) if (OFFICE.test(p) && !warmed.has(p)) { warmed.add(p); fetch('/api/peek?' + new URLSearchParams({ path: p, warm: 1 })).catch(() => {}); }
+};
+let pv = null, pvFrom = null;
+const previewOff = () => { if (!pv || pv.hidden) return; pv.hidden = true; pv.gen++; pv.querySelector('.pvBody').innerHTML = ''; pvFrom?.focus?.({ preventScroll: true }); };
+async function preview(p) {
+  if (!pv) {
+    pv = document.createElement('div'); pv.id = 'peek'; pv.hidden = true; pv.gen = 0;
+    pv.innerHTML = `<div class="pvIn" role="dialog" aria-modal="true" aria-label="预览"><div class="pvHead"><button class="ico" data-pv="up" title="上一级">${svg(I.back, 2)}</button>
+      <div class="pvName"><b></b><small></small></div><a class="ico" data-pv="tab" target="_blank" rel="noopener" title="在新标签页打开">${svg(I.out)}</a>
+      <button class="ico" data-pv="close" title="关闭（Esc）">${svg(I.close, 2)}</button></div><div class="pvBody"></div></div>`;
+    document.body.append(pv);
+    pv.addEventListener('click', (e) => {
+      if (e.target === pv || e.target.closest('[data-pv=close]')) return previewOff();
+      if (e.target.closest('[data-pv=up]')) return preview(pv.dataset.up);
+      const r = e.target.closest('[data-pvp]');
+      if (r) preview(r.dataset.pvp);
+    });
+  }
+  if (pv.hidden) pvFrom = document.activeElement;
+  pv.hidden = false;
+  const gen = ++pv.gen, body = pv.querySelector('.pvBody'), tab = pv.querySelector('[data-pv=tab]'), up = pv.querySelector('[data-pv=up]');
+  const name = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p, parent = p.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '');
+  pv.querySelector('.pvName b').textContent = name; pv.querySelector('.pvName small').textContent = p;
+  body.innerHTML = '<div class="pvWait">正在打开…</div>'; tab.hidden = true;
+  pv.dataset.up = /^[A-Za-z]:$/.test(parent) ? parent + '\\' : parent; up.hidden = !parent || parent === p;
+  pv.querySelector('[data-pv=close]').focus();
+  const r = await fetch('/api/dirs?' + new URLSearchParams({ path: p })).then((x) => x.json()).catch(() => ({ err: '连不上' }));
+  if (gen !== pv.gen) return;
+  if (!r.err) { // a folder: its folders, then its files
+    const at = r.path.replace(/[\\/]?$/, '\\');
+    pv.dataset.up = r.up ?? ''; up.hidden = !r.up;
+    body.innerHTML = r.dirs.map((d) => `<button class="pvRow" data-pvp="${esc(d)}">${svg(I.folder)}<span>${esc(d.split(/[\\/]/).pop())}</span></button>`).join('')
+      + r.files.map((f) => `<button class="pvRow" data-pvp="${esc(at + f)}">${svg(I.file)}<span>${esc(f)}</span></button>`).join('') || '<div class="pvWait">这个文件夹是空的</div>';
+    return;
+  }
+  const q = `/api/peek/${encodeURIComponent(name)}?` + new URLSearchParams({ path: p }); // its name in the address: the PDF viewer's title
+  const w = await fetch(q + '&warm=1').then(async (x) => ({ ok: x.ok, j: await x.json().catch(() => null), t: x.ok ? '' : await x.clone().text().catch(() => '') }), () => null);
+  if (gen !== pv.gen) return;
+  if (!w || (!w.ok && w.j)) { body.innerHTML = '<div class="pvWait">预览要等网页服务重启后才能用</div>'; return; } // the service before it: no such address
+  tab.hidden = false; tab.href = q;
+  if (w.ok && w.j?.type === 'application/octet-stream') { body.innerHTML = `<div class="pvWait"><span>这种文件在网页里看不了，<a href="${q}" download>下载下来</a>用电脑上的程序打开。</span></div>`; return; }
+  const app = /\.pptx?$/i.test(p) ? 'PowerPoint' : /\.xlsx?$/i.test(p) ? 'Excel' : 'Word', type = w.j?.type ?? '';
+  // a picture, a video or a sound in the pane itself (fitted to it: a page of its own shows a big picture at full size);
+  // the rest, a PDF and text, in a frame
+  const kind = /^image\//.test(type) ? 'img' : /^video\//.test(type) ? 'video' : /^audio\//.test(type) ? 'audio' : 'iframe';
+  body.innerHTML = `<div class="pvWait">${OFFICE.test(p) ? `正在用 ${app} 转成 PDF…（第一次要几秒）` : '正在打开…'}</div><${kind} class="pvMedia"${kind === 'iframe' ? ` title="${esc(name)}"` : kind === 'img' ? ` alt="${esc(name)}"` : ' controls'}></${kind}>`;
+  const f = body.querySelector('.pvMedia');
+  f[kind === 'iframe' || kind === 'img' ? 'onload' : 'onloadeddata'] = () => body.querySelector('.pvWait')?.remove();
+  f.onerror = () => { const n = body.querySelector('.pvWait'); if (n) n.textContent = '打不开这个文件'; };
+  f.src = q;
+}
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && pv && !pv.hidden) { e.preventDefault(); e.stopImmediatePropagation(); previewOff(); } }, true);
+document.addEventListener('click', (e) => { const c = e.target.closest('[data-peek]'); if (c) { e.preventDefault(); preview(c.dataset.peek); } });
 // 复制: a code block's code, or an answer as Claude wrote it (its Markdown). 展开全部 / 收起 a long message of yours
 // (folded again, kept in sight)
 document.addEventListener('click', (e) => {

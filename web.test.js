@@ -19,11 +19,15 @@ const histReads = []; // when each history read came
 const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'C:/Users/ly/Desktop', 'D:/'], files: [] },
   'D:/': { path: 'D:/', up: '', dirs: ['D:/work', 'D:/.cache'], files: ['a.civa'] }, 'D:/work': { path: 'D:/work', up: 'D:/', dirs: [], files: [] } };
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
+let cmdAsks = 0; // the times / asked for a conversation's commands
+const CMDS = [{ name: 'usage', desc: 'Show usage', hint: '' }, { name: 'usage-credits', desc: 'Credits', hint: '' }, { name: 'clear', desc: 'Start anew', hint: '[name]' }, { name: 'status', desc: 'Status', hint: '' }];
+dirs['D:\\figs'] = { path: 'D:\\figs', up: 'D:\\', dirs: ['D:\\figs\\old'], files: ['图7.pptx', 'a.png', 'x.exe'] };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/open') opens++;
   if (url.pathname === '/api/history') histReads.push(Date.now());
   if (url.pathname === '/api/history' && histHang) { histHang = false; hung = res; return; } // left open, never answered
+  if (url.pathname.startsWith('/api/peek') && !url.searchParams.has('warm')) return setTimeout(() => { res.setHeader('content-type', 'text/plain'); res.end('the file'); }, 1500); // (an Office one's PDF takes a while)
   if (url.pathname === '/api/project') { // 项目, kept as the service keeps them
     let b = ''; req.on('data', (d) => (b += d));
     return req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(require('./claude-multi').projectOp(state.projects ??= [], JSON.parse(b)))); });
@@ -53,6 +57,8 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
       : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: histFeed ? histFeed.splice(0) : [{ role: 'claude', text: long }] }
       : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' }
+      : url.pathname === '/api/commands' ? (cmdAsks++, { commands: CMDS })
+      : url.pathname.startsWith('/api/peek') ? { type: /\.exe$/.test(url.searchParams.get('path')) ? 'application/octet-stream' : /\.pptx$/.test(url.searchParams.get('path')) ? 'application/pdf' : 'image/png' }
       : url.pathname === '/api/dirs' ? dirs[url.searchParams.get('path')] ?? { err: '打不开' } : {};
     res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(data));
   }
@@ -437,6 +443,49 @@ const press = async (key, shift = false) => {
     a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true })); const stayed = z.hidden;
     a.remove(); return [up, gone, stayed, ctrlLeft].join(' | '); })()`), 'true | true | true | true');
   console.log('browser picture shown big ok');
+  // / in a conversation's box: its commands, asked for once; those beginning with what's typed first, then those with it
+  // inside; ↓ and Tab take one (its name and a space); Enter takes the one chosen, not sent; Esc leaves the list; a GPT
+  // one's box: none
+  assert.equal(await evaluate(`(async () => {
+    const c = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, c);
+    const box = c.el.querySelector('.send textarea'), list = c.el.querySelector('.slash'), wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+    const type = async (v) => { box.value = v; box.dispatchEvent(new Event('input')); await wait(200); };
+    const key = (k) => box.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    const names = () => list.hidden ? 'hidden' : [...list.querySelectorAll('b')].map((b) => b.textContent).join(' ');
+    const out = [];
+    box.focus(); await type('/us'); out.push(names());
+    key('ArrowDown'); key('Tab'); out.push(JSON.stringify(box.value), names());
+    await type('/cle'); key('Enter'); out.push(JSON.stringify(box.value));
+    await type('/s'); key('Escape'); out.push(names());
+    closeConv(c);
+    const g = makeConv({ id: 'G', gpt: true }, 'GPT'); addConv(focusG, g);
+    const gb = g.el.querySelector('.send textarea'); gb.focus(); gb.value = '/'; gb.dispatchEvent(new Event('input')); await wait(200);
+    out.push(g.el.querySelector('.slash').hidden); closeConv(g);
+    return out.join(' | '); })()`), '/usage /usage-credits /status | "/usage-credits " | hidden | "/clear " | hidden | true');
+  assert.equal(cmdAsks, 1);
+  console.log('browser / commands ok');
+  // 预览: a path of this PC in a reply's code is a link (other code isn't); a folder opens beside it with its folders and
+  // files; an Office file says it's being made a PDF and shows in a frame; ← one up; one the browser can't show offers its
+  // download; Esc closes it
+  assert.equal(await evaluate(`(async () => {
+    const wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), d = document.createElement('div'); d.className = 'hm claude';
+    d.innerHTML = md('看 \\\`D:\\\\figs\\\` 和 \\\`npm i\\\`'); document.body.append(d);
+    const out = [d.querySelectorAll('code.peek').length, d.querySelector('code:not(.peek)').textContent];
+    d.querySelector('code.peek').click(); await wait(300);
+    const pv = document.querySelector('#peek'), rows = () => [...pv.querySelectorAll('.pvRow span')].map((s) => s.textContent).join(',');
+    out.push(!pv.hidden, pv.querySelector('.pvName b').textContent, rows());
+    [...pv.querySelectorAll('.pvRow')].find((r) => r.textContent === '图7.pptx').click(); await wait(300);
+    out.push(pv.querySelector('.pvWait')?.textContent ?? 'loaded', decodeURIComponent(pv.querySelector('iframe').getAttribute('src')));
+    pv.querySelector('[data-pv=up]').click(); await wait(300); out.push(rows());
+    [...pv.querySelectorAll('.pvRow')].find((r) => r.textContent === 'x.exe').click(); await wait(300);
+    out.push(!!pv.querySelector('.pvWait a[download]'), !pv.querySelector('iframe'));
+    pv.querySelector('[data-pv=up]').click(); await wait(300);
+    [...pv.querySelectorAll('.pvRow')].find((r) => r.textContent === 'a.png').click(); await wait(300);
+    out.push(pv.querySelector('.pvMedia')?.tagName); // a picture in the pane itself, fitted to it
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); out.push(pv.hidden);
+    d.remove(); return out.join(' | '); })()`),
+    '1 | npm i | true | figs | old,图7.pptx,a.png,x.exe | 正在用 PowerPoint 转成 PDF…（第一次要几秒） | /api/peek/图7.pptx?path=D:\\figs\\图7.pptx | old,图7.pptx,a.png,x.exe | true | true | IMG | true');
+  console.log('browser 预览 ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }

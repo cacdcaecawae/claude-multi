@@ -466,11 +466,14 @@ if (SESSION0) {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
   const part = (re) => src.match(re)[0];
   const md = new Function('katex', `${part(/^const esc = .*$/m)}\n${part(/^const svg = .*$/m)}\n${part(/^const I = [\s\S]*?\};$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}
-    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^const BLOCKS = .*$/m)}\n${part(/^const block = [\s\S]*?'<hr>';$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
+    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^const PEEKABLE = .*$/m)}\n${part(/^const BLOCKS = .*$/m)}\n${part(/^const block = [\s\S]*?'<hr>';$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
   // a list's items, a rule and a quote: blocks, each line's end taken with it; a - inside a line, or in code, stays
   const h = md('看\n- 一\n  - 二\n---\n> 引\n正文 - 不是\n```\n- 代码\n```');
   assert.ok(h.startsWith('看\n<span class="li" style="margin-left:0em">一</span><span class="li" style="margin-left:1em">二</span><hr><span class="bq">引</span>正文 - 不是\n'), h);
   assert.ok(h.includes('<pre>- 代码</pre>'), h);
+  // a path of this PC in code: a 预览 link (D:\\… and D:/…, Chinese and spaces in it); other code, or a Mac's path: not
+  assert.equal(md('`D:\\论文 04\\图7.pptx` `D:/a` `npm i` `/Users/me/x`'),
+    '<code class="peek" data-peek="D:\\论文 04\\图7.pptx" title="点开预览">D:\\论文 04\\图7.pptx</code> <code class="peek" data-peek="D:/a" title="点开预览">D:/a</code> <code>npm i</code> <code>/Users/me/x</code>');
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
@@ -1236,7 +1239,7 @@ if (SESSION0) {
       const line = { value: '', style: {}, scrollHeight: 0 }, go = { dataset: {} }, messages = [], writes = [];
       const hist = { innerHTML: '', scrollHeight: 1000, scrollTop: 0, clientHeight: 100 };
       const localStorage = { setItem: (k,v) => store.set(k,v), getItem: k => store.get(k) ?? null, removeItem: k => store.delete(k) };
-      const noop = () => {}, fitLine = noop, goMode = noop, drawAtts = noop, redraw = noop, markRows = noop, save = noop;
+      const noop = () => {}, fitLine = noop, goMode = noop, drawAtts = noop, redraw = noop, markRows = noop, save = noop, slashDraw = noop, peekWarm = noop;
       const claim = async () => {}, toast = t => messages.push(t), shownText = t => t, addItems = noop, topNote = noop, loadOlder = noop;
       const histGet = async () => ({ id: nextId, start: 0, end: 0, items: [] });
       let post = async (url, b) => { writes.push(b.data); };
@@ -1555,6 +1558,40 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.equal(fileServed('20261113T060145-8c06a5-gone.pdf', up, oai).file, path.join(up, '20261113T060145-8c06a5-gone.pdf')); // nowhere: the uploads (not there: 不在了)
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log('files opened ok');
+}
+// 预览: a file of this PC by its path: a PDF, a picture or a video as itself (a PDF unsandboxed: its viewer), text sandboxed
+// (a web page or an SVG too: never as one), an Office one as its PDF, the rest downloaded. An Office one made a PDF once (by
+// path, time and size; two asks at once: one making), none half-made left, a failure said. `/`'s list: no internal,
+// removed or renamed ones
+{
+  const { peekHead, peekPdf, slashKeep } = require('./claude-multi');
+  const t = (n, o) => { const h = peekHead(n, o); return [h['content-type'], h['content-disposition'].split(';')[0], h['content-security-policy'] ?? '']; };
+  assert.deepEqual(t('图7.pptx', true), ['application/pdf', 'inline', '']);
+  assert.ok(peekHead('图7.pptx', true)['content-disposition'].endsWith(encodeURIComponent('图7.pptx.pdf')));
+  assert.deepEqual(t('a.pdf'), ['application/pdf', 'inline', '']);
+  assert.deepEqual(t('a.PNG'), ['image/png', 'inline', 'sandbox']);
+  assert.deepEqual(t('a.mp4'), ['video/mp4', 'inline', 'sandbox']);
+  for (const n of ['a.html', 'a.svg', 'a.py', 'Makefile', '.gitignore']) assert.deepEqual(t(n), ['text/plain; charset=utf-8', 'inline', 'sandbox'], n);
+  assert.deepEqual(t('a.exe'), ['application/octet-stream', 'attachment', '']);
+  assert.deepEqual([{ name: 'clear', description: 'x' }, { name: '__remote-workflow', description: 'x' }, { name: 'agents', description: '(removed) Ask Claude' },
+    { name: 'extra-usage', description: 'Renamed to /usage-credits' }, { name: 'ponytail:ponytail' }].filter(slashKeep).map((c) => c.name), ['clear', 'ponytail:ponytail']);
+  if (process.platform === 'win32') {
+    const fs = require('fs'), path = require('path'), os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-peek-')), dir = path.join(tmp, 'peek');
+    const deck = path.join(tmp, '图 7.pptx'), bad = path.join(tmp, 'b.docx');
+    fs.writeFileSync(deck, 'x'); fs.writeFileSync(bad, 'y');
+    process.env.CM_RUNS = path.join(tmp, 'runs');
+    const ps = { ppt: 'Add-Content -LiteralPath $env:CM_RUNS -Value 1; Set-Content -LiteralPath $env:CM_OUT -Value $env:CM_IN -Encoding UTF8', doc: "throw 'no Word here'" };
+    Promise.all([peekPdf(deck, dir, ps), peekPdf(deck, dir, ps)]).then(async ([a, b]) => {
+      assert.equal(a, b);
+      assert.equal(fs.readFileSync(a, 'utf8').trim(), path.resolve(deck)); // its path through, a Chinese name and a space in it
+      assert.equal(await peekPdf(deck, dir, ps), a); // kept: not made again
+      assert.equal(fs.readFileSync(process.env.CM_RUNS, 'utf8').trim().split(/\s+/).length, 1);
+      await assert.rejects(peekPdf(bad, dir, ps), /Word 没能把它转成 PDF：no Word here/);
+      assert.deepEqual(fs.readdirSync(dir), [path.basename(a)]); // none half-made
+      delete process.env.CM_RUNS; fs.rmSync(tmp, { recursive: true, force: true });
+      console.log('peek ok');
+    });
+  } else console.log('peek ok (no Office here: no PDFs made)');
 }
 // 项目: made, renamed (names unique), conversations added from anywhere (each once) and taken out; dropped, its
 // conversations untouched; nonsense refused
