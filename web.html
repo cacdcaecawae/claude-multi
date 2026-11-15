@@ -755,16 +755,25 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .slash b { flex: none; font-weight: 600; color: var(--fgHi); } .slash i { flex: none; font-style: normal; font-size: 12px; color: var(--fg3); }
   .slash span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--fg2); }
   .slashNote { padding: 6px 10px; font-size: 12.5px; color: var(--fg3); } .slash button + .slashNote { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 8px; }
-  /* 预览: a path of this PC in a reply, opened beside the conversation (a phone: the whole screen) */
-  .hm code.peek { cursor: pointer; color: var(--link); } .hm code.peek:hover { text-decoration: underline; }
-  #peek { position: fixed; inset: 0; z-index: 28; display: flex; justify-content: flex-end; background: rgba(0,0,0,.25); }
-  #peek[hidden] { display: none; }
-  .pvIn { display: flex; flex-direction: column; width: min(960px, 72vw); height: 100%; background: var(--bg); border-left: 1px solid var(--cardB); box-shadow: -12px 0 40px var(--shadow); }
-  .pvHead { display: flex; flex: none; align-items: center; gap: 6px; height: 50px; padding: 0 10px; border-bottom: 1px solid var(--border); }
+  /* 预览: a path of this PC in a reply, as Codex shows one (its kind's mark and its name; the whole path on hover), opened
+     in a pane right of the conversation, a tab each (a phone: the whole screen) */
+  .hm a.peek { cursor: pointer; color: var(--link); white-space: nowrap; } .hm a.peek:hover { text-decoration: underline; }
+  .hm a.peek svg { width: 14px; height: 14px; margin-right: 3px; vertical-align: -2px; }
+  #peek { display: flex; flex: none; flex-direction: column; width: var(--pvW, min(46vw, 760px)); min-width: 0; background: var(--bg); border-left: 1px solid var(--border); }
+  #peek[hidden], #pvSash[hidden], #app.butler #peek, #app.butler #pvSash { display: none !important; }
+  .pvTabs { display: flex; flex: none; align-items: center; gap: 4px; height: 40px; padding: 0 6px; border-bottom: 1px solid var(--border); }
+  .pvTabList { display: flex; flex: 1; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .pvTab { display: flex; flex: none; align-items: center; gap: 6px; max-width: 220px; height: 30px; padding: 0 4px 0 10px; border-radius: 8px; color: var(--fg2); }
+  .pvTab:hover { background: var(--hover); } .pvTab.on { background: var(--sel); color: var(--fgHi); }
+  .pvTab > svg { flex: none; width: 14px; height: 14px; } .pvTab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pvTab .x { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--fg3); } .pvTab .x:hover { background: var(--hover); color: var(--fgHi); }
+  .pvTab .x svg { width: 12px; height: 12px; }
+  .pvHead { display: flex; flex: none; align-items: center; gap: 6px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--border); }
   .pvHead [hidden] { display: none; }
   .pvName { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.3; }
   .pvName b, .pvName small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pvName b { font-weight: 600; color: var(--fgHi); } .pvName small { font-size: 11.5px; color: var(--fg3); }
-  .pvBody { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 4px 0; }
+  .pvBodies { position: relative; flex: 1; min-height: 0; }
+  .pvBody { position: absolute; inset: 0; overflow: auto; padding: 4px 0; } .pvBody[hidden] { display: none; }
   .pvBody iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
   .pvBody:has(.pvMedia) { display: grid; place-items: center; padding: 0; overflow: hidden; }
   .pvBody img.pvMedia, .pvBody video.pvMedia { max-width: calc(100% - 32px); max-height: calc(100% - 32px); object-fit: contain; }
@@ -774,7 +783,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pvRow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 18px; text-align: left; color: var(--fg); }
   .pvRow:hover { background: var(--hover); } .pvRow svg { flex: none; width: 16px; height: 16px; color: var(--fg3); }
   .pvRow span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  @media (max-width: 759px) { .pvIn { width: 100%; border-left: 0; } }
+  @media (min-width: 760px) { #peek { border: 1px solid var(--cardB); border-radius: 12px; overflow: hidden; } }
+  @media (max-width: 759px) { #peek { position: fixed; inset: 0; z-index: 28; width: auto; border: 0; } #pvSash { display: none !important; } }
   #zoom img { max-width: 100%; max-height: 94vh; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,.5); background: var(--bar); }
   .toast { position: fixed; z-index: 30; right: 12px; bottom: 34px; max-width: min(420px, calc(100vw - 24px)); background: var(--pop); border: 1px solid var(--popB);
     box-shadow: 0 8px 28px var(--shadow); border-radius: 12px; padding: 10px 14px; white-space: pre-wrap; display: none; }
@@ -1000,6 +1010,7 @@ if (FINE) {
 const saved = (() => { try { return JSON.parse(localStorage.getItem('cm-layout')) ?? {}; } catch { return {}; } })();
 let side = ['chats', 'usage', 'tokens'].includes(saved.side) ? saved.side : 'chats', sideOn = saved.sideOn ?? true, sideW = saved.sideW ?? 300;
 let deskW = saved.deskW ?? null, deskRW = saved.deskRW ?? null; // the 管家's columns as dragged (null: as the window makes them)
+let pvW = saved.pvW ?? null; // 预览's pane as dragged (null: by the window)
 const secs = saved.secs ?? {}; // its 操作台's sections opened or closed by you (by data-sec), the rest as the page has them
 let state = null, tokens = null, tokensNow = null, tokensAt = 0, tokensErr = '', groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
@@ -1009,7 +1020,7 @@ let butler = !!saved.butler, bConv = null, peek = null; // 管家 mode (the spar
 $('#app').classList.toggle('butler', butler);
 $('#act .logo .label').textContent = butler ? '退出管家' : '管家'; // reloaded in it: says what the spark does
 function save() { // not before the tabs are back: a first load that failed would forget them
-  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, deskW, deskRW, secs, folded: [...folded], listMode, listKind, butler, focus: groups.indexOf(focusG),
+  if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, deskW, deskRW, pvW, secs, folded: [...folded], listMode, listKind, butler, focus: groups.indexOf(focusG),
     groups: groups.map((g) => ({ size: g.size, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
 }
 const allConvs = () => groups.flatMap((g) => g.tabs), convOf = (id) => id && allConvs().find((c) => c.id === id);
@@ -3270,6 +3281,9 @@ const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)
 const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
 // a path of this PC as Claude writes one in `code` (D:\… or D:/…): opened by 预览 (preview)
 const PEEKABLE = /^[A-Za-z]:[\\/][^<>|?*\n]*$/;
+// as Codex shows one: its kind's mark and its name (a folder's: one ending in \ or /, or with no .ext), the whole path on hover
+const peekLink = (c) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || c, dir = /[\\/]$/.test(c) || !/\.\w{1,8}$/.test(n);
+  return `<a class="peek" data-peek="${c}" title="${c}">${svg(dir ? I.folder : I.file)}${n}</a>`; };
 // a line as a list's item (- or *, indented by its spaces), a rule (---) or a quote (> ): a block of its own, its line's end
 // taken with it (else pre-wrap draws an empty line after it); an item's wrapped lines start under its words, not its dot
 const BLOCKS = /^( *)[-*] (.*)\n?|^ *(?:-{3,}|\*{3,}) *(?:\n|$)|^&gt; ?(.*)\n?/gm;
@@ -3280,7 +3294,7 @@ function md(t) {
     if (i % 2) return `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${esc(p.replace(/\n$/, ''))}</pre></div>`;
     const math = [];
     p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
-    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (PEEKABLE.test(c) ? `<code class="peek" data-peek="${c}" title="点开预览">${c}</code>` : `<code>${c}</code>`))
+    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (PEEKABLE.test(c) ? peekLink(c) : `<code>${c}</code>`))
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)
       .replace(/\u0000(\d+)\u0000/g, (_, k) => tex(...math[k]));
   }).join('');
@@ -3293,53 +3307,72 @@ const OFFICE = /\.(pptx?|docx?|xlsx?|rtf)$/i, warmed = new Set();
 const peekWarm = (text) => {
   for (const [, p] of String(text).matchAll(/`([A-Za-z]:[\\/][^`\n]*)`/g)) if (OFFICE.test(p) && !warmed.has(p)) { warmed.add(p); fetch('/api/peek?' + new URLSearchParams({ path: p, warm: 1 })).catch(() => {}); }
 };
-let pv = null, pvFrom = null;
-const previewOff = () => { if (!pv || pv.hidden) return; pv.hidden = true; pv.gen++; pv.querySelector('.pvBody').innerHTML = ''; pvFrom?.focus?.({ preventScroll: true }); };
-async function preview(p) {
-  if (!pv) {
-    pv = document.createElement('div'); pv.id = 'peek'; pv.hidden = true; pv.gen = 0;
-    pv.innerHTML = `<div class="pvIn" role="dialog" aria-modal="true" aria-label="预览"><div class="pvHead"><button class="ico" data-pv="up" title="上一级">${svg(I.back, 2)}</button>
-      <div class="pvName"><b></b><small></small></div><a class="ico" data-pv="tab" target="_blank" rel="noopener" title="在新标签页打开">${svg(I.out)}</a>
-      <button class="ico" data-pv="close" title="关闭（Esc）">${svg(I.close, 2)}</button></div><div class="pvBody"></div></div>`;
-    document.body.append(pv);
-    pv.addEventListener('click', (e) => {
-      if (e.target === pv || e.target.closest('[data-pv=close]')) return previewOff();
-      if (e.target.closest('[data-pv=up]')) return preview(pv.dataset.up);
-      const r = e.target.closest('[data-pvp]');
-      if (r) preview(r.dataset.pvp);
-    });
-  }
-  if (pv.hidden) pvFrom = document.activeElement;
-  pv.hidden = false;
-  const gen = ++pv.gen, body = pv.querySelector('.pvBody'), tab = pv.querySelector('[data-pv=tab]'), up = pv.querySelector('[data-pv=up]');
-  const name = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p, parent = p.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '');
-  pv.querySelector('.pvName b').textContent = name; pv.querySelector('.pvName small').textContent = p;
-  body.innerHTML = '<div class="pvWait">正在打开…</div>'; tab.hidden = true;
-  pv.dataset.up = /^[A-Za-z]:$/.test(parent) ? parent + '\\' : parent; up.hidden = !parent || parent === p;
-  pv.querySelector('[data-pv=close]').focus();
+const pv = { tabs: [], on: null, el: document.createElement('aside') }; // the tabs, each { p, body, dir, q }: a file's or a folder's
+const pvName = (p) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
+const pvUp = (p) => { const u = p.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, ''); return /^[A-Za-z]:$/.test(u) ? u + '\\' : u; };
+{
+  pv.el.id = 'peek'; pv.el.hidden = true; pv.el.setAttribute('aria-label', '预览');
+  pv.el.innerHTML = `<div class="pvTabs"><div class="pvTabList" role="tablist"></div><button class="ico" data-pv="close" title="关闭预览">${svg(I.close, 2)}</button></div>
+    <div class="pvHead"><button class="ico" data-pv="up" title="上一级">${svg(I.back, 2)}</button><div class="pvName"><b></b><small></small></div>
+    <a class="ico" data-pv="tab" target="_blank" rel="noopener" title="在新标签页打开">${svg(I.out)}</a></div><div class="pvBodies"></div>`;
+  const sash = document.createElement('div'); sash.className = 'sash'; sash.id = 'pvSash'; sash.hidden = true; sash.title = '拖动调宽窄';
+  $('#editor').after(sash, pv.el);
+  if (pvW) $('#app').style.setProperty('--pvW', pvW + 'px');
+  dragSash(sash, (x) => { pvW = Math.round(Math.max(320, Math.min(innerWidth - 480, pv.el.getBoundingClientRect().right - x))); $('#app').style.setProperty('--pvW', pvW + 'px'); });
+}
+// a path opened: its tab if it has one, else a new one
+function preview(p) {
+  let t = pv.tabs.find((x) => x.p === p);
+  if (!t) { t = { p, body: document.createElement('div'), dir: false, q: null }; t.body.className = 'pvBody'; pv.el.querySelector('.pvBodies').append(t.body); pv.tabs.push(t); pvLoad(t); }
+  pvShow(t);
+}
+function pvShow(t) {
+  pv.on = t; pv.el.hidden = false; $('#pvSash').hidden = false;
+  for (const x of pv.tabs) x.body.hidden = x !== t; // the others kept as they are: a PDF isn't read again
+  pvDraw();
+  pv.el.querySelector('.pvTab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+function pvDraw() {
+  const t = pv.on, up = pvUp(t.p), tab = pv.el.querySelector('[data-pv=tab]');
+  pv.el.querySelector('.pvTabList').innerHTML = pv.tabs.map((x, i) => `<button class="pvTab${x === t ? ' on' : ''}" role="tab" aria-selected="${x === t}" data-pvt="${i}" title="${esc(x.p)}">${svg(x.dir ? I.folder : I.file)}<span>${esc(pvName(x.p))}</span><i class="x" data-pvx="${i}" title="关闭">${svg(I.close, 2)}</i></button>`).join('');
+  pv.el.querySelector('.pvName b').textContent = pvName(t.p); pv.el.querySelector('.pvName small').textContent = t.p;
+  pv.el.querySelector('[data-pv=up]').hidden = !up || up === t.p;
+  tab.hidden = !t.q; if (t.q) tab.href = t.q;
+}
+function pvClose(t) {
+  const i = pv.tabs.indexOf(t);
+  if (i < 0) return;
+  pv.tabs.splice(i, 1); t.body.remove(); t.gen = -1;
+  if (!pv.tabs.length) { pv.on = null; pv.el.hidden = true; $('#pvSash').hidden = true; pv.el.querySelector('.pvTabList').innerHTML = ''; return; }
+  if (pv.on === t) pvShow(pv.tabs[Math.min(i, pv.tabs.length - 1)]); else pvDraw();
+}
+// a tab's path into its body: a folder's folders (gone into in the tab) and files (each opened in a tab of its own); a file
+// as the browser shows it, after asking what it is (an Office one's PDF begun meanwhile)
+async function pvLoad(t) {
+  const gen = t.gen = (t.gen ?? 0) + 1, body = t.body, p = t.p, name = pvName(p);
+  body.innerHTML = '<div class="pvWait">正在打开…</div>'; t.q = null;
   const r = await fetch('/api/dirs?' + new URLSearchParams({ path: p })).then((x) => x.json()).catch(() => ({ err: '连不上' }));
-  if (gen !== pv.gen) return;
-  if (!r.err) { // a folder: its folders, then its files
+  if (gen !== t.gen) return;
+  t.dir = !r.err;
+  if (t.dir) {
     const at = r.path.replace(/[\\/]?$/, '\\');
-    pv.dataset.up = r.up ?? ''; up.hidden = !r.up;
-    body.innerHTML = r.dirs.map((d) => `<button class="pvRow" data-pvp="${esc(d)}">${svg(I.folder)}<span>${esc(d.split(/[\\/]/).pop())}</span></button>`).join('')
+    body.innerHTML = r.dirs.map((d) => `<button class="pvRow" data-pvgo="${esc(d)}">${svg(I.folder)}<span>${esc(d.split(/[\\/]/).pop())}</span></button>`).join('')
       + r.files.map((f) => `<button class="pvRow" data-pvp="${esc(at + f)}">${svg(I.file)}<span>${esc(f)}</span></button>`).join('') || '<div class="pvWait">这个文件夹是空的</div>';
     if (r.files.some((f) => OFFICE.test(f))) fetch('/api/peek?' + new URLSearchParams({ path: r.path, warm: 1 })).catch(() => {}); // its Office files' PDFs made meanwhile
+    if (pv.on === t) pvDraw();
     return;
   }
   const q = `/api/peek/${encodeURIComponent(name)}?` + new URLSearchParams({ path: p }); // its name in the address: the PDF viewer's title
-  // first only asked what it is (an Office one's PDF begun meanwhile): the service's words when it can't (not there), or
-  // JSON from one before 预览 (no such address)
+  // the service's words when it can't (not there), or JSON from one before 预览 (no such address)
   const w = await fetch(q + '&warm=1').then(async (x) => { const t = await x.text(); let j = null; try { j = JSON.parse(t); } catch {} return { ok: x.ok, j, t }; }, () => null);
-  if (gen !== pv.gen) return;
+  if (gen !== t.gen) return;
   if (!w || !w.ok) { body.innerHTML = `<div class="pvWait">${esc(!w ? '连不上网页服务' : w.j ? '预览要等网页服务重启后才能用' : w.t || '打不开这个文件')}</div>`; return; }
-  tab.hidden = false; tab.href = q;
-  // a phone shows a PDF in a frame as its first page only: there it's opened in a tab of its own
-  if (!FINE && w.j?.type === 'application/pdf') { body.innerHTML = `<div class="pvWait"><a href="${q}" target="_blank" rel="noopener">打开${OFFICE.test(p) ? '（先转成 PDF，第一次要几秒）' : ''}</a></div>`; return; }
-  if (w.j?.type === 'application/octet-stream') { body.innerHTML = `<div class="pvWait"><span>这种文件在网页里看不了，<a href="${q}" download>下载下来</a>用电脑上的程序打开。</span></div>`; return; }
+  t.q = q; if (pv.on === t) pvDraw();
   const app = /\.pptx?$/i.test(p) ? 'PowerPoint' : /\.xlsx?$/i.test(p) ? 'Excel' : 'Word', type = w.j?.type ?? '';
-  // a picture, a video or a sound in the pane itself (fitted to it: a page of its own shows a big picture at full size);
-  // the rest, a PDF and text, in a frame
+  // a phone shows a PDF in a frame as its first page only: there it's opened in a tab of its own
+  if (!FINE && type === 'application/pdf') { body.innerHTML = `<div class="pvWait"><a href="${q}" target="_blank" rel="noopener">打开${OFFICE.test(p) ? '（先转成 PDF，第一次要几秒）' : ''}</a></div>`; return; }
+  if (type === 'application/octet-stream') { body.innerHTML = `<div class="pvWait"><span>这种文件在网页里看不了，<a href="${q}" download>下载下来</a>用电脑上的程序打开。</span></div>`; return; }
+  // a picture, a video or a sound in the pane itself (fitted to it); a PDF and text in a frame
   const kind = /^image\//.test(type) ? 'img' : /^video\//.test(type) ? 'video' : /^audio\//.test(type) ? 'audio' : 'iframe';
   body.innerHTML = `<div class="pvWait">${OFFICE.test(p) ? `正在用 ${app} 转成 PDF…（第一次要几秒）` : '正在打开…'}</div><${kind} class="pvMedia"${kind === 'iframe' ? ` title="${esc(name)}"` : kind === 'img' ? ` alt="${esc(name)}"` : ' controls'}></${kind}>`;
   const f = body.querySelector('.pvMedia');
@@ -3347,7 +3380,16 @@ async function preview(p) {
   f.onerror = () => { const n = body.querySelector('.pvWait'); if (n) n.textContent = '打不开这个文件'; };
   f.src = q;
 }
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && pv && !pv.hidden) { e.preventDefault(); e.stopImmediatePropagation(); previewOff(); } }, true);
+pv.el.addEventListener('click', (e) => {
+  const x = e.target.closest('[data-pvx]'); if (x) return pvClose(pv.tabs[+x.dataset.pvx]);
+  const tb = e.target.closest('[data-pvt]'); if (tb) return pvShow(pv.tabs[+tb.dataset.pvt]);
+  if (e.target.closest('[data-pv=close]')) { for (const t of [...pv.tabs]) pvClose(t); return; }
+  const go = e.target.closest('[data-pvgo]')?.dataset.pvgo ?? (e.target.closest('[data-pv=up]') && pvUp(pv.on.p)); // into a folder, or one up: in this tab
+  if (go) { pv.on.p = go; pvLoad(pv.on); return pvDraw(); }
+  const f = e.target.closest('[data-pvp]'); if (f) preview(f.dataset.pvp);
+});
+// a phone's pane covers the page: Esc closes it (a computer's sits beside the conversation, where Esc stops Claude)
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && NARROW.matches && !pv.el.hidden) { e.preventDefault(); e.stopImmediatePropagation(); for (const t of [...pv.tabs]) pvClose(t); } }, true);
 document.addEventListener('click', (e) => { const c = e.target.closest('[data-peek]'); if (c) { e.preventDefault(); preview(c.dataset.peek); } });
 // 复制: a code block's code, or an answer as Claude wrote it (its Markdown). 展开全部 / 收起 a long message of yours
 // (folded again, kept in sight)

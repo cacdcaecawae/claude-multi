@@ -19,7 +19,7 @@ const histReads = []; // when each history read came
 const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'C:/Users/ly/Desktop', 'D:/'], files: [] },
   'D:/': { path: 'D:/', up: '', dirs: ['D:/work', 'D:/.cache'], files: ['a.civa'] }, 'D:/work': { path: 'D:/work', up: 'D:/', dirs: [], files: [] } };
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
-let cmdAsks = 0; // the times / asked for a conversation's commands
+const cmdAsks = []; // whose commands / asked for, in turn
 const CMDS = [{ name: 'usage', desc: 'Show usage', hint: '' }, { name: 'usage-credits', desc: 'Credits', hint: '' }, { name: 'clear', desc: 'Start anew', hint: '[name]' }, { name: 'status', desc: 'Status', hint: '' }];
 dirs['D:\\figs'] = { path: 'D:\\figs', up: 'D:\\', dirs: ['D:\\figs\\old'], files: ['图7.pptx', 'a.png', 'x.exe'] };
 const server = http.createServer((req, res) => {
@@ -59,7 +59,7 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
       : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: histFeed ? histFeed.splice(0) : [{ role: 'claude', text: long }] }
       : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' }
-      : url.pathname === '/api/commands' ? (cmdAsks++, url.searchParams.get('id') === 'M' ? { commands: [{ name: 'clear', desc: 'Start anew', hint: '[name]', also: ['reset'], builtin: true }], note: 'Mac 上装的技能这里列不出' } : { commands: CMDS })
+      : url.pathname === '/api/commands' ? (cmdAsks.push(url.searchParams.get('id') ?? url.searchParams.get('dir') ?? url.searchParams.get('mac')), url.searchParams.get('id') === 'M' ? { commands: [{ name: 'clear', desc: 'Start anew', hint: '[name]', also: ['reset'], builtin: true }], note: 'Mac 上装的技能这里列不出' } : { commands: CMDS })
       : url.pathname.startsWith('/api/peek') ? { type: /\.exe$/.test(url.searchParams.get('path')) ? 'application/octet-stream' : /\.pptx$/.test(url.searchParams.get('path')) ? 'application/pdf' : 'image/png' }
       : url.pathname === '/api/dirs' ? dirs[url.searchParams.get('path')] ?? { err: '打不开' } : {};
     res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(data));
@@ -475,31 +475,36 @@ const press = async (key, shift = false) => {
     out.push(g.el.querySelector('.slash').hidden ? 'hidden' : g.el.querySelector('.slash').textContent); closeConv(g);
     return out.join(' | '); })()`), '/clear[name]Start anewMac 上装的技能这里列不出 | GPT（Codex）对话的命令这里列不出，可以直接打完整的命令');
   historyId = 'A';
-  assert.equal(cmdAsks, 2); // once for each (a GPT one's: not asked)
+  assert.deepEqual(cmdAsks, ['A', 'M']); // once for each (a GPT one's: not asked)
   console.log('browser / commands ok');
-  // 预览: a path of this PC in a reply's code is a link (other code isn't); a folder opens beside it with its folders and
-  // files; an Office file says it's being made a PDF and shows in a frame; ← one up; one the browser can't show offers its
-  // download; Esc closes it
+  // 预览: a path of this PC in a reply's code is a link (its name; other code isn't); it opens in a pane beside the
+  // conversation, a tab each: a folder lists its folders and files, a file of it opens in a tab of its own (an Office one
+  // says it's being made a PDF), the tabs before kept as they were; ← one up in the tab; one not there or a service before
+  // 预览 say so, one the browser can't show offers its download; × closes a tab, the last one the pane; Esc leaves it
   assert.equal(await evaluate(`(async () => {
     const wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), d = document.createElement('div'); d.className = 'hm claude';
     d.innerHTML = md('看 \\\`D:\\\\figs\\\` 和 \\\`npm i\\\`'); document.body.append(d);
-    const out = [d.querySelectorAll('code.peek').length, d.querySelector('code:not(.peek)').textContent];
-    d.querySelector('code.peek').click(); await wait(300);
-    const pv = document.querySelector('#peek'), rows = () => [...pv.querySelectorAll('.pvRow span')].map((s) => s.textContent).join(',');
-    out.push(!pv.hidden, pv.querySelector('.pvName b').textContent, rows());
-    [...pv.querySelectorAll('.pvRow')].find((r) => r.textContent === '图7.pptx').click(); await wait(300);
-    out.push(pv.querySelector('.pvWait')?.textContent ?? 'loaded', decodeURIComponent(pv.querySelector('iframe').getAttribute('src')));
-    pv.querySelector('[data-pv=up]').click(); await wait(300); out.push(rows());
-    [...pv.querySelectorAll('.pvRow')].find((r) => r.textContent === 'x.exe').click(); await wait(300);
-    out.push(!!pv.querySelector('.pvWait a[download]'), !pv.querySelector('iframe'));
-    pv.querySelector('[data-pv=up]').click(); await wait(300);
-    [...pv.querySelectorAll('.pvRow')].find((r) => r.textContent === 'a.png').click(); await wait(300);
-    out.push(pv.querySelector('.pvMedia')?.tagName); // a picture in the pane itself, fitted to it
-    preview('D:\\\\figs\\\\missing.png'); await wait(300); out.push(pv.querySelector('.pvWait').textContent);
-    preview('D:\\\\figs\\\\oldsvc.png'); await wait(300); out.push(pv.querySelector('.pvWait').textContent);
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); out.push(pv.hidden);
+    const out = [d.querySelectorAll('a.peek').length, d.querySelector('a.peek').textContent, d.querySelector('code').textContent];
+    d.querySelector('a.peek').click(); await wait(300);
+    const pv = document.querySelector('#peek'), on = () => pv.querySelector('.pvBody:not([hidden])');
+    const rows = () => [...on().querySelectorAll('.pvRow span')].map((s) => s.textContent).join(','), tabs = () => [...pv.querySelectorAll('.pvTab span')].map((s) => s.textContent).join(',');
+    const open = async (n) => { [...on().querySelectorAll('.pvRow')].find((r) => r.textContent === n).click(); await wait(300); };
+    out.push(!pv.hidden && !document.querySelector('#pvSash').hidden, tabs(), rows());
+    await open('图7.pptx'); out.push(tabs(), on().querySelector('.pvWait')?.textContent ?? 'loaded', decodeURIComponent(on().querySelector('iframe').getAttribute('src')));
+    const deck = on(); pv.querySelector('[data-pvt="0"]').click(); await wait(100); out.push(rows(), deck.isConnected && !!deck.querySelector('iframe'));
+    pv.querySelector('[data-pvt="1"]').click(); pv.querySelector('[data-pv=up]').click(); await wait(300); out.push(tabs(), rows());
+    pv.querySelector('[data-pvt="0"]').click(); await open('x.exe'); out.push(!!on().querySelector('.pvWait a[download]'));
+    preview('D:\\\\figs\\\\a.png'); await wait(300); out.push(on().querySelector('.pvMedia')?.tagName); // a picture in the pane itself, fitted to it
+    preview('D:\\\\figs\\\\missing.png'); await wait(300); out.push(on().querySelector('.pvWait').textContent);
+    preview('D:\\\\figs\\\\oldsvc.png'); await wait(300); out.push(on().querySelector('.pvWait').textContent);
+    pv.querySelector('.pvTab.on .x').click(); out.push(tabs());
+    // Esc: a phone's pane (it covers the page) closes, a computer's stays (there Esc stops Claude); ✕ closes them all
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); out.push(pv.hidden === NARROW.matches);
+    if (!pv.hidden) pv.querySelector('[data-pv=close]').click(); out.push(pv.hidden, document.querySelector('#pvSash').hidden, tabs() || 'none');
     d.remove(); return out.join(' | '); })()`),
-    '1 | npm i | true | figs | old,图7.pptx,a.png,x.exe | 正在用 PowerPoint 转成 PDF…（第一次要几秒） | /api/peek/图7.pptx?path=D:\\figs\\图7.pptx | old,图7.pptx,a.png,x.exe | true | true | IMG | 没有这个文件：D:\\figs\\missing.png | 预览要等网页服务重启后才能用 | true');
+    '1 | figs | npm i | true | figs | old,图7.pptx,a.png,x.exe | figs,图7.pptx | 正在用 PowerPoint 转成 PDF…（第一次要几秒） | /api/peek/图7.pptx?path=D:\\figs\\图7.pptx'
+    + ' | old,图7.pptx,a.png,x.exe | true | figs,figs | old,图7.pptx,a.png,x.exe | true | IMG | 没有这个文件：D:\\figs\\missing.png | 预览要等网页服务重启后才能用'
+    + ' | figs,figs,x.exe,a.png,missing.png | true | true | true | none');
   console.log('browser 预览 ok');
   // 提示: the page's own card, never the browser's: over a hinted thing inside another, neither keeps its title while the
   // mouse is there (the browser would show the outer one), the card says the inner's; a click takes the card away and

@@ -466,14 +466,16 @@ if (SESSION0) {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
   const part = (re) => src.match(re)[0];
   const md = new Function('katex', `${part(/^const esc = .*$/m)}\n${part(/^const svg = .*$/m)}\n${part(/^const I = [\s\S]*?\};$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}
-    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^const PEEKABLE = .*$/m)}\n${part(/^const BLOCKS = .*$/m)}\n${part(/^const block = [\s\S]*?'<hr>';$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
+    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^const PEEKABLE = .*$/m)}\n${part(/^const peekLink = [\s\S]*?\};$/m)}\n${part(/^const BLOCKS = .*$/m)}\n${part(/^const block = [\s\S]*?'<hr>';$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
   // a list's items, a rule and a quote: blocks, each line's end taken with it; a - inside a line, or in code, stays
   const h = md('看\n- 一\n  - 二\n---\n> 引\n正文 - 不是\n```\n- 代码\n```');
   assert.ok(h.startsWith('看\n<span class="li" style="margin-left:0em">一</span><span class="li" style="margin-left:1em">二</span><hr><span class="bq">引</span>正文 - 不是\n'), h);
   assert.ok(h.includes('<pre>- 代码</pre>'), h);
-  // a path of this PC in code: a 预览 link (D:\\… and D:/…, Chinese and spaces in it); other code, or a Mac's path: not
-  assert.equal(md('`D:\\论文 04\\图7.pptx` `D:/a` `npm i` `/Users/me/x`'),
-    '<code class="peek" data-peek="D:\\论文 04\\图7.pptx" title="点开预览">D:\\论文 04\\图7.pptx</code> <code class="peek" data-peek="D:/a" title="点开预览">D:/a</code> <code>npm i</code> <code>/Users/me/x</code>');
+  // a path of this PC in code: a 预览 link, as Codex shows one: its kind's mark and its name, the whole path on hover
+  // (Chinese and spaces in it; a folder by its ending / or no .ext); other code, or a Mac's path: code
+  const pk = md('`D:\\论文 04\\图7.pptx` `D:/a/` `npm i` `/Users/me/x`');
+  const lk = /^<a class="peek" data-peek="D:\\论文 04\\图7\.pptx" title="D:\\论文 04\\图7\.pptx">(<svg.*?<\/svg>)图7\.pptx<\/a> <a class="peek" data-peek="D:\/a\/" title="D:\/a\/">(<svg.*?<\/svg>)a<\/a> <code>npm i<\/code> <code>\/Users\/me\/x<\/code>$/.exec(pk);
+  assert.ok(lk && lk[1] !== lk[2], pk); // a file's mark, a folder's
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
