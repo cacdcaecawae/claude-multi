@@ -59,7 +59,7 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
       : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: histFeed ? histFeed.splice(0) : [{ role: 'claude', text: long }] }
       : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' }
-      : url.pathname === '/api/commands' ? (cmdAsks++, { commands: CMDS })
+      : url.pathname === '/api/commands' ? (cmdAsks++, url.searchParams.get('id') === 'M' ? { commands: [{ name: 'clear', desc: 'Start anew', hint: '[name]', also: ['reset'], builtin: true }], note: 'Mac 上装的技能这里列不出' } : { commands: CMDS })
       : url.pathname.startsWith('/api/peek') ? { type: /\.exe$/.test(url.searchParams.get('path')) ? 'application/octet-stream' : /\.pptx$/.test(url.searchParams.get('path')) ? 'application/pdf' : 'image/png' }
       : url.pathname === '/api/dirs' ? dirs[url.searchParams.get('path')] ?? { err: '打不开' } : {};
     res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(data));
@@ -461,11 +461,21 @@ const press = async (key, shift = false) => {
     await type('/s'); key('Escape'); out.push(names());
     box.blur(); await type('/pon'); out.push(names()); // a draft put back, the box not typed in: no list
     closeConv(c);
+    return out.join(' | '); })()`), '/usage /usage-credits /status | "/usage-credits " | hidden | "/clear " | hidden | hidden');
+  // a Mac's: Claude Code's own commands (found by another name too: /reset is /clear), a line saying why; a GPT one's:
+  // the line alone, not asked for
+  historyId = 'M';
+  assert.equal(await evaluate(`(async () => {
+    const wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), out = [];
+    const m = makeConv({ id: 'M', mac: 'la-a1' }, 'Mac'); addConv(focusG, m); await wait(300);
+    const mb = m.el.querySelector('.send textarea'); mb.focus(); mb.value = '/re'; mb.dispatchEvent(new Event('input')); await wait(200);
+    out.push(m.el.querySelector('.slash').textContent); closeConv(m);
     const g = makeConv({ id: 'G', gpt: true }, 'GPT'); addConv(focusG, g);
     const gb = g.el.querySelector('.send textarea'); gb.focus(); gb.value = '/'; gb.dispatchEvent(new Event('input')); await wait(200);
-    out.push(g.el.querySelector('.slash').hidden); closeConv(g);
-    return out.join(' | '); })()`), '/usage /usage-credits /status | "/usage-credits " | hidden | "/clear " | hidden | hidden | true');
-  assert.equal(cmdAsks, 1);
+    out.push(g.el.querySelector('.slash').hidden ? 'hidden' : g.el.querySelector('.slash').textContent); closeConv(g);
+    return out.join(' | '); })()`), '/clear[name]Start anewMac 上装的技能这里列不出 | GPT（Codex）对话的命令这里列不出，可以直接打完整的命令');
+  historyId = 'A';
+  assert.equal(cmdAsks, 2); // once for each (a GPT one's: not asked)
   console.log('browser / commands ok');
   // 预览: a path of this PC in a reply's code is a link (other code isn't); a folder opens beside it with its folders and
   // files; an Office file says it's being made a PDF and shows in a frame; ← one up; one the browser can't show offers its

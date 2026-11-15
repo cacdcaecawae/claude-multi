@@ -754,6 +754,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .slash button.on { background: var(--sel); }
   .slash b { flex: none; font-weight: 600; color: var(--fgHi); } .slash i { flex: none; font-style: normal; font-size: 12px; color: var(--fg3); }
   .slash span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--fg2); }
+  .slashNote { padding: 6px 10px; font-size: 12.5px; color: var(--fg3); } .slash button + .slashNote { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 8px; }
   /* 预览: a path of this PC in a reply, opened beside the conversation (a phone: the whole screen) */
   .hm code.peek { cursor: pointer; color: var(--link); } .hm code.peek:hover { text-decoration: underline; }
   #peek { position: fixed; inset: 0; z-index: 28; display: flex; justify-content: flex-end; background: rgba(0,0,0,.25); }
@@ -2306,22 +2307,24 @@ function makeConv(body, title) {
   // / at the start of the box: the commands and skills Claude Code lists for this conversation (its account and folder;
   // asked once, the first time), those whose name has what's typed (beginning with it first); ↑↓ choose, Tab or a click
   // takes one (its name and a space, for what goes after), Enter takes it and sends one typed out in full, Esc leaves it.
-  // A Mac's or a GPT one's: none (its list isn't asked for there)
+  // A Mac's: Claude Code's own commands only, a line saying why; a GPT one's: that line alone
   const slash = document.createElement('div'); slash.className = 'slash'; slash.hidden = true; slash.setAttribute('role', 'listbox'); $p('.send').append(slash);
-  let cmds = null, asking = null, slashQ = '', picked = 0, offered = [];
-  const askCmds = () => asking ??= fetch('/api/commands?' + new URLSearchParams(c.id ? { id: c.id } : { dir: c.dir(), acct: c.acct ?? '' }))
-    .then(async (r) => { const j = await r.json(); if (!r.ok) throw Object.assign(new Error(j.err), { old: r.status === 404 }); cmds = j.commands ?? []; slashDraw(); })
+  let cmds = null, asking = null, slashQ = '', picked = 0, offered = [], slashNote = '';
+  const askCmds = () => asking ??= fetch('/api/commands?' + new URLSearchParams(c.id ? { id: c.id } : c.mac ? { mac: c.mac } : { dir: c.dir(), acct: c.acct ?? '' }))
+    .then(async (r) => { const j = await r.json(); if (!r.ok) throw Object.assign(new Error(j.err), { old: r.status === 404 }); cmds = j.commands ?? []; slashNote = j.note ?? ''; slashDraw(); })
     .catch((e) => { cmds = []; if (e.old) toast('/ 的命令列表要等网页服务重启后才有', 3000); setTimeout(() => { cmds = asking = null; }, 60000); });
   function slashDraw() {
     const m = /^\/(\S*)$/.exec(line.value);
-    if (!m || c.gpt || c.mac || document.activeElement !== line) return void (slash.hidden = true); // (a draft put back: not while it's not typed in)
+    if (!m || document.activeElement !== line) return void (slash.hidden = true); // (a draft put back: not while it's not typed in)
+    if (c.gpt) { cmds = []; slashNote = 'GPT（Codex）对话的命令这里列不出，可以直接打完整的命令'; }
     if (!cmds) { askCmds(); return void (slash.hidden = true); }
-    const q = m[1].toLowerCase(), has = (x) => x.name.toLowerCase().includes(q);
+    const q = m[1].toLowerCase(), names = (x) => [x.name, ...(x.also ?? [])].map((n) => n.toLowerCase()), starts = (x) => names(x).some((n) => n.startsWith(q));
     if (q !== slashQ) { slashQ = q; picked = 0; }
-    offered = [...cmds.filter((x) => x.name.toLowerCase().startsWith(q)), ...cmds.filter((x) => has(x) && !x.name.toLowerCase().startsWith(q))].slice(0, 60);
-    if (!offered.length) return void (slash.hidden = true);
-    picked = Math.min(picked, offered.length - 1);
-    slash.innerHTML = offered.map((x, i) => `<button data-slash="${i}" role="option"${i === picked ? ' class="on" aria-selected="true"' : ''}><b>/${esc(x.name)}</b>${x.hint ? `<i>${esc(x.hint)}</i>` : ''}<span>${esc(x.desc)}</span></button>`).join('');
+    offered = [...cmds.filter(starts), ...cmds.filter((x) => !starts(x) && names(x).some((n) => n.includes(q)))].slice(0, 60); // by its name or another it goes by
+    if (!offered.length && !slashNote) return void (slash.hidden = true);
+    picked = Math.max(0, Math.min(picked, offered.length - 1));
+    slash.innerHTML = offered.map((x, i) => `<button data-slash="${i}" role="option"${i === picked ? ' class="on" aria-selected="true"' : ''}><b>/${esc(x.name)}</b>${x.hint ? `<i>${esc(x.hint)}</i>` : ''}<span>${esc(x.desc)}</span></button>`).join('')
+      + (slashNote ? `<div class="slashNote">${esc(slashNote)}</div>` : '');
     slash.hidden = false;
     slash.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
   }
@@ -2501,9 +2504,10 @@ function makeConv(body, title) {
   }
   line.onkeydown = (e) => {
     if (!slash.hidden && !e.isComposing) { // the / list up: its keys
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); picked = (picked + (e.key === 'ArrowDown' ? 1 : offered.length - 1)) % offered.length; return slashDraw(); }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); return slashTake(picked, e.key === 'Enter' && offered[picked]?.name.toLowerCase() === slashQ); }
-      if (e.key === 'Escape') { e.preventDefault(); slash.hidden = true; return; }
+      if (!offered.length) { if (e.key === 'Escape') { e.preventDefault(); slash.hidden = true; return; } } // a line saying why, nothing to take
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); picked = (picked + (e.key === 'ArrowDown' ? 1 : offered.length - 1)) % offered.length; return slashDraw(); }
+      else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); return slashTake(picked, e.key === 'Enter' && offered[picked]?.name.toLowerCase() === slashQ); }
+      else if (e.key === 'Escape') { e.preventDefault(); slash.hidden = true; return; }
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim() || atts.length) go.click(); } // only sends (pictures alone too); Shift+Enter: a new line
     if (e.key === 'Escape' && busyNow) stop(); // as in Claude: Esc stops it

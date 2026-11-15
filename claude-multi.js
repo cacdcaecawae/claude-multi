@@ -2741,7 +2741,7 @@ function slashList(exe, configDir, cwd, timeout = 20000) {
         let j; try { j = JSON.parse(buf.slice(0, i)); } catch { continue; }
         if (j.type !== 'control_response') continue;
         if (j.response?.subtype !== 'success') settle(new Error(j.response?.error || '没拿到命令列表'));
-        else settle(null, (j.response.response?.commands ?? []).filter(slashKeep).map((c) => ({ name: c.name, desc: c.description ?? '', hint: c.argumentHint ?? '' })));
+        else settle(null, (j.response.response?.commands ?? []).filter(slashKeep).map((c) => ({ name: c.name, desc: c.description ?? '', hint: c.argumentHint ?? '', also: c.aliases ?? [], builtin: !!c.builtin })));
         p.stdin.end(); setTimeout(() => p.kill(), 5000).unref(); // it goes on its own at the end of its input
       }
     });
@@ -3475,15 +3475,17 @@ async function web() {
     'POST /api/project': (q, b) => editProjects((all) => projectOp(all, b)),
     'GET /api/dirs': (q) => dirsIn(q.get('path') ?? ''),
     // `/` in a conversation's box ({id}, or {dir, acct} for one not begun): what Claude Code lists there (slashList), by
-    // account and folder, kept 10 min. A Mac's or a GPT one's: none (not asked for there)
+    // account and folder, kept 10 min. A Mac's ({mac} one not begun): Claude Code's own commands only, as listed here (its
+    // skills are the Mac's, and nothing is run there to ask)
     'GET /api/commands': async (q) => {
-      const s = q.get('id') ? sessions().find((x) => x.id === q.get('id')) : null, reg = load();
-      const p = reg.profiles[s ? s.acct : (Number(q.get('acct')) || 0) - 1], cwd = s ? s.cwd : q.get('dir') ?? '';
-      if (s?.mac || s?.gpt || !p || !isDir(cwd)) return { commands: [] };
+      const s = q.get('id') ? sessions().find((x) => x.id === q.get('id')) : null, reg = load(), mac = s ? s.mac : q.get('mac');
+      const p = mac ? reg.profiles[0] : reg.profiles[s ? s.acct : (Number(q.get('acct')) || 0) - 1], cwd = mac ? ROOT : s ? s.cwd : q.get('dir') ?? '';
+      if (s?.gpt || !p || !isDir(cwd)) return { commands: [] };
       const k = `${p.configDir}|${path.resolve(cwd).toLowerCase()}`;
       let c = slashCache.get(k);
       if (!c || Date.now() - c.at > 600000) { c = { at: Date.now(), list: slashList(claudeExe, p.configDir, cwd) }; slashCache.set(k, c); c.list.catch(() => slashCache.delete(k)); }
-      return { commands: await c.list };
+      const list = await c.list;
+      return mac ? { commands: list.filter((x) => x.builtin), note: 'Mac 上装的技能这里列不出，可以直接打完整的名字' } : { commands: list };
     },
     // your name, for the page's avatar (its first character; none: the gear), kept in the registry
     'POST /api/me': (q, b) => {
