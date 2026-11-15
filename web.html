@@ -2314,7 +2314,7 @@ function makeConv(body, title) {
     .catch((e) => { cmds = []; if (e.old) toast('/ 的命令列表要等网页服务重启后才有', 3000); setTimeout(() => { cmds = asking = null; }, 60000); });
   function slashDraw() {
     const m = /^\/(\S*)$/.exec(line.value);
-    if (!m || c.gpt || c.mac) return void (slash.hidden = true);
+    if (!m || c.gpt || c.mac || document.activeElement !== line) return void (slash.hidden = true); // (a draft put back: not while it's not typed in)
     if (!cmds) { askCmds(); return void (slash.hidden = true); }
     const q = m[1].toLowerCase(), has = (x) => x.name.toLowerCase().includes(q);
     if (q !== slashQ) { slashQ = q; picked = 0; }
@@ -2419,7 +2419,9 @@ function makeConv(body, title) {
   // its Enter, a long text was taken for a paste, the Enter with it for a new line, and the message sat there unsent.
   go.onclick = () => (go.classList.contains('stop') ? stop() : send());
   async function send(quick = null) {
-    const v = (quick ?? line.value).trim(), imgs = quick === null ? atts : [];
+    // a / command alone keeps a space after it: "/usage" pasted then Enter could take the first of Claude's own list
+    // (/usage-credits), "/usage " runs /usage
+    const v = (quick ?? line.value).trim().replace(/^\/\S+$/, '$& '), imgs = quick === null ? atts : [];
     if (!v && !imgs.length) return false;
     if (view === 'hist') drawLive(); // the terminal may already have a question the debounced redraw hasn't shown
     const why = cantSend();
@@ -3318,14 +3320,19 @@ async function preview(p) {
     pv.dataset.up = r.up ?? ''; up.hidden = !r.up;
     body.innerHTML = r.dirs.map((d) => `<button class="pvRow" data-pvp="${esc(d)}">${svg(I.folder)}<span>${esc(d.split(/[\\/]/).pop())}</span></button>`).join('')
       + r.files.map((f) => `<button class="pvRow" data-pvp="${esc(at + f)}">${svg(I.file)}<span>${esc(f)}</span></button>`).join('') || '<div class="pvWait">这个文件夹是空的</div>';
+    if (r.files.some((f) => OFFICE.test(f))) fetch('/api/peek?' + new URLSearchParams({ path: r.path, warm: 1 })).catch(() => {}); // its Office files' PDFs made meanwhile
     return;
   }
   const q = `/api/peek/${encodeURIComponent(name)}?` + new URLSearchParams({ path: p }); // its name in the address: the PDF viewer's title
-  const w = await fetch(q + '&warm=1').then(async (x) => ({ ok: x.ok, j: await x.json().catch(() => null), t: x.ok ? '' : await x.clone().text().catch(() => '') }), () => null);
+  // first only asked what it is (an Office one's PDF begun meanwhile): the service's words when it can't (not there), or
+  // JSON from one before 预览 (no such address)
+  const w = await fetch(q + '&warm=1').then(async (x) => { const t = await x.text(); let j = null; try { j = JSON.parse(t); } catch {} return { ok: x.ok, j, t }; }, () => null);
   if (gen !== pv.gen) return;
-  if (!w || (!w.ok && w.j)) { body.innerHTML = '<div class="pvWait">预览要等网页服务重启后才能用</div>'; return; } // the service before it: no such address
+  if (!w || !w.ok) { body.innerHTML = `<div class="pvWait">${esc(!w ? '连不上网页服务' : w.j ? '预览要等网页服务重启后才能用' : w.t || '打不开这个文件')}</div>`; return; }
   tab.hidden = false; tab.href = q;
-  if (w.ok && w.j?.type === 'application/octet-stream') { body.innerHTML = `<div class="pvWait"><span>这种文件在网页里看不了，<a href="${q}" download>下载下来</a>用电脑上的程序打开。</span></div>`; return; }
+  // a phone shows a PDF in a frame as its first page only: there it's opened in a tab of its own
+  if (!FINE && w.j?.type === 'application/pdf') { body.innerHTML = `<div class="pvWait"><a href="${q}" target="_blank" rel="noopener">打开${OFFICE.test(p) ? '（先转成 PDF，第一次要几秒）' : ''}</a></div>`; return; }
+  if (w.j?.type === 'application/octet-stream') { body.innerHTML = `<div class="pvWait"><span>这种文件在网页里看不了，<a href="${q}" download>下载下来</a>用电脑上的程序打开。</span></div>`; return; }
   const app = /\.pptx?$/i.test(p) ? 'PowerPoint' : /\.xlsx?$/i.test(p) ? 'Excel' : 'Word', type = w.j?.type ?? '';
   // a picture, a video or a sound in the pane itself (fitted to it: a page of its own shows a big picture at full size);
   // the rest, a PDF and text, in a frame

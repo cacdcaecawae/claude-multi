@@ -27,6 +27,8 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/open') opens++;
   if (url.pathname === '/api/history') histReads.push(Date.now());
   if (url.pathname === '/api/history' && histHang) { histHang = false; hung = res; return; } // left open, never answered
+  if (url.pathname.startsWith('/api/peek') && /missing/.test(url.searchParams.get('path'))) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('没有这个文件：' + url.searchParams.get('path')); }
+  if (url.pathname.startsWith('/api/peek') && /oldsvc/.test(url.searchParams.get('path'))) { res.writeHead(404, { 'content-type': 'application/json' }); return res.end('{"err":"没有这个地址"}'); } // a service before 预览
   if (url.pathname.startsWith('/api/peek') && !url.searchParams.has('warm')) return setTimeout(() => { res.setHeader('content-type', 'text/plain'); res.end('the file'); }, 1500); // (an Office one's PDF takes a while)
   if (url.pathname === '/api/project') { // 项目, kept as the service keeps them
     let b = ''; req.on('data', (d) => (b += d));
@@ -457,11 +459,12 @@ const press = async (key, shift = false) => {
     key('ArrowDown'); key('Tab'); out.push(JSON.stringify(box.value), names());
     await type('/cle'); key('Enter'); out.push(JSON.stringify(box.value));
     await type('/s'); key('Escape'); out.push(names());
+    box.blur(); await type('/pon'); out.push(names()); // a draft put back, the box not typed in: no list
     closeConv(c);
     const g = makeConv({ id: 'G', gpt: true }, 'GPT'); addConv(focusG, g);
     const gb = g.el.querySelector('.send textarea'); gb.focus(); gb.value = '/'; gb.dispatchEvent(new Event('input')); await wait(200);
     out.push(g.el.querySelector('.slash').hidden); closeConv(g);
-    return out.join(' | '); })()`), '/usage /usage-credits /status | "/usage-credits " | hidden | "/clear " | hidden | true');
+    return out.join(' | '); })()`), '/usage /usage-credits /status | "/usage-credits " | hidden | "/clear " | hidden | hidden | true');
   assert.equal(cmdAsks, 1);
   console.log('browser / commands ok');
   // 预览: a path of this PC in a reply's code is a link (other code isn't); a folder opens beside it with its folders and
@@ -482,10 +485,27 @@ const press = async (key, shift = false) => {
     pv.querySelector('[data-pv=up]').click(); await wait(300);
     [...pv.querySelectorAll('.pvRow')].find((r) => r.textContent === 'a.png').click(); await wait(300);
     out.push(pv.querySelector('.pvMedia')?.tagName); // a picture in the pane itself, fitted to it
+    preview('D:\\\\figs\\\\missing.png'); await wait(300); out.push(pv.querySelector('.pvWait').textContent);
+    preview('D:\\\\figs\\\\oldsvc.png'); await wait(300); out.push(pv.querySelector('.pvWait').textContent);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); out.push(pv.hidden);
     d.remove(); return out.join(' | '); })()`),
-    '1 | npm i | true | figs | old,图7.pptx,a.png,x.exe | 正在用 PowerPoint 转成 PDF…（第一次要几秒） | /api/peek/图7.pptx?path=D:\\figs\\图7.pptx | old,图7.pptx,a.png,x.exe | true | true | IMG | true');
+    '1 | npm i | true | figs | old,图7.pptx,a.png,x.exe | 正在用 PowerPoint 转成 PDF…（第一次要几秒） | /api/peek/图7.pptx?path=D:\\figs\\图7.pptx | old,图7.pptx,a.png,x.exe | true | true | IMG | 没有这个文件：D:\\figs\\missing.png | 预览要等网页服务重启后才能用 | true');
   console.log('browser 预览 ok');
+  // 提示: the page's own card, never the browser's: over a hinted thing inside another, neither keeps its title while the
+  // mouse is there (the browser would show the outer one), the card says the inner's; a click takes the card away and
+  // the titles stay aside till the mouse leaves; drawn anew under the mouse while the card waits, it comes all the same
+  assert.equal(await evaluate(`(async () => {
+    const wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), d = document.createElement('div');
+    d.title = '外面'; d.innerHTML = '<span title="里面">x</span>'; d.style.cssText = 'position:fixed;left:300px;top:300px;padding:20px'; document.body.append(d);
+    const tip = document.querySelector('#tip'), ev = (t, el, rel) => el.dispatchEvent(new MouseEvent(t, { bubbles: true, relatedTarget: rel ?? null, clientX: 320, clientY: 320 }));
+    const titled = () => [d, d.firstChild].filter((e) => e.hasAttribute('title')).length, card = () => tip.classList.contains('show') && tip.textContent, out = [];
+    ev('mouseover', d.firstChild); await wait(600); out.push(card(), titled());
+    ev('mousedown', d.firstChild); out.push(card(), titled());
+    ev('mouseout', d.firstChild, document.body); out.push(titled());
+    ev('mouseover', d.firstChild); await wait(200); d.innerHTML = '<span title="里面">x</span>'; ev('mouseover', d.firstChild); await wait(400); out.push(card());
+    ev('mouseout', d.firstChild, document.body); out.push(titled()); d.remove();
+    return out.join(' | '); })()`), '里面 | 0 | false | 0 | 2 | 里面 | 2');
+  console.log('browser hints ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }

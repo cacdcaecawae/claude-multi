@@ -2664,39 +2664,65 @@ function peekHead(name, office = false) {
     'content-disposition': `${type ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(office ? name + '.pdf' : name)}`,
     ...(type && type !== 'application/pdf' && { 'content-security-policy': 'sandbox' }) };
 }
-// An Office file as a PDF, made by the Office here, unseen (no window), one at a time, kept a week in peek\ by the file's
-// path, time and size (changed: made again). PowerPoint is one for the whole PC: a deck of yours open stays, and it's
-// quit only if it wasn't running before. Word and Excel are started apart from yours, and quit when ours is closed
+// An Office file as a PDF, made by the Office here, unseen (no window), kept a week in peek\ by the file's path, time and
+// size (changed: made again). Those asked for together (a folder's, as it's listed) made in one go, Office started once
+// for them; one opened goes first (first). PowerPoint is one for the whole PC: a deck of yours open stays, and it's quit
+// only if it wasn't running before. Word and Excel are instances of their own, quit once ours are closed
 const PEEK_DIR = path.join(ROOT, 'peek');
-const OFFICE_PS = {
+const OFFICE_APP = { ppt: 'PowerPoint', doc: 'Word', xls: 'Excel' };
+const OFFICE_PS = { // each job ({k, in, out}) said done (ok k) or not (fail k why), as it goes
   ppt: `$was = [bool](Get-Process POWERPNT -ErrorAction SilentlyContinue); $app = New-Object -ComObject PowerPoint.Application
-try { $p = $app.Presentations.Open($env:CM_IN, -1, 0, 0); try { $p.SaveAs($env:CM_OUT, 32) } finally { $p.Close() } } finally { if (-not $was -and $app.Presentations.Count -eq 0) { $app.Quit() } }`,
+try { foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { try { $p = $app.Presentations.Open($j.in, -1, 0, 0); try { $p.SaveAs($j.out, 32) } finally { $p.Close() }; "ok $($j.k)" } catch { "fail $($j.k) $($_.Exception.Message)" } } }
+finally { if (-not $was -and $app.Presentations.Count -eq 0) { $app.Quit() } }`,
   doc: `$app = New-Object -ComObject Word.Application; $app.Visible = $false; $app.DisplayAlerts = 0
-try { $d = $app.Documents.Open($env:CM_IN, $false, $true, $false); try { $d.ExportAsFixedFormat($env:CM_OUT, 17) } finally { $d.Close(0) } } finally { if ($app.Documents.Count -eq 0) { $app.Quit() } }`,
+try { foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { try { $d = $app.Documents.Open($j.in, $false, $true, $false); try { $d.ExportAsFixedFormat($j.out, 17) } finally { $d.Close(0) }; "ok $($j.k)" } catch { "fail $($j.k) $($_.Exception.Message)" } } }
+finally { if ($app.Documents.Count -eq 0) { $app.Quit() } }`,
   xls: `$app = New-Object -ComObject Excel.Application; $app.Visible = $false; $app.DisplayAlerts = $false
-try { $b = $app.Workbooks.Open($env:CM_IN, 0, $true); try { $b.ExportAsFixedFormat(0, $env:CM_OUT) } finally { $b.Close($false) } } finally { if ($app.Workbooks.Count -eq 0) { $app.Quit() } }`,
+try { foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { try { $b = $app.Workbooks.Open($j.in, 0, $true); try { $b.ExportAsFixedFormat(0, $j.out) } finally { $b.Close($false) }; "ok $($j.k)" } catch { "fail $($j.k) $($_.Exception.Message)" } } }
+finally { if ($app.Workbooks.Count -eq 0) { $app.Quit() } }`,
 };
-const peekMade = new Map(); // key -> its PDF on the way (one that failed kept 10 min: not tried again at every look)
-let peekLine = Promise.resolve();
-function peekPdf(file, dir = PEEK_DIR, ps = OFFICE_PS) {
+const peekMade = new Map(), peekWait = []; // key -> its PDF on the way (a failure kept 10 min: not tried again at every look); jobs not begun
+let peekBusy = false;
+function peekPdf(file, { dir = PEEK_DIR, ps = OFFICE_PS, first = false } = {}) {
   const kind = OFFICE_KIND[path.extname(file).slice(1).toLowerCase()], st = fs.statSync(file), at = path.resolve(file);
   const key = require('crypto').createHash('sha1').update(`${at.toLowerCase()}|${st.mtimeMs}|${st.size}`).digest('hex').slice(0, 24), pdf = path.join(dir, key + '.pdf');
   if (fs.existsSync(pdf)) return Promise.resolve(pdf);
+  const i = peekWait.findIndex((j) => j.key === key);
+  if (first && i > 0) peekWait.unshift(...peekWait.splice(i, 1));
   if (peekMade.has(key)) return peekMade.get(key);
-  const made = peekLine = peekLine.catch(() => {}).then(() => new Promise((ok, no) => {
-    fs.mkdirSync(dir, { recursive: true });
-    for (const f of fs.readdirSync(dir)) try { if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 7 * 864e5) fs.rmSync(path.join(dir, f)); } catch {}
-    const tmp = path.join(dir, `${key}.${process.pid}.tmp.pdf`);
-    require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$ErrorActionPreference = 'Stop'; ${ps[kind]}`],
-      { env: { ...process.env, CM_IN: at, CM_OUT: tmp }, windowsHide: true, timeout: 120000 }, (e, so, se) => {
-        if (!e && fs.existsSync(tmp)) { fs.renameSync(tmp, pdf); return ok(pdf); }
-        fs.rmSync(tmp, { force: true });
-        no(new Error(`${{ ppt: 'PowerPoint', doc: 'Word', xls: 'Excel' }[kind]} 没能把它转成 PDF：${String(se || e?.message || '').trim().split('\n')[0]}`));
-      });
-  }));
+  const made = new Promise((ok, no) => { const job = { key, kind, at, pdf, dir, ps, ok, no }; if (first) peekWait.unshift(job); else peekWait.push(job); });
   peekMade.set(key, made);
   made.then(() => peekMade.delete(key), () => setTimeout(() => peekMade.delete(key), 600000).unref());
+  setTimeout(peekTurn, 30); // those asked for at once, together
   return made;
+}
+function peekTurn() {
+  if (peekBusy || !peekWait.length) return;
+  peekBusy = true;
+  const { kind, ps, dir } = peekWait[0], batch = peekWait.filter((j) => j.kind === kind && j.ps === ps).slice(0, 20);
+  for (const j of batch) peekWait.splice(peekWait.indexOf(j), 1);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(dir)) try { if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 7 * 864e5) fs.rmSync(path.join(dir, f)); } catch {} // a week old
+  const jobs = batch.map((j) => ({ k: j.key, in: j.at, out: path.join(j.dir, `${j.key}.${process.pid}.tmp.pdf`) }));
+  const settle = (k, done, why) => {
+    const j = batch.find((x) => x.key === k), tmp = jobs.find((x) => x.k === k)?.out;
+    if (!j || j.settled) return;
+    j.settled = true;
+    if (done && fs.existsSync(tmp)) { fs.renameSync(tmp, j.pdf); return j.ok(j.pdf); }
+    fs.rmSync(tmp, { force: true });
+    j.no(new Error(`${OFFICE_APP[kind]} 没能把它转成 PDF：${why || '没有做完'}`));
+  };
+  const p = require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; ${ps[kind]}`],
+    { env: { ...process.env, CM_JOBS: JSON.stringify(jobs) }, windowsHide: true });
+  let out = '', err = '';
+  const stop = setTimeout(() => p.kill(), 60000 + 30000 * batch.length); // one left hanging (a dialog of Office's): given up
+  p.stdout.on('data', (d) => {
+    out += d;
+    for (let i; (i = out.indexOf('\n')) >= 0; out = out.slice(i + 1)) { const m = /^(ok|fail) (\w+) ?(.*)$/.exec(out.slice(0, i).trim()); if (m) settle(m[2], m[1] === 'ok', m[3]); }
+  });
+  p.stderr.on('data', (d) => { err += d; });
+  p.on('error', (e) => { err ||= e.message; });
+  p.on('close', () => { clearTimeout(stop); for (const j of batch) settle(j.key, false, err.trim().split('\n')[0]); peekBusy = false; peekTurn(); });
 }
 // `/` in the page's box: the commands and skills Claude Code itself lists for a folder and an account, asked as the Agent
 // SDK asks (its initialize request: no model call; hooks and MCP servers off), its process let go of cleanly (killed, its
@@ -3789,16 +3815,21 @@ async function web() {
       }
       // 预览: a file or folder of this PC named in a reply (?path as Claude wrote it): a folder's folders and files; a file as
       // peekHead says, a part of it when asked (Range: a video's seek), text its first 2 MB; an Office one as its PDF
-      // (?warm: only made, for when it's opened; its type said, for the page to know one it can't show)
+      // (?warm: only made, for when it's opened, a folder's Office ones too; a file's type said, for the page to know one
+      // it can't show)
       if (req.method === 'GET' && (url.pathname === '/api/peek' || url.pathname.startsWith('/api/peek/'))) { // (/api/peek/<name>: its name for the PDF viewer's title)
         const p = url.searchParams.get('path') ?? '';
         if (!/^[A-Za-z]:[\\/]/.test(p)) return out(400, '只能预览这台电脑上的文件（像 D:\\… 这样的完整路径）', text);
         let st; try { st = await fs.promises.stat(p); } catch { return out(404, `没有这个文件：${p}`, text); }
-        if (st.isDirectory()) return out(200, await dirsIn(p));
-        const office = !!OFFICE_KIND[path.extname(p).slice(1).toLowerCase()];
-        if (url.searchParams.has('warm')) { if (office) peekPdf(p).catch(() => {}); return out(200, { type: peekHead(p, office)['content-type'] }); } // what it'll be
+        const office = !!OFFICE_KIND[path.extname(p).slice(1).toLowerCase()], warm = url.searchParams.has('warm');
+        if (st.isDirectory()) { // listed: its Office files' PDFs made meanwhile (20 at most), for when one's opened
+          const ls = await dirsIn(p);
+          if (warm) for (const f of ls.files.filter((n) => OFFICE_KIND[path.extname(n).slice(1).toLowerCase()]).slice(0, 20)) peekPdf(path.join(ls.path, f)).catch(() => {});
+          return out(200, warm ? {} : ls);
+        }
+        if (warm) { if (office) peekPdf(p).catch(() => {}); return out(200, { type: peekHead(p, office)['content-type'] }); } // what it'll be
         let file = p;
-        if (office) try { file = await peekPdf(p); } catch (e) { return out(500, e.message, text); }
+        if (office) try { file = await peekPdf(p, { first: true }); } catch (e) { return out(500, e.message, text); }
         const head = peekHead(path.basename(p), office), size = office ? fs.statSync(file).size : st.size, plain = head['content-type'].startsWith('text/');
         const range = !plain && size && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
         let start = 0, end = (plain ? Math.min(size, 2 << 20) : size) - 1;

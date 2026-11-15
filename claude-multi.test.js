@@ -1577,17 +1577,21 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
     { name: 'extra-usage', description: 'Renamed to /usage-credits' }, { name: 'ponytail:ponytail' }].filter(slashKeep).map((c) => c.name), ['clear', 'ponytail:ponytail']);
   if (process.platform === 'win32') {
     const fs = require('fs'), path = require('path'), os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-peek-')), dir = path.join(tmp, 'peek');
-    const deck = path.join(tmp, '图 7.pptx'), bad = path.join(tmp, 'b.docx');
-    fs.writeFileSync(deck, 'x'); fs.writeFileSync(bad, 'y');
+    const deck = path.join(tmp, '图 7.pptx'), deck2 = path.join(tmp, '图8.pptx'), bad = path.join(tmp, 'b.docx'), sheet = path.join(tmp, 'c.xlsx');
+    for (const f of [deck, deck2, bad, sheet]) fs.writeFileSync(f, f);
     process.env.CM_RUNS = path.join(tmp, 'runs');
-    const ps = { ppt: 'Add-Content -LiteralPath $env:CM_RUNS -Value 1; Set-Content -LiteralPath $env:CM_OUT -Value $env:CM_IN -Encoding UTF8', doc: "throw 'no Word here'" };
-    Promise.all([peekPdf(deck, dir, ps), peekPdf(deck, dir, ps)]).then(async ([a, b]) => {
-      assert.equal(a, b);
+    const each = (body) => `foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { ${body} }`;
+    const ps = { ppt: 'Add-Content -LiteralPath $env:CM_RUNS -Value run; ' + each('Set-Content -LiteralPath $j.out -Value $j.in -Encoding UTF8; "ok $($j.k)"'),
+      doc: each('"fail $($j.k) no Word here"'), xls: "throw 'no Excel here'" }, o = { dir, ps };
+    Promise.all([peekPdf(deck, o), peekPdf(deck, o), peekPdf(deck2, o)]).then(async ([a, b, c2]) => {
+      assert.equal(a, b); assert.notEqual(a, c2);
       assert.equal(fs.readFileSync(a, 'utf8').trim(), path.resolve(deck)); // its path through, a Chinese name and a space in it
-      assert.equal(await peekPdf(deck, dir, ps), a); // kept: not made again
-      assert.equal(fs.readFileSync(process.env.CM_RUNS, 'utf8').trim().split(/\s+/).length, 1);
-      await assert.rejects(peekPdf(bad, dir, ps), /Word 没能把它转成 PDF：no Word here/);
-      assert.deepEqual(fs.readdirSync(dir), [path.basename(a)]); // none half-made
+      assert.equal(fs.readFileSync(c2, 'utf8').trim(), path.resolve(deck2));
+      assert.equal(await peekPdf(deck, o), a); // kept: not made again
+      assert.equal(fs.readFileSync(process.env.CM_RUNS, 'utf8').trim().split(/\s+/).length, 1); // two asked for at once: Office started once
+      await assert.rejects(peekPdf(bad, o), /Word 没能把它转成 PDF：no Word here/);
+      await assert.rejects(peekPdf(sheet, o), /Excel 没能把它转成 PDF：no Excel here/);
+      assert.deepEqual(fs.readdirSync(dir).sort(), [path.basename(a), path.basename(c2)].sort()); // none half-made
       delete process.env.CM_RUNS; fs.rmSync(tmp, { recursive: true, force: true });
       console.log('peek ok');
     });
