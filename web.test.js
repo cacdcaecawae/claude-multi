@@ -475,7 +475,9 @@ const press = async (key, shift = false) => {
     out.push(g.el.querySelector('.slash').hidden ? 'hidden' : g.el.querySelector('.slash').textContent); closeConv(g);
     return out.join(' | '); })()`), '/clear[name]Start anewMac 上装的技能这里列不出 | GPT（Codex）对话的命令这里列不出，可以直接打完整的命令');
   historyId = 'A';
-  assert.deepEqual(cmdAsks, ['A', 'M']); // once for each (a GPT one's: not asked)
+  // A asked once (its list kept), the Mac's asked, the GPT one's not. (Not M's count: a tab left open by the tests before
+  // takes M's record too, as the stand-in service gives every record that id, and may ask for itself)
+  assert.ok(cmdAsks.filter((x) => x === 'A').length === 1 && cmdAsks.includes('M') && !cmdAsks.includes('G'), JSON.stringify(cmdAsks));
   console.log('browser / commands ok');
   // 预览: a path of this PC in a reply's code is a link (its name; other code isn't); it opens in a pane beside the
   // conversation, a tab each: a folder lists its folders and files, a file of it opens in a tab of its own (an Office one

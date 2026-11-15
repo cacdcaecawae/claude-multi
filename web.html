@@ -758,7 +758,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* 预览: a path of this PC in a reply, as Codex shows one (its kind's mark and its name; the whole path on hover), opened
      in a pane right of the conversation, a tab each (a phone: the whole screen) */
   .hm a.peek { cursor: pointer; color: var(--link); white-space: nowrap; } .hm a.peek:hover { text-decoration: underline; }
-  .hm a.peek svg { width: 14px; height: 14px; margin-right: 3px; vertical-align: -2px; }
+  .hm a.peek svg { display: inline-block; width: 14px; height: 14px; margin-right: 3px; vertical-align: -2px; } /* (svg is a block of its own here) */
   #peek { display: flex; flex: none; flex-direction: column; width: var(--pvW, min(46vw, 760px)); min-width: 0; background: var(--bg); border-left: 1px solid var(--border); }
   #peek[hidden], #pvSash[hidden], #app.butler #peek, #app.butler #pvSash { display: none !important; }
   .pvTabs { display: flex; flex: none; align-items: center; gap: 4px; height: 40px; padding: 0 6px; border-bottom: 1px solid var(--border); }
