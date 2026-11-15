@@ -493,6 +493,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hm.note { align-self: center; font-size: 12px; color: var(--fg3); }
   .hm.tm { margin-top: 12px; font-size: 11.5px; } /* the time over a message of yours, after a pause */
   .hm.tm + .hm.user, .hm.tm + .hm.img { margin-top: 0; }
+  .hm .li { display: block; position: relative; padding-left: 1.2em; } .hm .li::before { content: '•'; position: absolute; left: .35em; color: var(--fg3); }
+  .hm .bq { display: block; padding: 0 0 0 12px; border-left: 3px solid var(--cardB); color: var(--fg2); }
+  .hm hr { border: 0; border-top: 1px solid var(--cardB); margin: 10px 0; }
   .hm a { color: var(--link); text-decoration: none; } .hm a:hover { text-decoration: underline; }
   /* copy: a code block's at its top right, an answer's under it (on a computer when the mouse is over it) */
   .cpy { width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--fg3); }
@@ -572,6 +575,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hm.img img { height: 200px; width: auto; max-width: 100%; min-width: 60px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; background: var(--bar); }
   .hm.img.pending { opacity: .5; }
   .box textarea { flex: 1; min-width: 0; font-size: 14px; line-height: 20px; resize: none; height: 32px; max-height: 200px; border: 0; border-radius: 0; background: none; padding: 6px 4px; }
+  .box textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* a narrow group's: cut, not on two lines */
   .go { width: 32px; height: 32px; flex: none; padding: 0; border-radius: 50%; display: grid; place-items: center; }
   .go svg { width: 18px; height: 18px; }
   .go .spin { border-color: var(--onInk); border-right-color: transparent; }
@@ -910,11 +914,22 @@ const FINE = matchMedia('(pointer: fine)').matches, FONT = FINE ? 14 : 13; // FI
 // bar redrawn under the mouse (every 5 s when something in it changed) keeps the card up, on the new copy, not hidden and shown again
 if (FINE) {
   const tip = document.createElement('div'); tip.id = 'tip'; document.body.append(tip);
-  let on = null, timer = 0;
-  const hide = () => { clearTimeout(timer); tip.classList.remove('show'); if (on && !on.hasAttribute('title')) on.title = on.dataset.tip; on = null; };
-  const take = (el) => { on = el; tip.textContent = el.dataset.tip = el.title; el.removeAttribute('title'); };
+  let on = null, held = [], timer = 0, px = 0, py = 0; // px, py: where the mouse came onto it
+  // its title and those of the things around it with one kept aside: else the browser shows the next one out (a 用量
+  // bar's part: the day's over the account's)
+  const take = (el) => {
+    on = el; tip.textContent = el.title;
+    for (let x = el; x; x = x.parentElement?.closest('[title]')) { x.dataset.tip = x.title; x.removeAttribute('title'); if (!held.includes(x)) held.push(x); }
+  };
+  const restore = () => { for (const x of held) if (!x.hasAttribute('title')) x.title = x.dataset.tip; held = []; };
+  const hide = () => { clearTimeout(timer); tip.classList.remove('show'); restore(); on = null; };
   const place = () => {
-    if (!on?.isConnected) return hide();
+    if (!on?.isConnected) { // redrawn while the card waited (the side bar, every 5 s): the new copy under the mouse
+      const el = document.elementFromPoint(px, py)?.closest('[title]');
+      restore();
+      if (!el?.title.trim()) return hide();
+      take(el);
+    }
     const r = on.getBoundingClientRect(), row = on.matches('.row');
     tip.classList.toggle('two', tip.textContent.includes('\n'));
     tip.style.left = tip.style.top = '0px'; // measured where it has room: by the window's right edge it wraps narrow
@@ -925,19 +940,31 @@ if (FINE) {
     tip.classList.add('show');
   };
   document.addEventListener('mouseover', (e) => {
-    const el = e.target.closest?.('[title]');
-    if (on?.isConnected && on.contains(e.target) && !(el && on.contains(el))) return; // still over the one it's for
-    if (on && !on.isConnected && tip.classList.contains('show') && el?.title.trim()) return take(el), place(); // its new copy
+    const el = e.target.closest?.('[title], [data-tip]'); // the nearest with a hint, kept aside (held) or not
+    px = e.clientX; py = e.clientY;
+    if (on?.isConnected && el === on) return; // still over the one it's for
+    if (on && !on.isConnected && el?.title.trim()) { // its new copy (or what's under the mouse now): the card, or its wait, goes on
+      const shown = tip.classList.contains('show');
+      restore(); take(el); if (shown) place();
+      return;
+    }
     hide();
     if (!el?.title.trim()) return;
     take(el); timer = setTimeout(place, 450);
   });
-  // a title set anew on the one hovered (发送 / 停止 as the conversation goes): taken too, else the browser's shows beside the card
-  new MutationObserver(() => { if (on?.hasAttribute('title')) on.title.trim() ? (take(on), tip.classList.contains('show') && place()) : hide(); })
-    .observe(document.body, { subtree: true, attributes: true, attributeFilter: ['title'] });
+  // a title set anew on one kept aside (发送 / 停止 as the conversation goes): taken too, else the browser's shows beside the card
+  new MutationObserver(() => {
+    const back = held.filter((x) => x.hasAttribute('title'));
+    if (!back.length) return;
+    if (back.includes(on) && !on.title.trim()) return hide();
+    for (const x of back) { x.dataset.tip = x.title; x.removeAttribute('title'); }
+    if (back.includes(on)) { tip.textContent = on.dataset.tip; if (tip.classList.contains('show')) place(); }
+  }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['title'] });
   // left: the mouse out of it (not a redraw taking it away under the mouse), or out of the page
   document.addEventListener('mouseout', (e) => { if (on && (!e.relatedTarget || on.isConnected && on.contains(e.target) && !on.contains(e.relatedTarget))) hide(); });
-  for (const t of ['mousedown', 'keydown', 'wheel']) addEventListener(t, hide, true);
+  // a click, a key or the wheel: the card goes, the titles stay aside till the mouse leaves (given back under a resting
+  // mouse, the browser's own would come up)
+  for (const t of ['mousedown', 'keydown', 'wheel']) addEventListener(t, () => { clearTimeout(timer); tip.classList.remove('show'); }, true);
   addEventListener('blur', hide);
 }
 const saved = (() => { try { return JSON.parse(localStorage.getItem('cm-layout')) ?? {}; } catch { return {}; } })();
@@ -3168,12 +3195,17 @@ const link = (m, words, u) => {
 // red as written (throwOnError: false); without KaTeX loaded, as written.
 const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]*?[^$\s])\$(?!\d)/g; // no lookbehind: an older Safari fails to read the whole script on one
 const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
+// a line as a list's item (- or *, indented by its spaces), a rule (---) or a quote (> ): a block of its own, its line's end
+// taken with it (else pre-wrap draws an empty line after it); an item's wrapped lines start under its words, not its dot
+const BLOCKS = /^( *)[-*] (.*)\n?|^ *(?:-{3,}|\*{3,}) *(?:\n|$)|^&gt; ?(.*)\n?/gm;
+const block = (m, sp, li, q) => li != null ? `<span class="li" style="margin-left:${Math.min(sp.length, 8) * 0.5}em">${li}</span>`
+  : q != null ? `<span class="bq">${q}</span>` : '<hr>';
 function md(t) {
   return t.split(/```[^\n]*\n?/).map((p, i) => {
     if (i % 2) return `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${esc(p.replace(/\n$/, ''))}</pre></div>`;
     const math = [];
     p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
-    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)
       .replace(/\u0000(\d+)\u0000/g, (_, k) => tex(...math[k]));
   }).join('');
