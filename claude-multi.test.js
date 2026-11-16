@@ -1572,7 +1572,15 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
 // path, time and size; two asks at once: one making), none half-made left, a failure said. `/`'s list: no internal,
 // removed or renamed ones
 {
-  const { peekHead, peekPdf, slashKeep } = require('./claude-multi');
+  const { peekHead, peekPdf, slashKeep, shellCmd } = require('./claude-multi');
+  // 右键's opening on this PC: a file with its own program, Windows' chooser (its path bare), Explorer at it; a program or a
+  // script never opened (it'd run): Explorer at it instead; a folder in Explorer; anything else asked: Explorer at it
+  assert.deepEqual(shellCmd('D:\\论文 04\\图7.pptx', 'open', false), ['explorer.exe', '"D:\\论文 04\\图7.pptx"']);
+  assert.deepEqual(shellCmd('D:\\论文 04\\图7.pptx', 'with', false), ['rundll32.exe', 'shell32.dll,OpenAs_RunDLL D:\\论文 04\\图7.pptx']);
+  assert.deepEqual(shellCmd('D:\\a\\x.md', 'reveal', false), ['explorer.exe', '/select,"D:\\a\\x.md"']);
+  for (const f of ['D:\\a\\run.BAT', 'D:\\a\\setup.exe', 'D:\\a\\x.ps1', 'D:\\a\\t.js', 'D:\\a\\go.py', 'D:\\a\\l.lnk']) assert.deepEqual(shellCmd(f, 'open', false), ['explorer.exe', `/select,"${f}"`], f);
+  assert.deepEqual(shellCmd('D:\\a b', 'open', true), ['explorer.exe', '"D:\\a b"']);
+  assert.deepEqual(shellCmd('D:\\a\\x.md', 'rm', false), ['explorer.exe', '/select,"D:\\a\\x.md"']);
   const t = (n, o) => { const h = peekHead(n, o); return [h['content-type'], h['content-disposition'].split(';')[0], h['content-security-policy'] ?? '']; };
   assert.deepEqual(t('图7.pptx', true), ['application/pdf', 'inline', '']);
   assert.ok(peekHead('图7.pptx', true)['content-disposition'].endsWith(encodeURIComponent('图7.pptx.pdf')));

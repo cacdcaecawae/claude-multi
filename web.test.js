@@ -598,6 +598,32 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate(`(() => { document.querySelector('#peek [data-pv=close]').click(); closeConv(fa);
     const m = makeConv({ dir: '/Users/me/x', acct: 1 }, 'm'); m.sync(); const s = m.el.querySelector('.dirBtn'), r = [s.tagName, s.title, s.textContent].join(' | '); m.close(); return r; })()`), 'SPAN | /Users/me/x | x');
   console.log('browser folder button ok');
+  // 右键 a path (a computer's): Codex's menu; 在电脑上打开 asks the service and says its words (one before it: restart it),
+  // 下载 the file itself, the path and a text file's words copied; a folder's menu (a link's, 预览's tab) its own
+  assert.equal(await evaluate(`(async () => {
+    const wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), out = [], real = window.fetch, shell = [], d = document.createElement('div'); d.className = 'hm claude';
+    window.fetch = async (u, o) => { u = String(u);
+      if (u === '/api/shell') { shell.push(JSON.parse(o.body).how); return shell.length === 1 ? new Response('{"said":"run.bat 是程序或脚本"}') : new Response('{"err":"没有这个地址"}', { status: 404 }); }
+      if (u.includes('x.md') && u.includes('warm=1')) return new Response('{"type":"text/plain; charset=utf-8"}');
+      if (u.includes('x.md')) return new Response('第一行\\n第二行');
+      return real(u, o); };
+    d.innerHTML = peekLink('D:\\\\a\\\\x.md') + peekLink('D:\\\\a'); document.body.append(d);
+    const [f, fo] = d.querySelectorAll('a.peek'), menu = document.querySelector('#cmenu'), toastNow = () => document.querySelector('#toast').textContent;
+    const ctx = (el) => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+    const items = () => [...menu.querySelectorAll('button')].map((b) => b.dataset.m).join(), pick = async (k) => { menu.querySelector('[data-m=' + k + ']').click(); await wait(80); };
+    out.push(ctx(f), menu.hidden, items(), !!menu.querySelector('.msep'), !!menu.querySelector('[data-m=open] small'));
+    await pick('open'); out.push(toastNow());
+    ctx(f); await pick('reveal'); out.push(shell.join(), toastNow());
+    ctx(f); await pick('copy'); out.push(window.copied);
+    ctx(f); await pick('text'); out.push(window.copied);
+    const ac = HTMLAnchorElement.prototype.click; let dl = null; HTMLAnchorElement.prototype.click = function () { dl = [decodeURIComponent(this.getAttribute('href')), this.download]; };
+    ctx(f); await pick('dl'); HTMLAnchorElement.prototype.click = ac; out.push(...dl);
+    ctx(fo); out.push(items()); menu.hidden = true;
+    window.fetch = real; preview('D:\\\\figs'); await wait(300); ctx(document.querySelector('#peek [data-pvt="0"]')); out.push(items()); menu.hidden = true;
+    document.querySelector('#peek [data-pv=close]').click(); d.remove(); return out.join(' | '); })()`),
+    'false | false | pv,open,with,reveal,dl,copy,text | true | false | run.bat 是程序或脚本 | open,reveal | 这一项要等网页服务重启后才能用 | D:\\a\\x.md | 第一行\n第二行'
+    + ' | /api/peek/x.md?path=D:\\a\\x.md&raw=1 | x.md | pv,open,copy | pv,open,copy');
+  console.log('browser 右键 a path ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }

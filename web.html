@@ -181,6 +181,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #cmenu button, .mlist button { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px; }
   .mlist { margin-top: 10px; } .mlist button { padding: 11px 10px; font-size: 15px; }
   #cmenu small, .mlist small { display: block; font-size: 11.5px; color: var(--fg3); }
+  .msep { height: 1px; margin: 5px 8px; background: var(--border); }
   #cmenu button:disabled, .mlist button:disabled { opacity: .55; cursor: default; }
   #cmenu [data-m=del]:not(:disabled), .mlist [data-m=del]:not(:disabled) { color: var(--red); }
   @media (hover: hover) { #cmenu button:not(:disabled):hover { background: var(--hover); } }
@@ -1352,7 +1353,7 @@ function rowMenu(id, x, y, inProj) {
 }
 // [key, words, why it's off (or a note under it, note: true)] at x, y; a phone: a sheet
 function popMenu(title, list, x, y) {
-  const items = list.map(([k, l, off, note]) => `<button data-m="${k}"${off && !note ? ' disabled' : ''}>${l}${off ? `<small>${esc(off)}</small>` : ''}</button>`).join('');
+  const items = list.map(([k, l, off, note]) => k === '-' ? '<div class="msep"></div>' : `<button data-m="${k}"${off && !note ? ' disabled' : ''}>${l}${off ? `<small>${esc(off)}</small>` : ''}</button>`).join('');
   if (NARROW.matches) { $('#sheetIn').innerHTML = `<div class="stitle">${esc(title)}</div><div class="mlist">${items}</div>`; $('#sheetIn').onclick = menuPick; return $('#sheet').classList.add('on'); }
   const m = $('#cmenu');
   m.innerHTML = items; m.hidden = false;
@@ -1377,6 +1378,7 @@ async function menuPick(e) {
   if (!b || b.disabled || !s) return;
   $('#cmenu').hidden = true; sheetOff();
   const k = b.dataset.m;
+  if (s.file) return fileAct(k, s.file);
   if (s.pane) return k === 'fresh' ? s.pane.fresh() : k === 'swap' ? s.pane.swap() : s.pane.end();
   if (s.proj) { // a 项目's ⋯
     const p = s.proj;
@@ -3510,6 +3512,40 @@ dp.el.addEventListener('click', (e) => {
 });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && !dp.el.hidden) { e.preventDefault(); e.stopImmediatePropagation(); dpHide(); } }, true);
 addEventListener('resize', () => dp.el.hidden || dpHide());
+// 右键 a path, on a computer (a phone has the link and 预览 for it): a reply's link, the folder button and its rows, 预览's
+// tabs and rows. What Codex's app offers: opened on this PC (its own program, Windows' chooser, Explorer; on its screen,
+// where the service runs), downloaded to the device you're on, its path or its words copied
+const isDirPath = (p) => /[\\/]$/.test(p) || !/\.\w{1,8}$/.test(pvName(p)); // (as its link's mark says)
+document.addEventListener('contextmenu', (e) => {
+  if (NARROW.matches) return;
+  const el = e.target.closest?.('[data-peek], button.dirBtn, [data-pvp], [data-pvgo], [data-pvt]');
+  if (!el) return;
+  const t = el.dataset.pvt != null ? pv.tabs[+el.dataset.pvt] : null, p = el.dataset.peek ?? el.dataset.dir ?? el.dataset.pvp ?? el.dataset.pvgo ?? t?.p;
+  const dir = el.dataset.dir != null || el.dataset.pvgo != null || (t ? t.dir : el.dataset.pvp == null && isDirPath(p));
+  const away = !/^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname) && '在电脑的屏幕上打开，不在这台设备上'; // (looked at from another device)
+  e.preventDefault(); menuFor = { file: { p, dir } };
+  popMenu(pvName(p), dir ? [['pv', '预览'], ['open', '在资源管理器中打开', away, true], ['copy', '复制路径']]
+    : [['pv', '预览'], ['open', '在电脑上打开', away, true], ['with', '打开方式…'], ['reveal', '在资源管理器中显示'], ['-'], ['dl', '下载'], ['copy', '复制路径'], ['text', '复制文件内容']], e.clientX, e.clientY);
+});
+async function fileAct(k, { p }) {
+  const copy = (t, said) => (navigator.clipboard?.writeText(t) ?? Promise.reject()).then(() => toast(said, 1200), () => toast('复制失败', 2000));
+  const q = `/api/peek/${encodeURIComponent(pvName(p))}?` + new URLSearchParams({ path: p });
+  if (k === 'pv') return preview(p);
+  if (k === 'copy') return copy(p, '已复制路径');
+  if (k === 'dl') { const a = document.createElement('a'); a.href = q + '&raw=1'; a.download = pvName(p); document.body.append(a); a.click(); a.remove(); return; } // the file itself (an Office one: not its PDF)
+  if (k === 'text') { // a text file's words (its first 2 MB, as 预览 has them)
+    const w = OFFICE.test(p) ? { type: '' } : await fetch(q + '&warm=1').then((x) => (x.ok ? x.json() : null)).catch(() => null);
+    if (!w) return toast('读不到这个文件', 2500);
+    if (!w.type?.startsWith('text/')) return toast('这不是文字文件，复制不了内容', 2500);
+    const t = await fetch(q).then((x) => (x.ok ? x.text() : null)).catch(() => null);
+    return t == null ? toast('读不到这个文件', 2500) : copy(t, '已复制文件内容');
+  }
+  // on this PC: what the service says (a program or a script isn't run, but shown in Explorer); one before this: say so
+  const r = await fetch('/api/shell', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: p, how: k }) }).catch(() => null);
+  const j = await r?.json().catch(() => null);
+  const said = !r ? '连不上网页服务' : r.ok ? j?.said : j?.err === '没有这个地址' ? '这一项要等网页服务重启后才能用' : j?.err ?? `打不开（${r.status}）`;
+  if (said) toast(said, 4000);
+}
 // 复制: a code block's code, or an answer as Claude wrote it (its Markdown). 展开全部 / 收起 a long message of yours
 // (folded again, kept in sight)
 document.addEventListener('click', (e) => {

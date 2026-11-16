@@ -2657,6 +2657,12 @@ const PEEK_MEDIA = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg'
   mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac' };
 const PEEK_TEXT = new Set([...TEXT_EXT, '', 'html', 'htm', 'svg', 'xml', 'css', 'scss', 'vue', 'jsx', 'tsx', 'mjs', 'cjs', 'bat', 'cmd', 'cfg', 'conf', 'lua', 'rb', 'php', 'kt',
   'swift', 'cs', 'r', 'sql', 'gitignore', 'env', 'ipynb', 'srt', 'vtt', 'out', 'err', 'diff', 'patch', 'lock']);
+// 右键 a path on the page (a computer's): 在电脑上打开 with its own program (a program or a script, which that would run,
+// shown in Explorer instead), 打开方式 (Windows' own chooser), 在资源管理器中显示; a folder opened in Explorer. [what's
+// started, its command line as Windows takes it (a path can't hold a ")]
+const RUNS = /\.(exe|com|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|ws|msi|msp|msc|lnk|scr|pif|hta|cpl|reg|inf|scf|jar|url|py|pyw|sh|appref-ms|application|gadget)$/i;
+const shellCmd = (f, how, dir) => dir ? ['explorer.exe', `"${f}"`] : how === 'with' ? ['rundll32.exe', `shell32.dll,OpenAs_RunDLL ${f}`] // (its path bare, as Windows' own "Open with" has it)
+  : how === 'open' && !RUNS.test(f) ? ['explorer.exe', `"${f}"`] : ['explorer.exe', `/select,"${f}"`];
 const OFFICE_KIND = { ppt: 'ppt', pptx: 'ppt', doc: 'doc', docx: 'doc', rtf: 'doc', xls: 'xls', xlsx: 'xls' };
 function peekHead(name, office = false) {
   const ext = path.extname(name).slice(1).toLowerCase(), type = office ? 'application/pdf' : PEEK_MEDIA[ext] ?? (PEEK_TEXT.has(ext) ? 'text/plain; charset=utf-8' : null);
@@ -3588,6 +3594,16 @@ async function web() {
     // 重命名 and 删除 from the page's list: the commands themselves, their checks and their words (a running one is
     // refused), run apart as warmup is: a deletion's PowerShell would hold up every terminal's stream meanwhile. One just
     // continued here isn't listed as running yet: refused here first. The list read afresh after.
+    // 右键 a path of this PC on the page (shellCmd): opened on this PC's screen, where the service runs (your session)
+    'POST /api/shell': (q, b) => {
+      const p = String(b.path ?? ''), how = String(b.how ?? '');
+      if (!/^[A-Za-z]:[\\/]/.test(p) || netPath(p)) throw new Error('只能打开这台电脑上的文件（像 D:\\… 这样的完整路径）');
+      const f = path.resolve(p);
+      let dir; try { dir = fs.statSync(f).isDirectory(); } catch { throw new Error(`没有这个文件：${p}`); }
+      const [exe, line] = shellCmd(f, how, dir);
+      require('child_process').spawn(exe, [line], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).on('error', () => {}).unref();
+      return { said: !dir && how === 'open' && RUNS.test(f) ? `${path.basename(f)} 是程序或脚本，没有运行它，在资源管理器里选中了它` : '' };
+    },
     'POST /api/rename': (q, b) => {
       const id = String(b.id ?? ''), name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
       if (!name) throw new Error('名字不能是空的');
@@ -3823,7 +3839,7 @@ async function web() {
         const p = url.searchParams.get('path') ?? '';
         if (!/^[A-Za-z]:[\\/]/.test(p)) return out(400, '只能预览这台电脑上的文件（像 D:\\… 这样的完整路径）', text);
         let st; try { st = await fs.promises.stat(p); } catch { return out(404, `没有这个文件：${p}`, text); }
-        const office = !!OFFICE_KIND[path.extname(p).slice(1).toLowerCase()], warm = url.searchParams.has('warm');
+        const raw = url.searchParams.has('raw'), office = !raw && !!OFFICE_KIND[path.extname(p).slice(1).toLowerCase()], warm = url.searchParams.has('warm'); // raw: the file itself, downloaded
         if (st.isDirectory()) { // listed: its Office files' PDFs made meanwhile (20 at most), for when one's opened
           const ls = await dirsIn(p);
           if (warm) for (const f of ls.files.filter((n) => OFFICE_KIND[path.extname(n).slice(1).toLowerCase()]).slice(0, 20)) peekPdf(path.join(ls.path, f)).catch(() => {});
@@ -3832,7 +3848,8 @@ async function web() {
         if (warm) { if (office) peekPdf(p).catch(() => {}); return out(200, { type: peekHead(p, office)['content-type'] }); } // what it'll be
         let file = p;
         if (office) try { file = await peekPdf(p, { first: true }); } catch (e) { return out(500, e.message, text); }
-        const head = peekHead(path.basename(p), office), size = office ? fs.statSync(file).size : st.size, plain = head['content-type'].startsWith('text/');
+        const head = raw ? { ...peekHead(path.basename(p)), 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(p))}` }
+          : peekHead(path.basename(p), office), size = office ? fs.statSync(file).size : st.size, plain = head['content-type'].startsWith('text/');
         const range = !plain && size && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
         let start = 0, end = (plain ? Math.min(size, 2 << 20) : size) - 1;
         if (range && (range[1] || range[2])) {
@@ -4199,7 +4216,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { peekHead, peekPdf, slashKeep, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { peekHead, peekPdf, slashKeep, shellCmd, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
