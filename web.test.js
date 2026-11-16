@@ -611,6 +611,7 @@ const press = async (key, shift = false) => {
     const [f, fo] = d.querySelectorAll('a.peek'), menu = document.querySelector('#cmenu'), toastNow = () => document.querySelector('#toast').textContent;
     const ctx = (el) => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
     const items = () => [...menu.querySelectorAll('button')].map((b) => b.dataset.m).join(), pick = async (k) => { menu.querySelector('[data-m=' + k + ']').click(); await wait(80); };
+    out.push(+getComputedStyle(menu).zIndex > +getComputedStyle(document.querySelector('.dirPop')).zIndex); // (opened on the folder button's rows: over them)
     out.push(ctx(f), menu.hidden, items(), !!menu.querySelector('.msep'), !!menu.querySelector('[data-m=open] small'));
     await pick('open'); out.push(toastNow());
     ctx(f); await pick('reveal'); out.push(shell.join(), toastNow());
@@ -621,7 +622,7 @@ const press = async (key, shift = false) => {
     ctx(fo); out.push(items()); menu.hidden = true;
     window.fetch = real; preview('D:\\\\figs'); await wait(300); ctx(document.querySelector('#peek [data-pvt="0"]')); out.push(items()); menu.hidden = true;
     document.querySelector('#peek [data-pv=close]').click(); d.remove(); return out.join(' | '); })()`),
-    'false | false | pv,open,with,reveal,dl,copy,text | true | false | run.bat 是程序或脚本 | open,reveal | 这一项要等网页服务重启后才能用 | D:\\a\\x.md | 第一行\n第二行'
+    'true | false | false | pv,open,with,reveal,dl,copy,text | true | false | run.bat 是程序或脚本 | open,reveal | 这一项要等网页服务重启后才能用 | D:\\a\\x.md | 第一行\n第二行'
     + ' | /api/peek/x.md?path=D:\\a\\x.md&raw=1 | x.md | pv,open,copy | pv,open,copy');
   console.log('browser 右键 a path ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
