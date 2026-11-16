@@ -248,9 +248,11 @@ const press = async (key, shift = false) => {
   // a table's cell with math in it: the formula, not its stand-in
   assert.equal(await evaluate("(() => { const h = md('| 算法 | 复杂度 |\\n|---|---|\\n| 快排 | $O(n \\\\log n)$ |'); return [h.includes('|0|'), /<td>[^|]*katex/.test(h)].join(); })()"), 'false,true');
   // a reply's code block in its language's colors, by the fence's word (py, m: MATLAB; none or an unknown one: as it is), its
-  // words as they are for 复制; one still coming in colored too
-  assert.equal(await evaluate("(() => { const k = (s) => { const d = document.createElement('div'); d.innerHTML = md(s); return [...d.querySelectorAll('pre')].map((p) => p.textContent + ':' + [...new Set([...p.querySelectorAll('span')].map((x) => x.className))].join('+')).join(' / ') + (d.querySelector('b') ? ' b' : ''); }; return [k('```python\\nimport os\\n```'), k('```\\nimport os\\n```'), k('a\\n```m\\nx = 1; % c\\n```\\n**b**'), k('```js\\nlet a'), k('```constructor\\nx\\n```')].join(' | '); })()"),
-    'import os:hljs-keyword | import os: | x = 1; % c:hljs-number+hljs-comment b | let a:hljs-keyword | x:');
+  // words as they are for 复制; one still coming in colored too. As VS Code: if/import apart, a call (print() and a bare name
+  // marked (&lt; left be), in MATLAB a name( a variable
+  assert.equal(await evaluate("(() => { const k = (s) => { const d = document.createElement('div'); d.innerHTML = md(s); return [...d.querySelectorAll('pre')].map((p) => p.textContent + ':' + [...new Set([...p.querySelectorAll('span')].map((x) => x.className))].join('+')).join(' / ') + (d.querySelector('b') ? ' b' : ''); }; return [k('```python\\nimport os\\n```'), k('```\\nimport os\\n```'), k('a\\n```m\\nx = 1; % c\\n```\\n**b**'), k('```js\\nlet a'), k('```constructor\\nx\\n```'), k('```py\\nif a < b: print(f(x))\\n```'), k('```m\\ny(i) = 1;\\n```')].join(' | '); })()"),
+    'import os:hljs-keyword flow+hl-var | import os: | x = 1; % c:hl-var+hljs-number+hljs-comment b | let a:hljs-keyword+hl-var | x:'
+    + ' | if a < b: print(f(x)):hljs-keyword flow+hl-var+hljs-built_in hl-call+hl-call | y(i) = 1;:hl-var+hljs-built_in+hljs-number');
   console.log('browser GPT draft kept while sending, math in a table ok');
   // 设置 as your avatar: your name's first character (none: the gear); the name in 设置
   state.user = '刘洋'; await evaluate('load()');
@@ -315,7 +317,7 @@ const press = async (key, shift = false) => {
     assert.equal(await evaluate("document.querySelector('.pkList').textContent.trim()"), '这里是空的');
     await evaluate("document.querySelector('[data-pkup]').click()"); await until("document.querySelector('#pkPath').value === 'D:/'");
     await evaluate("{ const p = document.querySelector('#pkPath'); p.value = 'D:/work'; p.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) }");
-    await until("document.querySelector('#pkPath').value === 'D:/work'");
+    await until("document.querySelector('.pkList').textContent.trim() === '这里是空的'"); // its listing in (the box says D:/work at once: typed)
     await evaluate("{ const p = document.querySelector('#pkPath'); p.value = 'Z:/nope'; p.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) }");
     await until("[...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('打不开'))");
     assert.equal(await evaluate("document.querySelector('.pkSide .pkRow.on') ? 'on' : 'none'"), 'none'); // still in D:/work

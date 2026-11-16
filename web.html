@@ -815,21 +815,24 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pvRow:hover { background: var(--hover); } .pvRow svg { flex: none; width: 16px; height: 16px; color: var(--fg3); }
   .pvRow span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* a text file: numbered lines (the numbers not copied with them), a long one scrolled to, 换行 wraps it. Code there and
-     in a reply's code block in GitHub's colors for its language (highlight.js's names for the parts) */
-  .pvCode { counter-reset: ln; width: max-content; min-width: 100%; padding: 6px 0 14px; font: 12.5px/1.6 var(--mono); color: var(--fg); tab-size: 4; }
-  :root { --hk: #ff7b72; --hs: #a5d6ff; --hn: #79c0ff; --ht: #d2a8ff; --hb: #ffa657; --hc: #8b949e; --hg: #7ee787; --hd: #ffa198; }
-  :root[data-theme=light] { --hk: #cf222e; --hs: #0a3069; --hn: #0550ae; --ht: #8250df; --hb: #953800; --hc: #6e7781; --hg: #116329; --hd: #82071e; }
+     in a reply's code block in VS Code's colors (Dark+, Light+), on highlight.js's names for the parts and hl()'s (hl-var,
+     hl-call; flow: if, for, return…); its letters each as typed (no => joined into ⇒), as VS Code has them */
+  .pvCode { counter-reset: ln; width: max-content; min-width: 100%; padding: 6px 0 14px; font: 13px/1.6 var(--mono); color: var(--fg); tab-size: 4; }
+  .pvCode, .hm pre, .hm code { font-variant-ligatures: none; }
+  :root { --hk: #569cd6; --hf: #c586c0; --hy: #dcdcaa; --ht: #4ec9b0; --hv: #9cdcfe; --hs: #ce9178; --hn: #b5cea8; --hc: #6a9955; --hr: #d16969; --hx: #569cd6; }
+  :root[data-theme=light] { --hk: #0000ff; --hf: #af00db; --hy: #795e26; --ht: #267f99; --hv: #001080; --hs: #a31515; --hn: #098658; --hc: #008000; --hr: #811f3f; --hx: #800000; }
   .pvCode .l { position: relative; min-height: 1.6em; padding: 0 18px 0 calc(var(--g) + 30px); white-space: pre; }
   .pvCode .l::before { counter-increment: ln; content: counter(ln); position: absolute; left: 14px; width: var(--g); text-align: right; color: var(--fg3); opacity: .75; user-select: none; }
   @media (hover: hover) { .pvCode .l:hover { background: var(--hover); } }
   .pvCode.wrap { width: auto; } .pvCode.wrap .l { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .hljs-keyword, .hljs-doctag, .hljs-template-tag, .hljs-template-variable, .hljs-type, .hljs-variable.language_ { color: var(--hk); }
-  .hljs-title, .hljs-title.class_, .hljs-title.function_ { color: var(--ht); }
-  .hljs-attr, .hljs-attribute, .hljs-literal, .hljs-meta, .hljs-number, .hljs-operator, .hljs-variable, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id { color: var(--hn); }
-  .hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: var(--hs); } .hljs-built_in, .hljs-symbol, .hljs-bullet { color: var(--hb); }
-  .hljs-comment, .hljs-code, .hljs-formula { color: var(--hc); } .hljs-name, .hljs-quote, .hljs-selector-tag, .hljs-selector-pseudo, .hljs-addition { color: var(--hg); }
-  .hljs-subst { color: var(--fg); } .hljs-section { color: var(--hn); font-weight: 600; } .hljs-deletion { color: var(--hd); }
-  .hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 600; }
+  .hljs-keyword, .hljs-literal, .hljs-type, .hljs-doctag, .hljs-symbol, .hljs-bullet, .hljs-variable.language_ { color: var(--hk); }
+  .hljs-keyword.flow, .hljs-meta .hljs-keyword { color: var(--hf); }
+  .hljs-title, .hljs-built_in { color: var(--ht); }
+  .hljs-title.function_, .hljs-function .hljs-title, .hljs-built_in.hl-call, .hl-call, .hljs-meta, .hljs-selector-tag, .hljs-selector-class, .hljs-selector-id { color: var(--hy); }
+  .hljs-params, .hljs-variable, .hljs-template-variable, .hljs-attr, .hljs-attribute, .hljs-property, .hl-var { color: var(--hv); }
+  .hljs-string, .hljs-char, .hljs-meta .hljs-string, .hljs-deletion { color: var(--hs); } .hljs-number, .hljs-addition { color: var(--hn); }
+  .hljs-comment, .hljs-quote { color: var(--hc); } .hljs-regexp { color: var(--hr); } .hljs-name, .hljs-section { color: var(--hx); }
+  .hljs-subst { color: var(--fg); } .hljs-section, .hljs-strong { font-weight: 600; } .hljs-emphasis { font-style: italic; }
   .pvMd { padding: 10px 22px 24px; } /* a Markdown file as a reply shows it */
   .pvCut { padding: 0 18px 16px; font-size: 12px; color: var(--fg3); }
   @media (min-width: 760px) { #peek { border: 1px solid var(--cardB); border-radius: 12px; overflow: hidden; }
@@ -3393,10 +3396,23 @@ const block = (m, sp, li, q) => li != null ? `<span class="li" style="margin-lef
 // code in its language's colors (highlight.js, by a name or an ending of its: py, cs, .m is MATLAB); as it is without one,
 // or past 1 MB (seconds)
 const PV_LANG = { __proto__: null, m: 'matlab', htm: 'html', vue: 'html', ipynb: 'json', cfg: 'ini', conf: 'ini', txt: '' };
+// VS Code's look: if/for/return… apart from the other keywords; a call (print(, np.square() a function's color; in a
+// programming language a name highlight.js leaves bare (outside its parts) a variable's. A call in MATLAB could be an
+// array's index: a variable's
+const FLOW = /^(?:if|elif|else|for|foreach|while|do|return|break|continue|try|except|catch|finally|raise|throw|import|from|as|yield|await|switch|case|default|goto|pass|with|end)$/;
+const NAMED = new Set(['Python', 'C#', 'C++', 'C', 'Objective-C', 'Java', 'JavaScript', 'TypeScript', 'Go', 'Rust', 'Kotlin', 'Swift', 'php', 'Ruby', 'Lua', 'R', 'Matlab']);
 const hl = (s, lang) => {
   lang = PV_LANG[lang] ?? lang;
-  if (lang && s.length < 1 << 20 && globalThis.hljs?.getLanguage(lang)) try { return hljs.highlight(s, { language: lang, ignoreIllegals: true }).value; } catch {}
-  return esc(s);
+  const L = lang && s.length < 1 << 20 && globalThis.hljs?.getLanguage(lang);
+  if (!L) return esc(s);
+  let v; try { v = hljs.highlight(s, { language: lang, ignoreIllegals: true }).value; } catch { return esc(s); }
+  const calls = L.name !== 'Matlab';
+  v = v.replace(/<span class="hljs-(keyword|built_in)">(\w+)<\/span>(?=(\s*\()?)/g, (m, k, w, call) =>
+    k === 'keyword' ? (FLOW.test(w) ? `<span class="hljs-keyword flow">${w}</span>` : m) : call && calls ? `<span class="hljs-built_in hl-call">${w}</span>` : m);
+  if (!NAMED.has(L.name)) return v;
+  let depth = 0; // a name in none of highlight.js's parts (not in a string, a comment…); &lt; and the like left be
+  return v.replace(/<span[^>]*>|<\/span>|[^<]+/g, (m) => (m[0] === '<' ? ((depth += m[1] === '/' ? -1 : 1), m) : depth ? m
+    : m.replace(/&#?\w+;|\b[A-Za-z_]\w*\b(?=(\s*\()?)/g, (w, call) => (w[0] === '&' ? w : `<span class="${call && calls ? 'hl-call' : 'hl-var'}">${w}</span>`))));
 };
 function md(t) {
   const ps = t.split(/```([^\n]*)\n?/); // words, a fence's word (an opening one's: the code's language), code, a fence's word, words…
