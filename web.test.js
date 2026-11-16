@@ -157,7 +157,7 @@ const press = async (key, shift = false) => {
   await evaluate("document.querySelector('#act [data-side=usage]').click()");
   for (let i = 0; i < 100 && (await evaluate("document.querySelector('[data-machine=here] b')?.textContent")) !== '50%'; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-machine=here] .meter.two > i')].map((i) => i.style.width)"), ['20%', '30%', '12.5%', '37.5%']);
-  assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-machine=here] .win')].map((r) => r.textContent)"), ['CPU50%Claude 20%', '内存50%Claude 2.0 GB']);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-machine=here] .win')].map((r) => r.textContent)"), ['CPU50%Claude 20%', '内存50%3 个 · 2.0 GB']);
   await evaluate("document.querySelector('#act [data-side=chats]').click()");
   console.log('browser CPU and memory in 额度 ok');
   // a waiting one's marks (the list's dot, a tab's ×, 提示's !) keep their size: the question card's class is ask too
