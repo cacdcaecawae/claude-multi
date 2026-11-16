@@ -554,22 +554,31 @@ const press = async (key, shift = false) => {
   await click(await at('#peek [data-pv=close]')); assert.equal(await evaluate("document.querySelector('#peek').hidden"), true);
   console.log('browser 预览 tabs closed one by one, 收起 ok');
   // 收起这一栏: a column a strip of its tabs' marks, its conversation asleep (not among those looked at: the mock's record names any one A, so by which), the focus on the
-  // other; kept over a reload; its mark clicked opens it at that one; the last open column closed, the strip opens
+  // other; kept over a reload; its mark clicked opens it at that one (its terminal sized again); the last open column
+  // closed, the strip opens
   assert.equal(await evaluate(`(async () => {
     const wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), out = [];
     for (const c of allConvs()) closeConv(c);
     const a = makeConv({ id: 'A' }, 'A'); addConv(focusG, a); const g1 = focusG; split(g1); const g2 = focusG, b = makeConv({ id: 'B' }, 'B'); addConv(g2, b); await wait(100);
-    const btn = (g) => g.el.querySelector('.fold');
+    const btn = (g) => g.el.querySelector('.fold'), real = window.fetch; let rs = 0;
+    window.fetch = (u, o) => { if (String(u).includes('/api/resize')) rs++; return real(u, o); };
+    a.el.querySelector('[data-v=term]').click(); await wait(500);
     out.push(groups.length, btn(g1).hidden, btn(g2).hidden);
-    btn(g1).click(); await wait(100);
+    rs = 0; btn(g1).click(); await wait(400);
     out.push(g1.min, g1.el.offsetWidth < 60, a.el.classList.contains('on'), shownConvs().map((c) => (c === a ? 'a' : c === b ? 'b' : '?')).join(), focusG === g2, btn(g2).hidden, btn(g1).title,
       JSON.parse(localStorage.getItem('cm-layout')).groups.map((x) => !!x.min).join());
-    g1.strip.querySelector('[data-i="0"]').click(); await wait(100);
-    out.push(g1.min, a.el.classList.contains('on'), shownConvs().map((c) => (c === a ? 'a' : c === b ? 'b' : '?')).join(), focusG === g1);
+    // its terminal not sized from here meanwhile; the strip: a spinner while it answers (by the list: it's asleep), a dot
+    // when it answered or asks, left unread (the mouse in the strip reads nothing)
+    const sA = state.sessions.find((x) => x.id === a.id); sA.busy = true; drawTabs(g1); out.push(rs, !!g1.strip.querySelector('.spin')); sA.busy = false;
+    state.notes = [{ id: a.id, kind: 'ask', at: 1, by: 'you' }]; drawTabs(g1); const x = g1.strip.querySelector('.x');
+    out.push(x.className, getComputedStyle(x).visibility, getComputedStyle(x, '::after').display); readShown(g1); out.push(state.notes.length); state.notes = []; drawTabs(g1);
+    g1.strip.querySelector('[data-i="0"]').click(); await wait(400);
+    out.push(g1.min, a.el.classList.contains('on'), shownConvs().map((c) => (c === a ? 'a' : c === b ? 'b' : '?')).join(), focusG === g1, rs > 0);
+    a.el.querySelector('[data-v=hist]').click(); window.fetch = real;
     btn(g1).click(); closeConv(b); await wait(100);
     out.push(groups.length, g1.min, a.el.classList.contains('on'));
     closeConv(a); return out.join(' | '); })()`),
-    '2 | false | false | true | true | false | b | true | true | 展开这一栏 | true,false | false | true | a,b | true | 1 | false | true');
+    '2 | false | false | true | true | false | b | true | true | 展开这一栏 | true,false | 0 | true | x ask | visible | block | 1 | false | true | a,b | true | true | 1 | false | true');
   console.log('browser 收起这一栏 ok');
   // a conversation's folder: a button (no account, nor where it runs); the mouse on it, what's in it (a folder gone into,
   // ← back; a file opened in 预览), gone when the mouse leaves; clicked, the folder in 预览. A Mac's own folder: its name
