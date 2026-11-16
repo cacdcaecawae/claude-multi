@@ -626,10 +626,11 @@ const press = async (key, shift = false) => {
     + ' | /api/peek/x.md?path=D:\\a\\x.md&raw=1 | x.md | pv,open,copy | pv,open,copy');
   console.log('browser 右键 a path ok');
   // a text file in 预览: numbered lines in its language's colors (a string over two lines colored on both), not wrapped
-  // till 换行; MATLAB's .m, in GBK too; a Markdown one as a reply shows it, 源码 as written; 复制 the whole file
+  // till 换行; MATLAB's .m, in GBK too (右键's 复制文件内容 as well), PowerShell's UTF-16; a Markdown one as a reply shows
+  // it, 源码 as written; 复制 the whole file
   assert.equal(await evaluate(`(async () => {
     const wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), out = [], real = window.fetch, enc = (s) => new TextEncoder().encode(s);
-    const files = { 'a.py': enc('import os\\n# 注释\\ns = """多\\n行"""\\n'), 'g.m': new Uint8Array([37, 32, 0xd6, 0xd0, 0xce, 0xc4, 10, 120, 32, 61, 32, 49, 59]), 'r.md': enc('# 标题\\n\\n正文\\n') };
+    const files = { 'a.py': enc('import os\\n# 注释\\ns = """多\\n行"""\\n'), 'g.m': new Uint8Array([37, 32, 0xd6, 0xd0, 0xce, 0xc4, 10, 120, 32, 61, 32, 49, 59]), 'r.md': enc('# 标题\\n\\n正文\\n'), 'u.ps1': new Uint8Array([0xff, 0xfe, ...[...'Get-Date'].flatMap((c) => [c.charCodeAt(0), 0])]) };
     window.fetch = async (u, o) => { u = String(u); const f = /\\/api\\/peek\\/([^?]+)/.exec(u)?.[1];
       if (!files[f]) return real(u, o);
       return u.includes('warm=1') ? new Response('{"type":"text/plain; charset=utf-8"}') : new Response(files[f]); };
@@ -642,10 +643,12 @@ const press = async (key, shift = false) => {
     btn('wrap').click(); out.push(code().classList.contains('wrap'), btn('wrap').classList.contains('on'), getComputedStyle(ls[0]).whiteSpace);
     btn('copy').click(); await wait(50); out.push(window.copied === new TextDecoder().decode(files['a.py']));
     preview('C:\\\\code\\\\g.m'); await wait(300); out.push(body().querySelector('.hljs-comment')?.textContent, body().querySelectorAll('.l').length);
+    await fileAct('text', { p: 'C:\\\\code\\\\g.m' }); out.push(JSON.stringify(window.copied));
+    preview('C:\\\\code\\\\u.ps1'); await wait(300); out.push(body().textContent);
     preview('C:\\\\code\\\\r.md'); await wait(300); out.push(body().querySelector('.pvMd b.h')?.textContent, shown());
     btn('src').click(); out.push(body().querySelectorAll('.pvCode .l').length, btn('src').classList.contains('on'), shown());
     window.fetch = real; btn('close').click(); return out.join(' | '); })()`),
-    '4 | true | # 注释 | """多 | 行""" | false | pre | copy+wrap | true | true | pre-wrap | true | % 中文 | 2 | 标题 | copy+src | 3 | true | copy+src+wrap');
+    '4 | true | # 注释 | """多 | 行""" | false | pre | copy+wrap | true | true | pre-wrap | true | % 中文 | 2 | "% 中文\\nx = 1;" | Get-Date | 标题 | copy+src | 3 | true | copy+src+wrap');
   console.log('browser 预览 code ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }

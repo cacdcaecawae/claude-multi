@@ -3497,15 +3497,20 @@ async function pvLoad(t) {
 }
 // a text file in the pane itself, as an editor shows it: its lines numbered, code in its language's colors (highlight.js,
 // by the file's ending: .m is MATLAB), a long line scrolled to (a text one's wrapped); a Markdown one as a reply shows it
-// (源码: as written). Not UTF-8: GBK, as MATLAB on a Chinese Windows saves. The service sends 2 MB at most
+// (源码: as written). The service sends 2 MB at most
 const PV_LANG = { m: 'matlab', htm: 'html', vue: 'html', ipynb: 'json', cfg: 'ini', conf: 'ini', txt: '' };
+// a text file's bytes as words: UTF-16 by its mark (as PowerShell 5.1 writes), else UTF-8, else GBK (as MATLAB on a Chinese
+// Windows saves). Cut at 2 MB: its last character may be half, so UTF-8 not checked
+const textOf = (b) => {
+  const u = new Uint8Array(b), bom = u[0] === 0xff && u[1] === 0xfe ? 'utf-16le' : u[0] === 0xfe && u[1] === 0xff ? 'utf-16be' : null;
+  try { return new TextDecoder(bom ?? 'utf-8', { fatal: !bom && b.byteLength < 2 << 20 }).decode(b); } catch { return new TextDecoder('gb18030').decode(b); }
+};
 async function pvText(t, q, gen) {
   const r = await fetch(q).catch(() => null), b = r?.ok ? await r.arrayBuffer().catch(() => null) : null;
   if (gen !== t.gen) return;
   if (!b) { t.body.innerHTML = '<div class="pvWait">打不开这个文件</div>'; return; }
-  const cut = b.byteLength >= 2 << 20, ext = /\.([^.\\/]+)$/.exec(t.p)?.[1].toLowerCase() ?? '', lang = PV_LANG[ext] ?? ext;
-  let s; try { s = new TextDecoder('utf-8', { fatal: !cut }).decode(b); } catch { s = new TextDecoder('gb18030').decode(b); } // (cut: its last character may be half)
-  Object.assign(t, { text: s, cut, md: ext === 'md' || ext === 'markdown', src: false, lang: window.hljs?.getLanguage(lang) ? lang : null });
+  const ext = /\.([^.\\/]+)$/.exec(t.p)?.[1].toLowerCase() ?? '', lang = PV_LANG[ext] ?? ext;
+  Object.assign(t, { text: textOf(b), cut: b.byteLength >= 2 << 20, md: ext === 'md' || ext === 'markdown', src: false, lang: window.hljs?.getLanguage(lang) ? lang : null });
   t.wrap = !t.lang || t.md;
   pvTextDraw(t);
   if (pv.on === t) pvDraw();
@@ -3602,7 +3607,7 @@ async function fileAct(k, { p }) {
     const w = OFFICE.test(p) ? { type: '' } : await fetch(q + '&warm=1').then((x) => (x.ok ? x.json() : null)).catch(() => null);
     if (!w) return toast('读不到这个文件', 2500);
     if (!w.type?.startsWith('text/')) return toast('这不是文字文件，复制不了内容', 2500);
-    const t = await fetch(q).then((x) => (x.ok ? x.text() : null)).catch(() => null);
+    const t = await fetch(q).then((x) => (x.ok ? x.arrayBuffer() : null)).then((b) => b && textOf(b)).catch(() => null);
     return t == null ? toast('读不到这个文件', 2500) : copyText(t, '已复制文件内容');
   }
   // on this PC: what the service says (a program or a script isn't run, but shown in Explorer); one before this: say so
