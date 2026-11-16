@@ -1698,3 +1698,50 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.ok(a === b && c !== a, 'cached within 5 minutes, fresh reads again');
   c.then((r) => { assert.match(r.err, /密码/); console.log('mac usage every 5 min ok'); });
 }
+// 申请接入, against a stand-in apply service: applied, asked while it waits, approved: an API account with the key (your
+// shared settings, less their own key), the record dropped and the service told; the same approval again: no second
+// account; the key taken back: 额度 says so; rejected: said so
+(async () => {
+  const { joinApply, checkJoins, readJoins, fetchUsage } = require('./claude-multi'), http = require('http'), path = require('path');
+  const reg = () => JSON.parse(fs.readFileSync(path.join(TEST_HOME, '.claude-multi', 'profiles.json'), 'utf8'));
+  fs.mkdirSync(path.join(TEST_HOME, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(TEST_HOME, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: 'x', env: { KEEP: '1', ANTHROPIC_API_KEY: 'mine' }, hooks: { Stop: [] } }));
+  let st = 'pending', models = 200, done = 0;
+  const srv = http.createServer((req, res) => {
+    let s = '';
+    req.on('data', (d) => (s += d)).on('end', () => {
+      const send = (code, j) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
+      const b = s ? JSON.parse(s) : {};
+      if (req.url === '/m/v1/models') return send(req.headers.authorization === 'Bearer sk-cm-test' ? models : 401, {});
+      if (req.url === '/m/apply') return send(200, { ticket: 'T-' + b.name });
+      if (b.ticket !== 'T-me' && b.ticket !== 'T-no') return send(404, { err: '没有这个申请' });
+      if (req.url === '/m/apply/done') { done++; return send(200, { ok: true }); }
+      send(200, { state: b.ticket === 'T-no' ? 'rejected' : st, ...(st === 'approved' && { key: 'sk-cm-test' }) });
+    });
+  }).listen(0, '127.0.0.1');
+  await new Promise((r) => srv.once('listening', r));
+  const url = `http://127.0.0.1:${srv.address().port}/m`, mine = () => reg().profiles.filter((p) => p.api?.baseURL === url);
+  await assert.rejects(joinApply({ url: 'ftp://x', name: 'me' }), /https/);
+  const shown = await joinApply({ url: url + '/', name: 'me', note: 'n' });
+  assert.deepEqual(shown.map((j) => [j.url, j.state, 'ticket' in j]), [[url, 'pending', false]]);
+  await checkJoins();
+  assert.equal(mine().length, 0);
+  st = 'approved'; const rec = readJoins()[0];
+  await checkJoins();
+  const [p] = mine(), s = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8'));
+  assert.deepEqual([p.api.join, p.subscriptionType, readJoins().length], [rec.id, 'API', 0]);
+  assert.deepEqual([s.env.ANTHROPIC_BASE_URL, s.env.ANTHROPIC_AUTH_TOKEN, s.env.KEEP, s.env.ANTHROPIC_API_KEY, s.apiKeyHelper, !!s.hooks], [url, 'sk-cm-test', '1', undefined, undefined, true]);
+  assert.ok(!fs.lstatSync(path.join(p.configDir, 'settings.json')).isSymbolicLink(), 'its own, not the shared one');
+  fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'join.json'), JSON.stringify([rec])); // asked again: the same one
+  await checkJoins();
+  assert.deepEqual([mine().length, readJoins().length], [1, 0]);
+  await new Promise((r) => setTimeout(r, 200)); assert.equal(done, 2); // told the service each time
+  assert.deepEqual(await fetchUsage(p), { api: true });
+  models = 401;
+  assert.match((await fetchUsage(p)).err, /接入已失效/);
+  await joinApply({ url, name: 'no' }); // a new one at the same address replaces the last
+  await checkJoins();
+  assert.deepEqual(readJoins().map((j) => [j.name, j.state]), [['no', 'rejected']]);
+  srv.close();
+  console.log('申请接入 ok');
+})();

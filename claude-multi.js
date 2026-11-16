@@ -206,8 +206,9 @@ function ask(q) {
   return null;
 }
 
-function newProfile() {
-  console.log('正在创建新的 Claude 账号配置……');
+// A new account's folder, acct-<day>-<n>: the shared files linked in, your preferences (theme, onboarding) copied.
+// settings: its own settings.json (an API account's), written first so the shared one isn't linked in its place.
+function accountDir(settings) {
   fs.mkdirSync(ACCOUNTS, { recursive: true });
   const day = new Date().toLocaleDateString('sv').replace(/-/g, ''); // local YYYYMMDD
   let id, dir;
@@ -216,6 +217,7 @@ function newProfile() {
     dir = path.join(ACCOUNTS, id);
     try { fs.mkdirSync(dir); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
   }
+  if (settings) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings, null, 2) + '\n');
   ensureLinks(dir);
   const prefs = {};
   try {
@@ -223,6 +225,61 @@ function newProfile() {
     for (const k of PREF_KEYS) if (k in g) prefs[k] = g[k];
   } catch {}
   fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify(prefs, null, 2) + '\n');
+  return { id, dir };
+}
+
+// 申请接入: your applications to a gateway's apply service, in join.json (never in git: each keeps its ticket, the
+// secret the service knows it by). Approved, one becomes an API account: your settings (the shared settings.json) with
+// the gateway's address and the key it gave. Once per application (api.join), however often it's asked.
+const JOINS = path.join(ROOT, 'join.json');
+const readJoins = () => { try { return JSON.parse(fs.readFileSync(JOINS, 'utf8')); } catch { return []; } };
+const saveJoins = (js) => { fs.writeFileSync(JOINS + '.tmp', JSON.stringify(js, null, 2)); fs.renameSync(JOINS + '.tmp', JOINS); };
+const editJoin = (id, fn) => saveJoins(readJoins().flatMap((j) => (j.id === id ? fn(j) : [j])));
+const joinsShown = () => readJoins().map(({ ticket, ...j }) => j);
+async function askApply(url, what, body) {
+  const r = await fetch(`${url}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+  const j = await r.json().catch(() => null);
+  if (!j || (!r.ok && r.status !== 404)) throw Error(j?.err ?? `接入地址答 ${r.status}`);
+  return { status: r.status, ...j };
+}
+function joinAccount(j, key) {
+  const had = load().profiles.find((p) => p.api?.join === j.id);
+  if (had) return had;
+  let mine = {};
+  try { mine = JSON.parse(fs.readFileSync(path.join(SHARED, 'settings.json'), 'utf8')); } catch {}
+  const env = { ...mine.env, ANTHROPIC_BASE_URL: j.url, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1' };
+  delete env.ANTHROPIC_API_KEY; delete mine.apiKeyHelper; // the gateway's key only
+  const { id, dir } = accountDir({ ...mine, env });
+  const p = { id, label: new URL(j.url).host, subscriptionType: 'API', configDir: dir, createdAt: now(), lastUsedAt: null, api: { baseURL: j.url, join: j.id } };
+  update((reg) => { reg.profiles.push(p); });
+  log('profile_joined', { profile_id: id, base_url: j.url });
+  return p;
+}
+async function joinApply(b) {
+  const url = String(b.url ?? '').trim().replace(/\/+$/, '');
+  if (!/^https?:\/\/[^\s/]+/.test(url)) throw Error('地址要以 https:// 开头');
+  const r = await askApply(url, 'apply', { name: b.name, note: b.note });
+  if (!r.ticket) throw Error(r.status === 404 ? '这个地址不收申请' : '接入地址没给回执');
+  saveJoins([...readJoins().filter((j) => j.url !== url), // one per address: a new one replaces the last
+    { id: require('crypto').randomBytes(6).toString('hex'), url, name: String(b.name ?? ''), ticket: r.ticket, state: 'pending', at: now() }]);
+  return joinsShown();
+}
+// each one waiting, asked once; approved: its account, then the record dropped, then the service told it can forget the key
+async function checkJoins() {
+  for (const j of readJoins().filter((x) => x.state === 'pending')) {
+    let r;
+    try { r = await askApply(j.url, 'apply/status', { ticket: j.ticket }); } catch { continue; } // away: asked again later
+    if (r.state === 'approved' && r.key) {
+      joinAccount(j, r.key);
+      editJoin(j.id, () => []);
+      askApply(j.url, 'apply/done', { ticket: j.ticket }).catch(() => {});
+    } else if (r.state !== 'pending') editJoin(j.id, (x) => [{ ...x, state: r.status === 404 || r.state === 'approved' ? 'gone' : r.state }]);
+  }
+}
+
+function newProfile() {
+  console.log('正在创建新的 Claude 账号配置……');
+  const { id, dir } = accountDir();
   log('profile_created', { profile_id: id });
 
   console.log(`Profile：${id}`);
@@ -336,7 +393,14 @@ function list() {
 // Same endpoint /usage uses (found in claude.exe, internal, may change). Token stays in memory,
 // no refresh: refreshing would race a running Claude writing the same .credentials.json.
 async function fetchUsage(p) {
-  if (p.api) return { api: true }; // an API account (本地代理): billed by what it uses, no 5-hour or weekly window to read
+  if (p.api) { // an API account (本地代理, or one 申请接入 got): billed by what it uses, no 5-hour or weekly window to read
+    if (p.api.join) try { // the gateway took its key back: 401
+      const key = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8')).env?.ANTHROPIC_AUTH_TOKEN;
+      const r = await fetch(`${p.api.baseURL}/v1/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
+      if (r.status === 401) return { api: true, err: '接入已失效，可在设置里重新申请' };
+    } catch {}
+    return { api: true };
+  }
   let c;
   try { c = JSON.parse(fs.readFileSync(path.join(p.configDir, '.credentials.json'), 'utf8')).claudeAiOauth; } catch {}
   if (!c?.accessToken) return { err: '未找到登录凭据' };
@@ -2166,7 +2230,7 @@ async function usage(args) {
   reg.profiles.forEach((p, i) => {
     const mark = p.id === reg.active ? '*' : ' ';
     const tag = rec?.i === i ? '  ' + c('1;32', open.length ? '← 推荐' : '← 最早恢复') : '';
-    const cells = res[i].api ? c(2, 'API：没有额度窗口，按用量计费') : res[i].err ? c(33, res[i].err) : cols.map(([k]) => cell(res[i].u[k])).join('   ');
+    const cells = res[i].err ? c(33, res[i].err) : res[i].api ? c(2, 'API：没有额度窗口，按用量计费') : cols.map(([k]) => cell(res[i].u[k])).join('   ');
     console.log(`  ${i + 1}. ${mark} ${c(1, pad(p.label, lw))}  ${c(2, pad(p.subscriptionType ?? '', pw))}   ${cells}${tag}`);
   });
   console.log();
@@ -3003,6 +3067,20 @@ const replayPty = (t) => Object.entries(t.modes ?? {}).map(([n, v]) => `\x1b[?${
 
 async function web() {
   procStarts.beside = true; // its process checks never hold up the terminals
+  // A private extension, when profiles.json names one (ext: a CommonJS file's absolute path, trusted as this code is):
+  // its routes join the page's behind the same key, its page part (/ext.js) runs before the page's script. One that
+  // won't load is logged and left out: the conversations here go on without it.
+  const ext = (() => {
+    try {
+      const f = load().ext;
+      if (!f) return null;
+      if (!path.isAbsolute(f)) throw Error('ext 要写绝对路径');
+      return require(f)({ load, root: ROOT });
+    } catch (e) { log('ext_error', { err: e.message }); return null; }
+  })();
+  let joining = false; // 申请接入: one round of asking at a time (the minute's, or 设置 opened)
+  const joinRound = async () => { if (joining) return; joining = true; try { await checkJoins(); } finally { joining = false; } };
+  setInterval(() => { if (readJoins().some((j) => j.state === 'pending')) joinRound().catch(() => {}); }, 60000);
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
   const codex = codexCmd(); // GPT conversations: none started without it
@@ -3499,6 +3577,7 @@ async function web() {
   const butlerSet = (k) => { for (const n of ['settings.local.json', 'settings.json']) try { const m = JSON.parse(fs.readFileSync(path.join(BUTLER, '.claude', n), 'utf8'))[k]; if (m) return m; } catch {} return null; };
   const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
   const api = {
+    ...ext?.api,
     // the questions other conversations wait on, as their screens show them (管家 mode has them as cards): each read again
     // 3 s after the last read at most, one read for every page asking
     // (a Mac's only when it runs in this service: one in a terminal on the Mac can't be read, and asking ssh'd there each time)
@@ -3610,6 +3689,9 @@ async function web() {
       return { on: false };
     },
     'GET /api/island': () => ({ on: !islandOff() }),
+    // 设置's 申请接入: the applications still out (an approved one is an account by then); opening it asks them once
+    'GET /api/join': async () => { await joinRound().catch(() => {}); return joinsShown(); },
+    'POST /api/join': (q, b) => joinApply(b),
     'POST /api/island': (q, b) => {
       if (b.on) { try { fs.unlinkSync(ISLAND_OFF); } catch {} island(); return { on: true }; }
       fs.writeFileSync(ISLAND_OFF, '');
@@ -3867,6 +3949,7 @@ async function web() {
       if (!keyMatch(keyCookie(req.headers.cookie), webKey())) return out(403, '要用链接打开：在电脑上运行 claude-multi web-link。', text);
       if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
       if (req.method === 'GET' && url.pathname === '/screen.js') return out(200, fs.readFileSync(path.join(ROOT, 'screen.js'), 'utf8'), 'text/javascript; charset=utf-8');
+      if (req.method === 'GET' && url.pathname === '/ext.js') return out(200, ext?.page?.() ?? '', 'text/javascript; charset=utf-8'); // none: empty
       // the terminal's files, KaTeX's (the math in messages, its fonts too) and highlight.js's (code's colors in 预览), from
       // our node_modules: from the CDN abroad they took 7-8 s, and the page waits for them. Kept a year: the page asks with
       // the version, ?6.0.0, so a new one is a new address.
@@ -4303,7 +4386,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { joinApply, checkJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

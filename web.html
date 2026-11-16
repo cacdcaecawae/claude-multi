@@ -902,10 +902,14 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 <script src="/lib/@highlightjs/cdn-assets/languages/dos.min.js?11.12.0"></script>
 <script src="/lib/@highlightjs/cdn-assets/languages/latex.min.js?11.12.0"></script>
 <script src="/screen.js"></script>
+<script src="/ext.js"></script>
 <script>
 /* global parseScreen */ // screen.js
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+// a private extension's side views (/ext.js, from profiles.json's ext): [{ id, title, icon, draw }], each a button in the bar
+const EXT = self.cmExt ?? [];
+for (const v of EXT) $('#gear').insertAdjacentHTML('beforebegin', `<button data-side="${esc(v.id)}" title="${esc(v.title)}">${v.icon}<span class="label">${esc(v.title)}</span></button>`);
 const ACCT = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)', 'var(--s7)', 'var(--s8)']; // an account's color everywhere: rings, dots, the usage chart (the island's and the status line's are the same)
 // An error the service answers comes with its words (err). One without them didn't come from it, the relay's own page
 // with the PC away, say: marked away, for a caller to try again rather than give up (as with no network at all).
@@ -1078,7 +1082,7 @@ if (FINE) {
   addEventListener('blur', hide);
 }
 const saved = (() => { try { return JSON.parse(localStorage.getItem('cm-layout')) ?? {}; } catch { return {}; } })();
-let side = ['chats', 'usage', 'tokens'].includes(saved.side) ? saved.side : 'chats', sideOn = saved.sideOn ?? true, sideW = saved.sideW ?? 300;
+let side = ['chats', 'usage', 'tokens', ...EXT.map((v) => v.id)].includes(saved.side) ? saved.side : 'chats', sideOn = saved.sideOn ?? true, sideW = saved.sideW ?? 300;
 let deskW = saved.deskW ?? null, deskRW = saved.deskRW ?? null; // the 管家's columns as dragged (null: as the window makes them)
 let pvW = saved.pvW ?? null; // 预览's pane as dragged (null: by the window)
 const secs = saved.secs ?? {}; // its 操作台's sections opened or closed by you (by data-sec), the rest as the page has them
@@ -1257,8 +1261,9 @@ function drawSide() {
   $('#app').style.setProperty('--sideW', sideW + 'px');
   document.querySelectorAll('#act [data-side]').forEach((b) => b.classList.toggle('on', b.dataset.side === side));
   const n = notesOut().length; $('#badge').textContent = n; $('#badge').hidden = !n; retitle();
-  $('#sideTitle').textContent = { chats: '对话', usage: '额度', tokens: '用量' }[side];
-  if (state) ({ chats: renderChats, usage: renderUsage, tokens: renderTokens })[side]();
+  const x = EXT.find((v) => v.id === side);
+  $('#sideTitle').textContent = x?.title ?? { chats: '对话', usage: '额度', tokens: '用量' }[side];
+  if (state) (x?.draw ?? { chats: renderChats, usage: renderUsage, tokens: renderTokens }[side])();
 }
 // no Claude account open, as said everywhere: none at all, none read (no recommendation: the quota unknown, which isn't
 // the same as used up), or all at their limits
@@ -1809,10 +1814,12 @@ function drawMe() {
   $('#gear').html = n ? `<span class="av">${esc([...n][0])}</span><span class="label">设置</span>` : GEAR;
   $('#gear').title = n ? `${n} · 设置` : '设置';
 }
+const JOIN_STATE = { pending: '等待批准', rejected: '未通过', removed: '已撤销', gone: '申请已失效' };
 function openSettings() {
   let island = null; // the computer's island: on, off, or not read yet
+  let joins = null, joinForm = false; // 申请接入: the applications still out; its form open
   const draw = () => {
-    const now = look();
+    const now = look(), typed = Object.fromEntries([...$('#sheetIn').querySelectorAll('input[id^=join]')].map((x) => [x.id, x.value])); // kept across a redraw
     $('#sheetIn').innerHTML = `<div class="shead"><span class="stitle">设置</span><button class="ico" data-x title="关闭">${svg(I.close)}</button></div>
       <h3>你</h3>
       <div class="setting"><span>名字</span><input type="text" id="meIn" maxlength="20" placeholder="头像上显示第一个字" value="${esc(state?.user ?? '')}" enterkeyhint="done"></div>
@@ -1823,11 +1830,20 @@ function openSettings() {
       ${pushOn ? '<div class="setting"><span>测试通知</span><button class="btn" data-pushtest>发送</button></div>' : ''}
       <h3>电脑</h3>
       <div class="setting"><span>桌面灵动岛</span>${island == null ? '<span class="m">读取中…</span>' : `<button class="switch${island ? ' on' : ''}" data-island title="${island ? '关闭：电脑桌面上不再显示和弹提示，网页和手机不受影响' : '打开'}"></button>`}</div>
+      <h3>接入</h3>
+      ${(joins ?? []).map((j) => `<div class="setting"><span>${esc(j.url.replace(/^https?:\/\//, ''))}</span><span class="m">${esc(JOIN_STATE[j.state] ?? j.state)}</span></div>`).join('')}
+      ${joinForm ? `<div class="setting"><span>地址</span><input type="text" inputmode="url" id="joinUrl" placeholder="https://…/magpie"></div>
+      <div class="setting"><span>名字</span><input type="text" id="joinName" maxlength="32" placeholder="对方看到的名字"></div>
+      <div class="setting"><span>备注</span><input type="text" id="joinNote" maxlength="100" placeholder="选填，比如微信名"></div>
+      <div class="setting"><span></span><button class="btn primary" data-joinsend>提交申请</button></div>`
+      : '<div class="setting"><span>申请接入</span><button class="btn" data-join>申请…</button></div>'}
       <h3>开发功能</h3>
       <div class="setting"><span>管家</span><button class="switch${state?.butlerOn ? ' on' : ''}" data-butler title="${state?.butlerOn ? '关闭：正在运行的管家会停下，菊花图标收起' : '打开'}"></button></div>
       <div class="m" style="white-space:normal">还在开发中：替你看着所有对话、给它们派工单。打开后长按菊花图标进入。</div>`;
+    for (const [k, v] of Object.entries(typed)) { const x = document.getElementById(k); if (x) x.value = v; }
   };
   fetch('/api/island').then((r) => r.json()).then((j) => { island = j.on; draw(); }).catch(() => {});
+  fetch('/api/join').then((r) => r.json()).then((j) => { if (Array.isArray(j)) { joins = j; draw(); } }).catch(() => {}); // asks the gateways first: a moment
   // the name: saved once you leave the box (or Enter), the avatar at once
   $('#sheetIn').onchange = (e) => {
     if (e.target.id !== 'meIn') return;
@@ -1846,6 +1862,12 @@ function openSettings() {
     if (b.matches('[data-pushtest]')) return pushTest();
     if (b.matches('[data-island]')) return post('/api/island', { on: !island }).then((j) => { island = j.on; draw(); }).catch((err) => toast(`没改成：${err.message}`));
     if (b.matches('[data-butler]')) return post('/api/butler', { on: !state?.butlerOn }).then((j) => { state.butlerOn = j.on; butlerShown(); draw(); }).catch((err) => toast(`没改成：${err.message}`));
+    if (b.matches('[data-join]')) { joinForm = true; draw(); return $('#joinUrl').focus(); }
+    if (b.matches('[data-joinsend]')) {
+      b.disabled = true;
+      return post('/api/join', { url: $('#joinUrl').value, name: $('#joinName').value, note: $('#joinNote').value })
+        .then((j) => { joins = j; joinForm = false; draw(); toast('已提交，批准后账号会出现在「额度」里'); }, (err) => { b.disabled = false; toast(`没提交成：${err.message}`); });
+    }
   };
   draw(); $('#sheet').classList.add('on', 'mid');
 }
@@ -1888,7 +1910,7 @@ function renderUsage() {
     <div data-machine="here">${machineRows('here')}</div>
     ${u.accounts.map((a, i) => `<div class="card"><div class="cardHead">${ac(i + 1)}<b>账号 ${i + 1}</b>
       <span class="m grow">${esc(a.label)}</span>${renew(a.sub)}${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
-      ${a.api ? '<div class="m" style="margin-top:4px">API，按用量计费，没有 5 小时和 7 天额度</div>'
+      ${a.api && !a.err ? '<div class="m" style="margin-top:4px">API，按用量计费，没有 5 小时和 7 天额度</div>'
         : a.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(a.err)}</div>` : `
       <div class="m" style="margin-top:4px">可连续用 ${a.runway} 小时</div>
       ${a.windows.map(winRow).join('')}`}</div>`).join('')}
