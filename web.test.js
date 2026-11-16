@@ -625,6 +625,28 @@ const press = async (key, shift = false) => {
     'true | false | false | pv,open,with,reveal,dl,copy,text | true | false | run.bat 是程序或脚本 | open,reveal | 这一项要等网页服务重启后才能用 | D:\\a\\x.md | 第一行\n第二行'
     + ' | /api/peek/x.md?path=D:\\a\\x.md&raw=1 | x.md | pv,open,copy | pv,open,copy');
   console.log('browser 右键 a path ok');
+  // a text file in 预览: numbered lines in its language's colors (a string over two lines colored on both), not wrapped
+  // till 换行; MATLAB's .m, in GBK too; a Markdown one as a reply shows it, 源码 as written; 复制 the whole file
+  assert.equal(await evaluate(`(async () => {
+    const wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), out = [], real = window.fetch, enc = (s) => new TextEncoder().encode(s);
+    const files = { 'a.py': enc('import os\\n# 注释\\ns = """多\\n行"""\\n'), 'g.m': new Uint8Array([37, 32, 0xd6, 0xd0, 0xce, 0xc4, 10, 120, 32, 61, 32, 49, 59]), 'r.md': enc('# 标题\\n\\n正文\\n') };
+    window.fetch = async (u, o) => { u = String(u); const f = /\\/api\\/peek\\/([^?]+)/.exec(u)?.[1];
+      if (!files[f]) return real(u, o);
+      return u.includes('warm=1') ? new Response('{"type":"text/plain; charset=utf-8"}') : new Response(files[f]); };
+    const body = () => document.querySelector('#peek .pvBody:not([hidden])'), btn = (k) => document.querySelector('#peek [data-pv=' + k + ']');
+    const shown = () => ['copy', 'src', 'wrap'].filter((k) => !btn(k).hidden).join('+'), code = () => body().querySelector('.pvCode');
+    preview('C:\\\\code\\\\a.py'); await wait(300);
+    const ls = body().querySelectorAll('.pvCode .l');
+    out.push(ls.length, !!ls[0].querySelector('.hljs-keyword'), ls[1].querySelector('.hljs-comment')?.textContent, ls[2].querySelector('.hljs-string')?.textContent,
+      ls[3].querySelector('.hljs-string')?.textContent, code().classList.contains('wrap'), getComputedStyle(ls[0]).whiteSpace, shown());
+    btn('wrap').click(); out.push(code().classList.contains('wrap'), btn('wrap').classList.contains('on'), getComputedStyle(ls[0]).whiteSpace);
+    btn('copy').click(); await wait(50); out.push(window.copied === new TextDecoder().decode(files['a.py']));
+    preview('C:\\\\code\\\\g.m'); await wait(300); out.push(body().querySelector('.hljs-comment')?.textContent, body().querySelectorAll('.l').length);
+    preview('C:\\\\code\\\\r.md'); await wait(300); out.push(body().querySelector('.pvMd b.h')?.textContent, shown());
+    btn('src').click(); out.push(body().querySelectorAll('.pvCode .l').length, btn('src').classList.contains('on'), shown());
+    window.fetch = real; btn('close').click(); return out.join(' | '); })()`),
+    '4 | true | # 注释 | """多 | 行""" | false | pre | copy+wrap | true | true | pre-wrap | true | % 中文 | 2 | 标题 | copy+src | 3 | true | copy+src+wrap');
+  console.log('browser 预览 code ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }

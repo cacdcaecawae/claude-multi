@@ -814,6 +814,24 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pvRow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 18px; text-align: left; color: var(--fg); }
   .pvRow:hover { background: var(--hover); } .pvRow svg { flex: none; width: 16px; height: 16px; color: var(--fg3); }
   .pvRow span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* a text file: numbered lines (the numbers not copied with them), a long one scrolled to, 换行 wraps it; code in GitHub's
+     colors for its language (highlight.js's names for the parts) */
+  .pvCode { counter-reset: ln; width: max-content; min-width: 100%; padding: 6px 0 14px; font: 12.5px/1.6 var(--mono); color: var(--fg); tab-size: 4;
+    --hk: #ff7b72; --hs: #a5d6ff; --hn: #79c0ff; --ht: #d2a8ff; --hb: #ffa657; --hc: #8b949e; --hg: #7ee787; --hd: #ffa198; }
+  :root[data-theme=light] .pvCode { --hk: #cf222e; --hs: #0a3069; --hn: #0550ae; --ht: #8250df; --hb: #953800; --hc: #6e7781; --hg: #116329; --hd: #82071e; }
+  .pvCode .l { position: relative; min-height: 1.6em; padding: 0 18px 0 calc(var(--g) + 30px); white-space: pre; }
+  .pvCode .l::before { counter-increment: ln; content: counter(ln); position: absolute; left: 14px; width: var(--g); text-align: right; color: var(--fg3); opacity: .75; user-select: none; }
+  @media (hover: hover) { .pvCode .l:hover { background: var(--hover); } }
+  .pvCode.wrap { width: auto; } .pvCode.wrap .l { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .hljs-keyword, .hljs-doctag, .hljs-template-tag, .hljs-template-variable, .hljs-type, .hljs-variable.language_ { color: var(--hk); }
+  .hljs-title, .hljs-title.class_, .hljs-title.function_ { color: var(--ht); }
+  .hljs-attr, .hljs-attribute, .hljs-literal, .hljs-meta, .hljs-number, .hljs-operator, .hljs-variable, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id { color: var(--hn); }
+  .hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: var(--hs); } .hljs-built_in, .hljs-symbol, .hljs-bullet { color: var(--hb); }
+  .hljs-comment, .hljs-code, .hljs-formula { color: var(--hc); } .hljs-name, .hljs-quote, .hljs-selector-tag, .hljs-selector-pseudo, .hljs-addition { color: var(--hg); }
+  .hljs-subst { color: var(--fg); } .hljs-section { color: var(--hn); font-weight: 600; } .hljs-deletion { color: var(--hd); }
+  .hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 600; }
+  .pvMd { padding: 10px 22px 24px; } /* a Markdown file as a reply shows it */
+  .pvCut { padding: 0 18px 16px; font-size: 12px; color: var(--fg3); }
   @media (min-width: 760px) { #peek { border: 1px solid var(--cardB); border-radius: 12px; overflow: hidden; }
     /* 收起: a strip at the window's edge, a mark for each tab (its × on hover), one clicked opens it again at that one */
     #peek.min { width: 44px; }
@@ -874,6 +892,12 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 <script src="/lib/@xterm/addon-webgl/lib/addon-webgl.js?0.19.0"></script>
 <script src="/lib/@xterm/addon-web-links/lib/addon-web-links.js?0.12.0"></script>
 <script src="/lib/katex/dist/katex.min.js?0.19.1"></script>
+<!-- code's colors in 预览, needed only once a file's opened: after the page (defer), in this order (a language after the core) -->
+<script defer src="/lib/@highlightjs/cdn-assets/highlight.min.js?11.12.0"></script>
+<script defer src="/lib/@highlightjs/cdn-assets/languages/matlab.min.js?11.12.0"></script>
+<script defer src="/lib/@highlightjs/cdn-assets/languages/powershell.min.js?11.12.0"></script>
+<script defer src="/lib/@highlightjs/cdn-assets/languages/dos.min.js?11.12.0"></script>
+<script defer src="/lib/@highlightjs/cdn-assets/languages/latex.min.js?11.12.0"></script>
 <script src="/screen.js"></script>
 <script>
 /* global parseScreen */ // screen.js
@@ -956,7 +980,8 @@ const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path
   grid: '<rect x="4.5" y="4.5" width="6" height="6" rx="1.2"/><rect x="13.5" y="4.5" width="6" height="6" rx="1.2"/><rect x="4.5" y="13.5" width="6" height="6" rx="1.2"/><rect x="13.5" y="13.5" width="6" height="6" rx="1.2"/>',
   more: '<circle cx="6" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/>',
   file: '<path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4"/>', min: '<path d="M6 12h12"/>', max: '<rect x="5.5" y="5.5" width="13" height="13" rx="2"/>',
-  bolt: '<path d="M13 3.5L5.5 13H11l-1 7.5L18.5 11H13z"/>', down: '<path d="M8 10l4 4 4-4"/>',
+  bolt: '<path d="M13 3.5L5.5 13H11l-1 7.5L18.5 11H13z"/>', down: '<path d="M8 10l4 4 4-4"/>', code: '<path d="M9 7.5L4.5 12 9 16.5M15 7.5l4.5 4.5-4.5 4.5"/>',
+  wrap: '<path d="M4.5 6.5h15M4.5 12h12a2.75 2.75 0 0 1 0 5.5H12"/><path d="M14 15.5l-2 2 2 2M4.5 17.5h4"/>',
   folder: '<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H19a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
   folderOpen: '<path d="M3.5 18V7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H18a1.5 1.5 0 0 1 1.5 1.5v1.5"/><path d="M3.5 18l2.6-6.4a1 1 0 0 1 .9-.6h14l-2.7 6.4a1 1 0 0 1-.9.6z"/>' };
 // an account's mark, n from 1: its number in a ring, the ring as full as its 5-hour window has left, dashed while unread.
@@ -3395,7 +3420,8 @@ const pvUp = (p) => { const u = p.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/
   pv.el.innerHTML = `<div class="pvTabs"><div class="pvTabList" role="tablist"></div><button class="ico" data-pv="min" title="收起预览">${svg(I.min)}</button>
     <button class="ico" data-pv="close" title="关闭全部预览">${svg(I.close, 2)}</button></div>
     <div class="pvHead"><button class="ico" data-pv="up" title="上一级">${svg(I.back, 2)}</button><span class="pvPath"></span>
-    <a class="ico" data-pv="tab" target="_blank" rel="noopener" title="在新标签页打开">${svg(I.out)}</a></div><div class="pvBodies"></div>`;
+    <button class="ico" data-pv="src" title="看源码">${svg(I.code)}</button><button class="ico" data-pv="wrap" title="自动换行">${svg(I.wrap)}</button>
+    <button class="ico" data-pv="copy" title="复制全部内容">${svg(I.copy)}</button><a class="ico" data-pv="tab" target="_blank" rel="noopener" title="在新标签页打开">${svg(I.out)}</a></div><div class="pvBodies"></div>`;
   const sash = document.createElement('div'); sash.className = 'sash'; sash.id = 'pvSash'; sash.hidden = true; sash.title = '拖动调宽窄';
   $('#editor').after(sash, pv.el);
   if (pvW) $('#app').style.setProperty('--pvW', pvW + 'px');
@@ -3425,6 +3451,9 @@ function pvDraw() {
   const at = pv.el.querySelector('.pvPath'); at.textContent = t.p; at.title = t.p;
   pv.el.querySelector('[data-pv=up]').hidden = !up || up === t.p;
   tab.hidden = !t.q; if (t.q) tab.href = t.q;
+  const b = (k) => pv.el.querySelector(`[data-pv=${k}]`), txt = t.text != null, lines = txt && (!t.md || t.src);
+  b('copy').hidden = !txt; b('src').hidden = !txt || !t.md; b('wrap').hidden = !lines;
+  b('src').classList.toggle('on', !!t.src); b('wrap').classList.toggle('on', !!t.wrap);
 }
 function pvClose(t) {
   const i = pv.tabs.indexOf(t);
@@ -3437,7 +3466,7 @@ function pvClose(t) {
 // as the browser shows it, after asking what it is (an Office one's PDF begun meanwhile)
 async function pvLoad(t) {
   const gen = t.gen = (t.gen ?? 0) + 1, body = t.body, p = t.p, name = pvName(p);
-  body.innerHTML = '<div class="pvWait">正在打开…</div>'; t.q = null;
+  body.innerHTML = '<div class="pvWait">正在打开…</div>'; t.q = t.text = null;
   const r = await fetch('/api/dirs?' + new URLSearchParams({ path: p })).then((x) => x.json()).catch(() => ({ err: '连不上' }));
   if (gen !== t.gen) return;
   t.dir = !r.err;
@@ -3457,7 +3486,8 @@ async function pvLoad(t) {
   // a phone shows a PDF in a frame as its first page only: there it's opened in a tab of its own
   if (!FINE && type === 'application/pdf') { body.innerHTML = `<div class="pvWait"><a href="${q}" target="_blank" rel="noopener">打开${OFFICE.test(p) ? '（先转成 PDF，第一次要几秒）' : ''}</a></div>`; return; }
   if (type === 'application/octet-stream') { body.innerHTML = `<div class="pvWait"><span>这种文件在网页里看不了，<a href="${q}" download>下载下来</a>用电脑上的程序打开。</span></div>`; return; }
-  // a picture, a video or a sound in the pane itself (fitted to it); a PDF and text in a frame
+  if (type.startsWith('text/plain')) return pvText(t, q, gen);
+  // a picture, a video or a sound in the pane itself (fitted to it); a PDF in a frame
   const kind = /^image\//.test(type) ? 'img' : /^video\//.test(type) ? 'video' : /^audio\//.test(type) ? 'audio' : 'iframe';
   body.innerHTML = `<div class="pvWait">${OFFICE.test(p) ? `正在用 ${app} 转成 PDF…（第一次要几秒）` : '正在打开…'}</div><${kind} class="pvMedia"${kind === 'iframe' ? ` title="${esc(name)}"` : kind === 'img' ? ` alt="${esc(name)}"` : ' controls'}></${kind}>`;
   const f = body.querySelector('.pvMedia');
@@ -3465,11 +3495,42 @@ async function pvLoad(t) {
   f.onerror = () => { const n = body.querySelector('.pvWait'); if (n) n.textContent = '打不开这个文件'; };
   f.src = q;
 }
+// a text file in the pane itself, as an editor shows it: its lines numbered, code in its language's colors (highlight.js,
+// by the file's ending: .m is MATLAB), a long line scrolled to (a text one's wrapped); a Markdown one as a reply shows it
+// (源码: as written). Not UTF-8: GBK, as MATLAB on a Chinese Windows saves. The service sends 2 MB at most
+const PV_LANG = { m: 'matlab', htm: 'html', vue: 'html', ipynb: 'json', cfg: 'ini', conf: 'ini', txt: '' };
+async function pvText(t, q, gen) {
+  const r = await fetch(q).catch(() => null), b = r?.ok ? await r.arrayBuffer().catch(() => null) : null;
+  if (gen !== t.gen) return;
+  if (!b) { t.body.innerHTML = '<div class="pvWait">打不开这个文件</div>'; return; }
+  const cut = b.byteLength >= 2 << 20, ext = /\.([^.\\/]+)$/.exec(t.p)?.[1].toLowerCase() ?? '', lang = PV_LANG[ext] ?? ext;
+  let s; try { s = new TextDecoder('utf-8', { fatal: !cut }).decode(b); } catch { s = new TextDecoder('gb18030').decode(b); } // (cut: its last character may be half)
+  Object.assign(t, { text: s, cut, md: ext === 'md' || ext === 'markdown', src: false, lang: window.hljs?.getLanguage(lang) ? lang : null });
+  t.wrap = !t.lang || t.md;
+  pvTextDraw(t);
+  if (pv.on === t) pvDraw();
+}
+function pvTextDraw(t) {
+  if (t.md && !t.src) { t.body.innerHTML = `<div class="hm pvMd">${md(t.text)}</div>`; return; }
+  const s = t.text.replace(/\r\n?/g, '\n').replace(/\n$/, '');
+  let h = esc(s);
+  if (t.lang && s.length < 1 << 20) try { h = hljs.highlight(s, { language: t.lang, ignoreIllegals: true }).value; } catch {} // (past 1 MB: seconds)
+  // a line each: the colors open at its end (a comment or a string over lines) closed there and opened again on the next
+  const open = [], ls = h.split('\n').map((l) => {
+    const at = open.join('');
+    for (const [m] of l.matchAll(/<span[^>]*>|<\/span>/g)) if (m[1] === '/') open.pop(); else open.push(m);
+    return `<div class="l">${at}${l}${'</span>'.repeat(open.length)}</div>`;
+  });
+  t.body.innerHTML = `<div class="pvCode${t.wrap ? ' wrap' : ''}" style="--g:${String(ls.length).length}ch">${ls.join('')}</div>${t.cut ? '<div class="pvCut">文件太大，只显示了前 2 MB</div>' : ''}`;
+}
 pv.el.addEventListener('click', (e) => {
   const x = e.target.closest('[data-pvx]'); if (x) return pvClose(pv.tabs[+x.dataset.pvx]);
   const tb = e.target.closest('[data-pvt]'); if (tb) return pvShow(pv.tabs[+tb.dataset.pvt]);
   if (e.target.closest('[data-pv=close]')) { for (const t of [...pv.tabs]) pvClose(t); return; }
   if (e.target.closest('[data-pv=min]')) return pvMin(!pv.el.classList.contains('min'));
+  if (e.target.closest('[data-pv=copy]')) return copyText(pv.on.text);
+  if (e.target.closest('[data-pv=wrap]')) { pv.on.wrap = !pv.on.wrap; pv.on.body.querySelector('.pvCode')?.classList.toggle('wrap', pv.on.wrap); return pvDraw(); }
+  if (e.target.closest('[data-pv=src]')) { pv.on.src = !pv.on.src; pvTextDraw(pv.on); return pvDraw(); }
   const go = e.target.closest('[data-pvgo]')?.dataset.pvgo ?? (e.target.closest('[data-pv=up]') && pvUp(pv.on.p)); // into a folder, or one up: in this tab
   if (go) { pv.on.p = go; pvLoad(pv.on); return pvDraw(); }
   const f = e.target.closest('[data-pvp]'); if (f) preview(f.dataset.pvp);
@@ -3531,18 +3592,18 @@ document.addEventListener('contextmenu', (e) => {
   popMenu(pvName(p), dir ? [['pv', '预览'], ['open', '在资源管理器中打开', away, true], ['copy', '复制路径']]
     : [['pv', '预览'], ['open', '在电脑上打开', away, true], ['with', '打开方式…'], ['reveal', '在资源管理器中显示'], ['-'], ['dl', '下载'], ['copy', '复制路径'], ['text', '复制文件内容']], e.clientX, e.clientY);
 });
+const copyText = (t, said = '已复制') => (navigator.clipboard?.writeText(t) ?? Promise.reject()).then(() => toast(said, 1200), () => toast('复制失败', 2000));
 async function fileAct(k, { p }) {
-  const copy = (t, said) => (navigator.clipboard?.writeText(t) ?? Promise.reject()).then(() => toast(said, 1200), () => toast('复制失败', 2000));
   const q = `/api/peek/${encodeURIComponent(pvName(p))}?` + new URLSearchParams({ path: p });
   if (k === 'pv') return preview(p);
-  if (k === 'copy') return copy(p, '已复制路径');
+  if (k === 'copy') return copyText(p, '已复制路径');
   if (k === 'dl') { const a = document.createElement('a'); a.href = q + '&raw=1'; a.download = pvName(p); document.body.append(a); a.click(); a.remove(); return; } // the file itself (an Office one: not its PDF)
   if (k === 'text') { // a text file's words (its first 2 MB, as 预览 has them)
     const w = OFFICE.test(p) ? { type: '' } : await fetch(q + '&warm=1').then((x) => (x.ok ? x.json() : null)).catch(() => null);
     if (!w) return toast('读不到这个文件', 2500);
     if (!w.type?.startsWith('text/')) return toast('这不是文字文件，复制不了内容', 2500);
     const t = await fetch(q).then((x) => (x.ok ? x.text() : null)).catch(() => null);
-    return t == null ? toast('读不到这个文件', 2500) : copy(t, '已复制文件内容');
+    return t == null ? toast('读不到这个文件', 2500) : copyText(t, '已复制文件内容');
   }
   // on this PC: what the service says (a program or a script isn't run, but shown in Explorer); one before this: say so
   const r = await fetch('/api/shell', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: p, how: k }) }).catch(() => null);
@@ -3557,8 +3618,7 @@ document.addEventListener('click', (e) => {
   if (m) { if (!m.classList.toggle('open')) m.scrollIntoView({ block: 'nearest' }); return; }
   const b = e.target.closest('[data-copy]');
   if (!b) return;
-  const t = b.closest('.pw')?.querySelector('pre').textContent ?? b.closest('[data-raw]')?.dataset.raw ?? '';
-  (navigator.clipboard?.writeText(t) ?? Promise.reject()).then(() => toast('已复制', 1200), () => toast('复制失败', 2000));
+  copyText(b.closest('.pw')?.querySelector('pre').textContent ?? b.closest('[data-raw]')?.dataset.raw ?? '');
 });
 
 focusGroup(makeGroup());
