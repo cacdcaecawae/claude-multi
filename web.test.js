@@ -22,6 +22,8 @@ let oaiHold = null; // a promise: GPT 聊天's send answered only once it settle
 const cmdAsks = []; // whose commands / asked for, in turn
 const CMDS = [{ name: 'usage', desc: 'Show usage', hint: '' }, { name: 'usage-credits', desc: 'Credits', hint: '' }, { name: 'clear', desc: 'Start anew', hint: '[name]' }, { name: 'status', desc: 'Status', hint: '' }];
 dirs['D:\\figs'] = { path: 'D:\\figs', up: 'D:\\', dirs: ['D:\\figs\\old'], files: ['图7.pptx', 'a.png', 'x.exe'] };
+dirs['C:/test'] = { path: 'C:/test', up: 'C:/', dirs: ['C:/test/sub'], files: ['a.png', 'b.md'] }; // conversation A's folder
+dirs['C:/test/sub'] = { path: 'C:/test/sub', up: 'C:/test', dirs: [], files: ['c.txt'] };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/open') opens++;
@@ -382,6 +384,13 @@ const press = async (key, shift = false) => {
     return [a.className, a.dataset.ext, a.getAttribute('href'), d.textContent.replace(/\\s+/g, ''), !!p.querySelector('span.att.doc'), !p.querySelector('a')].join(' | '); })()`),
     'att pdf | PDF | /api/file?n=20261113T081500-a1b2c3-%E5%85%A8%E6%96%87-%E4%B8%AD%E6%96%87-v16.pdf | 看看这个附件：全文-中文-v16.pdf | true | true');
   console.log('browser 附件 cards ok');
+  // a command (a skill, a plugin's, /model): a tag at the start of your bubble, what's after it your words (more lines too);
+  // the bubble's text as before (停止 compares it); a path isn't one
+  assert.equal(await evaluate(`(() => { const d = document.createElement('div');
+    d.innerHTML = userHtml({ role: 'user', text: '/ponytail:review 看看\\n第二行' }, '') + userHtml({ role: 'user', text: '/model opus' }, '') + userHtml({ role: 'user', text: '/Users/me 不是' }, '');
+    return [...d.children].map((b) => (b.querySelector('.slashTag')?.textContent ?? '-') + ':' + b.textContent.replace(/\\s+/g, '')).join(' | '); })()`),
+    '/ponytail:review:/ponytail:review看看第二行 | /model:/modelopus | -:/Users/me不是');
+  console.log('browser command tags ok');
   // a picture waiting in the box: just the picture, not a message's card with its kind's square
   assert.equal(await evaluate(`(() => { const d = document.createElement('div'); d.className = 'send';
     d.innerHTML = '<div class="atts"><div class="att"><img alt=""></div></div>'; document.body.append(d);
@@ -523,6 +532,63 @@ const press = async (key, shift = false) => {
     ev('mouseout', d.firstChild, document.body); out.push(titled()); d.remove();
     return out.join(' | '); })()`), '里面 | 0 | false | 0 | 2 | 里面 | 2');
   console.log('browser hints ok');
+
+  // --- a computer's window again (the phone's above), and a real mouse: a button hidden by its style takes no click
+  await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await new Promise((r) => setTimeout(r, 200));
+  const click = async ([x, y]) => { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: type === 'mouseMoved' ? 0 : 1 }); };
+  const at = (sel) => evaluate(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  const pvTabs = () => evaluate("[...document.querySelectorAll('#peek .pvTab span')].map((s) => s.textContent).join(',') + (document.querySelector('#peek').classList.contains('min') ? ' min' : '')");
+  // 预览's tabs: each its own × to a mouse (the shown one's, another's on hover), a middle click too; 收起: a strip of their
+  // marks (the sash gone), a mark's × on hover closing it there, a mark clicked or a path opened bringing the pane back
+  await evaluate("preview('D:\\\\figs'); preview('D:\\\\figs\\\\a.png')"); await new Promise((r) => setTimeout(r, 300));
+  await click(await at('#peek .pvTab.on .x')); assert.equal(await pvTabs(), 'figs');
+  await evaluate("preview('D:\\\\figs\\\\a.png')"); await click(await at('#peek [data-pvt="0"] .x')); assert.equal(await pvTabs(), 'a.png');
+  await evaluate("preview('D:\\\\figs')"); await click(await at('#peek [data-pv=min]'));
+  assert.equal(await evaluate("[document.querySelector('#peek').offsetWidth < 60, document.querySelector('#pvSash').hidden].join()"), 'true,true');
+  assert.equal(await pvTabs(), 'a.png,figs min');
+  await click(await at('#peek [data-pvt="0"] .x')); assert.equal(await pvTabs(), 'figs min');
+  await click(await at('#peek [data-pvt="0"]')); assert.equal(await pvTabs(), 'figs');
+  await click(await at('#peek [data-pv=min]')); await evaluate("preview('D:\\\\figs\\\\a.png')"); assert.equal(await pvTabs(), 'figs,a.png');
+  await evaluate("document.querySelector('#peek [data-pvt=\"0\"]').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 }))"); assert.equal(await pvTabs(), 'a.png');
+  await click(await at('#peek [data-pv=close]')); assert.equal(await evaluate("document.querySelector('#peek').hidden"), true);
+  console.log('browser 预览 tabs closed one by one, 收起 ok');
+  // 收起这一栏: a column a strip of its tabs' marks, its conversation asleep (not among those looked at: the mock's record names any one A, so by which), the focus on the
+  // other; kept over a reload; its mark clicked opens it at that one; the last open column closed, the strip opens
+  assert.equal(await evaluate(`(async () => {
+    const wait = (ms) => new Promise((ok) => setTimeout(ok, ms)), out = [];
+    for (const c of allConvs()) closeConv(c);
+    const a = makeConv({ id: 'A' }, 'A'); addConv(focusG, a); const g1 = focusG; split(g1); const g2 = focusG, b = makeConv({ id: 'B' }, 'B'); addConv(g2, b); await wait(100);
+    const btn = (g) => g.el.querySelector('.fold');
+    out.push(groups.length, btn(g1).hidden, btn(g2).hidden);
+    btn(g1).click(); await wait(100);
+    out.push(g1.min, g1.el.offsetWidth < 60, a.el.classList.contains('on'), shownConvs().map((c) => (c === a ? 'a' : c === b ? 'b' : '?')).join(), focusG === g2, btn(g2).hidden, btn(g1).title,
+      JSON.parse(localStorage.getItem('cm-layout')).groups.map((x) => !!x.min).join());
+    g1.strip.querySelector('[data-i="0"]').click(); await wait(100);
+    out.push(g1.min, a.el.classList.contains('on'), shownConvs().map((c) => (c === a ? 'a' : c === b ? 'b' : '?')).join(), focusG === g1);
+    btn(g1).click(); closeConv(b); await wait(100);
+    out.push(groups.length, g1.min, a.el.classList.contains('on'));
+    closeConv(a); return out.join(' | '); })()`),
+    '2 | false | false | true | true | false | b | true | true | 展开这一栏 | true,false | false | true | a,b | true | 1 | false | true');
+  console.log('browser 收起这一栏 ok');
+  // a conversation's folder: a button (no account, nor where it runs); the mouse on it, what's in it (a folder gone into,
+  // ← back; a file opened in 预览), gone when the mouse leaves; clicked, the folder in 预览. A Mac's own folder: its name
+  const move = async ([x, y]) => { await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' }); };
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  const popRows = "(() => { const p = document.querySelector('.dirPop'); return p.hidden ? 'hidden' : [...p.querySelectorAll('.pvRow span')].map((s) => s.textContent).join(','); })()";
+  const rowAt = (n) => evaluate(`(() => { const r = [...document.querySelectorAll('.dirPop .pvRow')].find((x) => x.textContent === ${JSON.stringify(n)}).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  assert.equal(await evaluate("(async () => { window.fa = makeConv({ id: 'A' }, 'A'); addConv(focusG, fa); await new Promise((ok) => setTimeout(ok, 200)); return fa.el.querySelector('.path').textContent; })()"), 'test');
+  await move(await at('.pane.on button.dirBtn')); await pause(450);
+  assert.equal(await evaluate(popRows), 'sub,a.png,b.md'); assert.equal(await evaluate("document.querySelector('.dpHead').textContent"), 'C:/test');
+  await click(await rowAt('sub')); await pause(150); assert.equal(await evaluate(popRows), 'c.txt');
+  await click(await at('.dirPop [data-dpup]')); await pause(150); assert.equal(await evaluate(popRows), 'sub,a.png,b.md');
+  await click(await rowAt('a.png')); await pause(150); assert.equal(await evaluate(popRows), 'hidden'); assert.equal(await pvTabs(), 'a.png');
+  await move(await at('.pane.on button.dirBtn')); await pause(450); assert.equal(await evaluate(popRows), 'sub,a.png,b.md');
+  await move(await at('.pane.on .msgs')); await pause(450); assert.equal(await evaluate(popRows), 'hidden');
+  await click(await at('.pane.on button.dirBtn')); await pause(300); assert.equal(await evaluate(popRows), 'hidden'); assert.equal(await pvTabs(), 'a.png,test');
+  assert.equal(await evaluate(`(() => { document.querySelector('#peek [data-pv=close]').click(); closeConv(fa);
+    const m = makeConv({ dir: '/Users/me/x', acct: 1 }, 'm'); m.sync(); const s = m.el.querySelector('.dirBtn'), r = [s.tagName, s.title, s.textContent].join(' | '); m.close(); return r; })()`), 'SPAN | /Users/me/x | x');
+  console.log('browser folder button ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }

@@ -106,6 +106,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #view { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 16px; }
   .sash { width: 4px; margin: 0 -2px; flex: none; position: relative; z-index: 4; cursor: col-resize; transition: background .1s .1s; }
   .sash:hover, .sash.drag { background: var(--accent); }
+  .sash.off { pointer-events: none; }
   #app:not(.side) #sideSash { display: none; }
   #deskSash, #deskRSash { display: none; } #app.butler #deskSash { display: block; }
   @media (min-width: 1280px) { #app.butler #deskRSash { display: block; } }
@@ -273,6 +274,22 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .tab.on { background: var(--sel); color: var(--fgHi); }
   .group:not(.focus) .tab.on { color: var(--fg2); } /* the group in focus: its shown tab's title bright, as in VS Code */
   .tab.gone .tt { opacity: .6; text-decoration: line-through; }
+  /* a column collapsed (收起这一栏): a strip of its tabs' marks (a dot: answered or asking), one clicked opens it at that one */
+  .tabs .fold[hidden] { display: none; }
+  .group.min { flex: none !important; width: 44px; }
+  .group.min > .body, .group.min .tabs .split, .group.min .tabs .list { display: none; }
+  .group.min .tabs { flex: 1; height: auto; flex-direction: column; padding: 6px 0; gap: 4px; box-shadow: none; }
+  .group.min .fold { order: -1; }
+  .group.min .strip { flex: 1; flex-direction: column; align-self: center; overflow: hidden auto; }
+  .group.min .tab { width: 32px; height: 32px; padding: 0; justify-content: center; }
+  .group.min .tab .tt { font-size: 0; } .group.min .tab .tt .mk { margin: 0; } /* a Mac's: its mark alone */
+  .group.min .tab > .ac ~ .tt, .group.min .tab > .spin ~ .tt { display: none; } /* else its account's ring, or the spinner */
+  .group.min .tab > *, .group.min .tab .mk { pointer-events: none; } /* the mouse on a mark: the conversation's title, not the mark's */
+  .group.min .tab .x { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; visibility: hidden; pointer-events: none; background: none !important; }
+  .group.min .tab .x svg { display: none !important; }
+  .group.min .tab .x.ask, .group.min .tab .x.done { visibility: visible; }
+  .group.min .tab .x.ask::after, .group.min .tab .x.done::after { display: block !important; content: ''; width: 8px; height: 8px; border-radius: 4px; background: var(--orange); }
+  .group.min .tab .x.done::after { background: var(--green); }
   .tab .ac { width: 18px; height: 18px; font-size: 10px; }
   .x { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; visibility: hidden; color: var(--fg2); }
   .x svg { width: 14px; height: 14px; }
@@ -440,6 +457,16 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .crumbs .path { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .crumbs .path b { font-weight: 400; color: var(--fg); }
   .crumbs .dim { color: var(--fg3); }
+  /* its folder: a button, what's in it under it (.dirPop) while the mouse is on it; a Mac's own one, its name only */
+  .crumbs .dirBtn { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 24px; padding: 0 4px 0 6px; margin-left: -6px; border-radius: 6px; color: var(--fg); vertical-align: middle; }
+  .crumbs button.dirBtn:hover, .crumbs button.dirBtn.on { background: var(--hover); }
+  .crumbs .dirBtn svg { flex: none; width: 14px; height: 14px; color: var(--fg3); } .crumbs .dirBtn b { overflow: hidden; text-overflow: ellipsis; }
+  .dirPop { position: fixed; z-index: 35; display: flex; flex-direction: column; width: min(340px, calc(100vw - 16px)); max-height: min(60vh, 440px);
+    border-radius: 12px; background: var(--pop); border: 1px solid var(--popB); box-shadow: 0 10px 30px var(--shadow); overflow: hidden; }
+  .dirPop[hidden] { display: none; }
+  .dpHead { display: flex; flex: none; align-items: center; gap: 4px; min-height: 34px; padding: 0 8px 0 12px; font-size: 12px; color: var(--fg3); border-bottom: 1px solid var(--border); }
+  .dpHead .ico { margin-left: -6px; } .dpHead span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dpList { overflow: auto; padding: 4px 0; } .dpList .pvRow { padding: 6px 12px; font-size: 13px; } .dpNote { padding: 10px 12px; font-size: 13px; color: var(--fg2); }
   .seg { display: flex; gap: 2px; border-radius: 8px; padding: 2px; flex: none; margin-right: 2px; background: var(--tint); }
   .seg button { padding: 1px 9px; border-radius: 6px; font-size: 12px; color: var(--fg2); }
   .seg button.on { background: var(--bg); color: var(--fgHi); box-shadow: 0 1px 2px var(--lift), 0 0 0 1px var(--border); }
@@ -472,7 +499,10 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .hm.user .lab { display: block; font-size: 11px; font-weight: 600; margin-bottom: 2px; color: var(--fg2); }
   .hm.user.sys { align-self: center; max-width: min(92%, 680px); border-radius: 10px; background: color-mix(in srgb, var(--orange) 8%, transparent); border: 1px dashed color-mix(in srgb, var(--orange) 40%, transparent); color: var(--fg2); font-size: 12.5px; }
   .hm.user.sys .lab { color: var(--orange); }
-  .hm.user.cmd { align-self: center; margin-top: 8px; padding: 2px 8px; background: none; color: var(--fg3); font: 12px/1.5 var(--mono); }
+  /* a command (a skill, /model…): at the start of your message, a tag of its own */
+  .hm.user .slashTag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px 0 6px; border-radius: 7px; line-height: 24px; vertical-align: 1px;
+    font-size: 13.5px; font-weight: 500; color: var(--link); background: color-mix(in srgb, var(--link) 12%, transparent); }
+  .hm.user .slashTag svg { flex: none; width: 14px; height: 14px; }
   .hm.user.byb { background: color-mix(in srgb, #d97757 14%, var(--bg)); } .hm.user.byb .lab { color: #d97757; }
   .hm.user.pending { opacity: .5; }
   /* a file in a message of yours: a card, its kind (its ending) in a colored square, its name; it opens the file */
@@ -629,7 +659,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   /* a phone: one group; the side bar over it under the tab strip, the activity bar at the bottom */
   @media (max-width: 759px) {
     html, body { font-size: 15px; }
-    #status, .sash, .tabs .split, .row .aside { display: none !important; }
+    #status, .sash, .tabs .split, .tabs .fold, .row .aside, [data-pv=min] { display: none !important; }
     #act { position: fixed; z-index: 7; left: 0; right: 0; bottom: 0; width: auto; flex-direction: row; display: none; border: 0;
       border-top: 1px solid var(--border); background: var(--bar); padding-bottom: env(safe-area-inset-bottom); }
     #app.side #act { display: flex; }
@@ -768,10 +798,10 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pvTab > svg { flex: none; width: 14px; height: 14px; } .pvTab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pvTab .x { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--fg3); } .pvTab .x:hover { background: var(--hover); color: var(--fgHi); }
   .pvTab .x svg { width: 12px; height: 12px; }
-  .pvHead { display: flex; flex: none; align-items: center; gap: 6px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--border); }
+  .pvTab.on .x { visibility: visible; } @media (hover: hover) { .pvTab:hover .x { visibility: visible; } } /* as a conversation's tab: the shown one's ×, the others' on hover */
+  .pvHead { display: flex; flex: none; align-items: center; gap: 4px; height: 34px; padding: 0 6px; border-bottom: 1px solid var(--border); }
   .pvHead [hidden] { display: none; }
-  .pvName { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.3; }
-  .pvName b, .pvName small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pvName b { font-weight: 600; color: var(--fgHi); } .pvName small { font-size: 11.5px; color: var(--fg3); }
+  .pvPath { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--fg3); }
   .pvBodies { position: relative; flex: 1; min-height: 0; }
   .pvBody { position: absolute; inset: 0; overflow: auto; padding: 4px 0; } .pvBody[hidden] { display: none; }
   .pvBody iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
@@ -783,7 +813,16 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pvRow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 18px; text-align: left; color: var(--fg); }
   .pvRow:hover { background: var(--hover); } .pvRow svg { flex: none; width: 16px; height: 16px; color: var(--fg3); }
   .pvRow span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  @media (min-width: 760px) { #peek { border: 1px solid var(--cardB); border-radius: 12px; overflow: hidden; } }
+  @media (min-width: 760px) { #peek { border: 1px solid var(--cardB); border-radius: 12px; overflow: hidden; }
+    /* 收起: a strip at the window's edge, a mark for each tab (its × on hover), one clicked opens it again at that one */
+    #peek.min { width: 44px; }
+    #peek.min .pvHead, #peek.min .pvBodies { display: none; }
+    #peek.min .pvTabs { flex: 1; height: auto; flex-direction: column; padding: 6px 0; border: 0; }
+    #peek.min [data-pv=min] { order: -1; }
+    #peek.min .pvTabList { flex: 0 1 auto; flex-direction: column; align-items: center; overflow: hidden auto; }
+    #peek.min .pvTab { position: relative; width: 32px; padding: 0; justify-content: center; } #peek.min .pvTab span { display: none; }
+    #peek.min .pvTab .x { position: absolute; top: -3px; right: -3px; width: 16px; height: 16px; border-radius: 8px; visibility: hidden; background: var(--pop); box-shadow: 0 1px 3px var(--shadow); }
+    #peek.min .pvTab .x svg { width: 10px; height: 10px; } #peek.min .pvTab:hover .x { visibility: visible; } }
   @media (max-width: 759px) { #peek { position: fixed; inset: 0; z-index: 28; width: auto; border: 0; } #pvSash { display: none !important; } }
   #zoom img { max-width: 100%; max-height: 94vh; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,.5); background: var(--bar); }
   .toast { position: fixed; z-index: 30; right: 12px; bottom: 34px; max-width: min(420px, calc(100vw - 24px)); background: var(--pop); border: 1px solid var(--popB);
@@ -915,7 +954,8 @@ const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   grid: '<rect x="4.5" y="4.5" width="6" height="6" rx="1.2"/><rect x="13.5" y="4.5" width="6" height="6" rx="1.2"/><rect x="4.5" y="13.5" width="6" height="6" rx="1.2"/><rect x="13.5" y="13.5" width="6" height="6" rx="1.2"/>',
   more: '<circle cx="6" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/>',
-  file: '<path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4"/>',
+  file: '<path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4"/>', min: '<path d="M6 12h12"/>', max: '<rect x="5.5" y="5.5" width="13" height="13" rx="2"/>',
+  bolt: '<path d="M13 3.5L5.5 13H11l-1 7.5L18.5 11H13z"/>', down: '<path d="M8 10l4 4 4-4"/>',
   folder: '<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H19a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
   folderOpen: '<path d="M3.5 18V7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2H18a1.5 1.5 0 0 1 1.5 1.5v1.5"/><path d="M3.5 18l2.6-6.4a1 1 0 0 1 .9-.6h14l-2.7 6.4a1 1 0 0 1-.9.6z"/>' };
 // an account's mark, n from 1: its number in a ring, the ring as full as its 5-hour window has left, dashed while unread.
@@ -1021,10 +1061,10 @@ $('#app').classList.toggle('butler', butler);
 $('#act .logo .label').textContent = butler ? '退出管家' : '管家'; // reloaded in it: says what the spark does
 function save() { // not before the tabs are back: a first load that failed would forget them
   if (restored) try { localStorage.setItem('cm-layout', JSON.stringify({ side, sideOn, sideW, deskW, deskRW, pvW, secs, folded: [...folded], listMode, listKind, butler, focus: groups.indexOf(focusG),
-    groups: groups.map((g) => ({ size: g.size, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
+    groups: groups.map((g) => ({ size: g.size, min: g.min || undefined, active: g.active?.id, tabs: g.tabs.map((c) => c.id).filter(Boolean) })) })); } catch {}
 }
 const allConvs = () => groups.flatMap((g) => g.tabs), convOf = (id) => id && allConvs().find((c) => c.id === id);
-const shownConvs = () => (butler ? [peek ?? bConv] : groups.map((g) => g.active)).filter(Boolean); // live: in 管家, its conversation (or the one looked at) only
+const shownConvs = () => (butler ? [peek ?? bConv] : groups.filter((g) => !g.min).map((g) => g.active)).filter(Boolean); // live: in 管家, its conversation (or the one looked at) only
 
 // Like the island: one account to the end, a conversation continues on its own account. Only when that one has
 // under an hour left and the recommended one has more, a sheet asks first (accounts don't share their prompt
@@ -1463,7 +1503,7 @@ function setButler(on) {
   if (!on) { unpeek(); deskOn(false); }
   butler = on; $('#app').classList.toggle('butler', on);
   $('#act .logo .label').textContent = on ? '退出管家' : '管家'; $('#act .logo').title = on ? '长按退出管家' : '长按进入管家';
-  for (const g of groups) if (g.active) on ? g.active.sleep() : g.active.wake();
+  for (const g of groups) if (g.active && !g.min) on ? g.active.sleep() : g.active.wake(); // (a collapsed column's asleep all along)
   if (bConv) on ? bConv.wake() : bConv.sleep();
   if (on) { drawButler(); drawAsks(); drawDesk(); if (FINE) bConv?.focus(); } else { drawSide(); groups.forEach(drawTabs); if (FINE) focusG?.active?.focus(); }
   markRows(); save(); drawBDot();
@@ -2044,14 +2084,15 @@ function makeGroup(ref, left) { // after ref (or before it: left), or last
   const g = { tabs: [], active: null, size: 1, el: document.createElement('div') };
   g.el.className = 'group blank';
   g.el.innerHTML = `<div class="tabs"><button class="ico list" title="对话列表">${svg(I.list)}</button><div class="strip"></div>
-    <button class="ico split" title="向右拆分">${svg(I.split)}</button></div>
+    <button class="ico fold" title="收起这一栏" hidden>${svg(I.min)}</button><button class="ico split" title="向右拆分">${svg(I.split)}</button></div>
     <div class="body"><div class="hint">${SPARK}<div>在左边点一个对话，在这里打开</div>
       <div class="btns"><button class="btn primary" data-new>＋ 新对话</button><button class="btn" data-shut>关闭这一栏</button></div></div></div>`;
   g.strip = g.el.querySelector('.strip'); g.body = g.el.querySelector('.body');
-  g.el.addEventListener('pointerdown', () => { focusGroup(g); readShown(g); }, true);
+  g.el.addEventListener('pointerdown', () => { if (!g.min) { focusGroup(g); readShown(g); } }, true);
   g.el.addEventListener('wheel', () => readShown(g), { capture: true, passive: true });
   g.el.querySelector('.list').onclick = () => { sideOn = !sideOn; drawSide(); save(); };
   g.el.querySelector('.split').onclick = () => split(g);
+  g.el.querySelector('.fold').onclick = () => fold(g, !g.min);
   g.el.querySelector('[data-new]').onclick = newSheet;
   g.el.querySelector('[data-shut]').onclick = () => dropGroup(g);
   g.strip.onclick = (e) => {
@@ -2106,14 +2147,37 @@ function drawTabs(g) {
       ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct, '', c.gpt)}<span class="tt">${mark(c.gpt, c.acct, c.mac)}${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
   }).join('') || '<span class="brand">Claude 多账号</span>';
   g.el.classList.toggle('blank', !g.tabs.length);
+  foldBtns();
 }
+// 收起这一栏 on each column with tabs while another is open (展开 on a collapsed one)
+function foldBtns() {
+  const open = groups.filter((x) => !x.min).length;
+  for (const x of groups) {
+    const b = x.el.querySelector('.fold'), t = x.min ? '展开这一栏' : '收起这一栏';
+    b.hidden = !x.min && (!x.tabs.length || open < 2);
+    if (b.dataset.t !== t) { b.dataset.t = t; b.title = t; b.innerHTML = svg(x.min ? I.max : I.min); }
+  }
+}
+// 收起: a column as a strip of its tabs' marks, its conversation put behind as a tab behind another is (asleep, its Claude
+// going on: its terminal keeps its size, it notifies as one not looked at). Not an empty one, nor the last one open. 展开:
+// at its shown tab (a tab of it picked, or a conversation opened into it, opens it too: activate)
+function fold(g, on) {
+  if (on === !!g.min) return;
+  if (!on) { if (g.active) activate(g, g.active); return; }
+  if (!g.tabs.length || groups.filter((x) => !x.min).length < 2) return;
+  g.min = true; g.el.classList.add('min'); g.active?.sleep(); relayout(); drawTabs(g);
+  if (focusG === g) focusGroup(openNear(groups.indexOf(g)));
+  save();
+}
+const openNear = (i) => groups.filter((x) => !x.min).sort((a, b) => Math.abs(groups.indexOf(a) - i) - Math.abs(groups.indexOf(b) - i))[0]; // (a tie: the left one)
 function focusGroup(g) {
   if (focusG === g) return;
   focusG = g; groups.forEach((x) => x.el.classList.toggle('focus', x === g)); markRows(); save();
 }
-function activate(g, c, quiet) { // quiet: neither the focus nor a phone's list moves
+function activate(g, c, quiet) { // quiet: neither the focus nor a phone's list moves, nor a collapsed column opens (c waits in it)
+  if (g.min && !quiet) { g.min = false; g.el.classList.remove('min'); relayout(); }
   if (g.active !== c) { g.active?.sleep(); g.prev = g.active; g.active = c; }
-  c.wake(); drawTabs(g);
+  if (!g.min) c.wake(); drawTabs(g);
   g.strip.querySelector('.tab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   if (!quiet) { focusGroup(g); if (NARROW.matches && sideOn) { sideOn = false; drawSide(); } if (FINE) c.focus(); } // a computer: type away
   markRows(); save();
@@ -2125,7 +2189,7 @@ function addConv(g, c) {
 function closeConv(c) { // its Claude goes on (one started here runs in the service), as it did after 返回
   const g = c.g, i = g.tabs.indexOf(c);
   g.tabs.splice(i, 1); c.close();
-  if (g.active === c) { g.active = null; const n = g.tabs[Math.min(i, g.tabs.length - 1)]; if (n) activate(g, n); }
+  if (g.active === c) { g.active = null; const n = g.tabs[Math.min(i, g.tabs.length - 1)]; if (n) activate(g, n, g.min); } // (a collapsed column stays so)
   if (!g.tabs.length && groups.length > 1) dropGroup(g); else drawTabs(g);
   if (!allConvs().length) drawSide(); // a phone: back to the list
   markRows(); save();
@@ -2155,7 +2219,8 @@ function dropGroup(g) {
   if (groups.length < 2) return;
   const i = groups.indexOf(g);
   g.tabs.forEach((c) => c.close()); groups.splice(i, 1); g.el.remove(); relayout();
-  if (focusG === g) focusGroup(groups[Math.max(0, i - 1)]);
+  if (!groups.some((x) => !x.min)) fold(groups[Math.max(0, i - 1)], false); // the last one open gone: the one beside it opens
+  if (focusG === g) focusGroup(openNear(i - 0.5));
   save();
 }
 function relayout() { // a sash before each group but the first
@@ -2167,12 +2232,14 @@ function relayout() { // a sash before each group but the first
     if (!i) return;
     const L = groups[i - 1], s = document.createElement('div');
     s.className = 'sash'; g.el.before(s);
+    if (L.min || g.min) return s.classList.add('off'); // beside a collapsed column: a gap, nothing to drag
     dragSash(s, (x) => {
       const a = L.el.getBoundingClientRect(), w = a.width + g.el.getBoundingClientRect().width, sum = L.size + g.size;
       L.size = sum * Math.max(240, Math.min(w - 240, x - a.left)) / w; g.size = sum - L.size;
       L.el.style.flexGrow = L.size; g.el.style.flexGrow = g.size;
     });
   });
+  foldBtns();
 }
 function dragSash(el, move) {
   el.onpointerdown = (e) => {
@@ -2216,11 +2283,12 @@ function restore() {
     const ids = (sg.tabs ?? []).filter((id) => state.sessions.some((s) => s.id === id) && !convOf(id));
     if (!ids.length) continue;
     g = g ? makeGroup(g) : groups[0];
-    g.size = sg.size || 1;
+    g.size = sg.size || 1; g.min = !!sg.min; g.el.classList.toggle('min', g.min);
     for (const id of ids) { const s = state.sessions.find((x) => x.id === id), c = convFor(s); c.g = g; g.tabs.push(c); g.body.append(c.el); }
     activate(g, g.tabs.find((c) => c.id === sg.active) ?? g.tabs[0], true);
   }
-  relayout(); focusGroup(groups[Math.min(Math.max(0, saved.focus | 0), groups.length - 1)]); narrow();
+  relayout(); if (groups.every((x) => x.min)) fold(groups[0], false);
+  const f = groups[Math.min(Math.max(0, saved.focus | 0), groups.length - 1)]; focusGroup(f.min ? openNear(groups.indexOf(f)) : f); narrow();
   if (butler) for (const g of groups) g.active?.sleep(); // reloaded in 管家: they wait for the way back
 }
 // what a conversation notified, read once you look at it (the island drops it too)
@@ -2233,7 +2301,7 @@ function readNote(id) {
 // one that came while its conversation was already shown: read at once in the pane you're in (this window in front, the
 // conversation not behind a phone's list), and in a pane beside it once you touch that one (a click, the wheel)
 function readShown(g = focusG) {
-  if (!butler && document.visibilityState === 'visible' && document.hasFocus() && !(NARROW.matches && sideOn)) readNote(g?.active?.id);
+  if (!g?.min && !butler && document.visibilityState === 'visible' && document.hasFocus() && !(NARROW.matches && sideOn)) readNote(g?.active?.id);
 }
 
 // --- a conversation in a tab. One running in the web service (started or continued here) takes the size of the
@@ -2956,12 +3024,12 @@ function makeConv(body, title) {
   c.sync = () => { // from the list: its title and account; and where it runs
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null;
     if (s) { c.title = s.title; c.acct = s.pid ? s.acct + 1 : body.acct ?? s.acct + 1; }
-    const cwd = s?.cwd ?? body.dir ?? '', parts = cwd.split(/[\\/]/).filter(Boolean);
-    const dir = isButler({ cwd }) ? ['管家'] : parts.length > 3 ? ['…', ...parts.slice(-2)] : parts;
-    const where = c.ended ? '已结束' : key ? (kind === 'pc' ? '在电脑窗口里运行' : '在网页上运行') : c.started ? '连接中…' : '没有在运行';
-    $p('.path').innerHTML = dir.map((p, i) => i === dir.length - 1 ? `<b>${esc(p)}</b>` : esc(p)).join(' › ')
-      + ` <span class="dim">· ${c.mac ? esc(macName(c.mac)) : `${c.gpt ? 'GPT 账号 G' : '账号 '}${c.acct ?? '?'}`} · ${where}</span>`;
-    $p('.path').title = cwd;
+    // its folder: a button, what's in it shown while the mouse is on it (dirPop), a click opens it in 预览; a Mac's own
+    // folder (not one of this PC's: its files are there), its name only
+    const cwd = s?.cwd ?? body.dir ?? '', name = isButler({ cwd }) ? '管家' : base(cwd) || cwd, pc = /^[A-Za-z]:[\\/]/.test(cwd) && !isButler({ cwd });
+    const h = !cwd ? '' : pc ? `<button class="dirBtn" data-dir="${esc(cwd)}">${svg(I.folder)}<b>${esc(name)}</b>${svg(I.down)}</button>`
+      : `<span class="dirBtn" title="${esc(cwd)}">${svg(I.folder)}<b>${esc(name)}</b></span>`;
+    if ($p('.path').$h !== h) { $p('.path').$h = h; $p('.path').innerHTML = h; } // (drawn anew only when it changes: the mouse may be on it)
     // its screen says it's answering, the service has had it idle 20 s: this page's stream fell behind (a phone's, the
     // end of an answer never came) and is opened again, the screen rebuilt from the service's (once a minute at most)
     if (busyNow && s && !s.busy && shown && key && !c.ended && !c.gpt) {
@@ -3115,7 +3183,7 @@ function makeOai(id, title) {
   c.sync = () => {
     const s = c.id && state?.sessions.find((x) => x.id === c.id);
     if (s) c.title = s.title;
-    $p('.path').innerHTML = '<b>GPT 聊天</b> <span class="dim">· 用你的 OpenAI key，按用量计费</span>';
+    $p('.path').innerHTML = '<b>GPT 聊天</b>';
   };
   c.wake = () => {
     shown = true; el.classList.add('on'); readNote(c.id); c.sync(); goMode(); refresh();
@@ -3152,15 +3220,16 @@ const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s} 秒
 // (the page's /model, /effort, or one you typed), what the 管家 typed into a conversation (the service knows: by), a
 // thing handed to the 管家 from the 操作台
 function userHtml(m, mark) {
-  const t = m.text, [cls, lab, words] = t.startsWith('[系统通知]') ? ['sys', '系统通知', t.slice(6).trim()]
-    : /^\/[a-z][\w-]*(\s|$)/.test(t) && !t.includes('\n') ? ['cmd', '', t]
+  const t = m.text, cmd = /^\/[a-z][\w:-]*(?=\s|$)/.exec(t)?.[0]; // a command (a plugin's skill: plugin:skill)
+  const [cls, lab, words] = t.startsWith('[系统通知]') ? ['sys', '系统通知', t.slice(6).trim()]
+    : cmd ? ['', '', t.slice(cmd.length).trim()]
     : m.by === 'butler' ? ['byb', '管家发的', t]
     : t.startsWith(HAND) ? ['', '交代给管家', t.slice(HAND.length)] : ['', '', t];
   // a long one (a paste, a ticket): its first lines fading out, 「展开全部」 under them; that button's words from the CSS,
   // out of the bubble's text (停止 compares it with what was sent)
-  const long = cls !== 'cmd' && (words.split('\n').length > 12 || words.length > 800);
+  const long = words.split('\n').length > 12 || words.length > 800, tag = cmd ? `<span class="slashTag">${svg(I.bolt)}${esc(cmd)}</span>${words ? ' ' : ''}` : '';
   return `<div class="hm user${cls ? ' ' + cls : ''}${long ? ' long' : ''}"${mark}>${lab ? `<span class="lab">${lab}</span>` : ''}${long
-    ? `<div class="clip">${userBody(words, m.files)}</div><button class="more" data-more></button>` : userBody(words, m.files)}</div>`;
+    ? `<div class="clip">${tag}${userBody(words, m.files)}</div><button class="more" data-more></button>` : tag + userBody(words, m.files)}</div>`;
 }
 // A message's words, and its files (its 附件：name lines) as cards under them: the file's kind (its ending) in a colored
 // square, its name; a link that opens it once it's sent (files: their saved names, in order; one on its way has none).
@@ -3279,8 +3348,9 @@ const link = (m, words, u) => {
 // red as written (throwOnError: false); without KaTeX loaded, as written.
 const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]*?[^$\s])\$(?!\d)/g; // no lookbehind: an older Safari fails to read the whole script on one
 const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
-// a path of this PC as Claude writes one in `code` (D:\… or D:/…): opened by 预览 (preview)
-const PEEKABLE = /^[A-Za-z]:[\\/][^<>|?*\n]*$/;
+// a path of this PC as Claude writes one in `code` (D:\… or D:/…): opened by 预览 (preview). Not one with a stand-in in it
+// (runs/<id>: its < > here as &lt; &gt;, the code being escaped already) nor a "
+const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/;
 // as Codex shows one: its kind's mark and its name (a folder's: one ending in \ or /, or with no .ext), the whole path on hover
 const peekLink = (c) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || c, dir = /[\\/]$/.test(c) || !/\.\w{1,8}$/.test(n);
   return `<a class="peek" data-peek="${c}" title="${c}">${svg(dir ? I.folder : I.file)}${n}</a>`; };
@@ -3305,15 +3375,20 @@ function md(t) {
 // opened in turn (← one up). Esc, ✕ or a click outside closes it
 const OFFICE = /\.(pptx?|docx?|xlsx?|rtf)$/i, warmed = new Set();
 const peekWarm = (text) => {
-  for (const [, p] of String(text).matchAll(/`([A-Za-z]:[\\/][^`\n]*)`/g)) if (OFFICE.test(p) && !warmed.has(p)) { warmed.add(p); fetch('/api/peek?' + new URLSearchParams({ path: p, warm: 1 })).catch(() => {}); }
+  for (const [, p] of String(text).matchAll(/`([A-Za-z]:[\\/][^`\n<>|?*"]*)`/g)) if (OFFICE.test(p) && !warmed.has(p)) { warmed.add(p); fetch('/api/peek?' + new URLSearchParams({ path: p, warm: 1 })).catch(() => {}); }
 };
 const pv = { tabs: [], on: null, el: document.createElement('aside') }; // the tabs, each { p, body, dir, q }: a file's or a folder's
 const pvName = (p) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
+// a folder's folders (data-pvgo: gone into) and files (data-pvp: opened), as /api/dirs gives them
+const dirRows = (r) => { const at = r.path.replace(/[\\/]?$/, '\\');
+  return r.dirs.map((d) => `<button class="pvRow" data-pvgo="${esc(d)}">${svg(I.folder)}<span>${esc(base(d))}</span></button>`).join('')
+    + r.files.map((f) => `<button class="pvRow" data-pvp="${esc(at + f)}">${svg(I.file)}<span>${esc(f)}</span></button>`).join(''); };
 const pvUp = (p) => { const u = p.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, ''); return /^[A-Za-z]:$/.test(u) ? u + '\\' : u; };
 {
   pv.el.id = 'peek'; pv.el.hidden = true; pv.el.setAttribute('aria-label', '预览');
-  pv.el.innerHTML = `<div class="pvTabs"><div class="pvTabList" role="tablist"></div><button class="ico" data-pv="close" title="关闭预览">${svg(I.close, 2)}</button></div>
-    <div class="pvHead"><button class="ico" data-pv="up" title="上一级">${svg(I.back, 2)}</button><div class="pvName"><b></b><small></small></div>
+  pv.el.innerHTML = `<div class="pvTabs"><div class="pvTabList" role="tablist"></div><button class="ico" data-pv="min" title="收起预览">${svg(I.min)}</button>
+    <button class="ico" data-pv="close" title="关闭全部预览">${svg(I.close, 2)}</button></div>
+    <div class="pvHead"><button class="ico" data-pv="up" title="上一级">${svg(I.back, 2)}</button><span class="pvPath"></span>
     <a class="ico" data-pv="tab" target="_blank" rel="noopener" title="在新标签页打开">${svg(I.out)}</a></div><div class="pvBodies"></div>`;
   const sash = document.createElement('div'); sash.className = 'sash'; sash.id = 'pvSash'; sash.hidden = true; sash.title = '拖动调宽窄';
   $('#editor').after(sash, pv.el);
@@ -3326,16 +3401,22 @@ function preview(p) {
   if (!t) { t = { p, body: document.createElement('div'), dir: false, q: null }; t.body.className = 'pvBody'; pv.el.querySelector('.pvBodies').append(t.body); pv.tabs.push(t); pvLoad(t); }
   pvShow(t);
 }
-function pvShow(t) {
-  pv.on = t; pv.el.hidden = false; $('#pvSash').hidden = false;
+function pvShow(t, stay) { // stay: collapsed, it stays so (a tab closed there)
+  pv.on = t; pv.el.hidden = false; if (!stay) pvMin(false);
   for (const x of pv.tabs) x.body.hidden = x !== t; // the others kept as they are: a PDF isn't read again
   pvDraw();
   pv.el.querySelector('.pvTab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
+// 收起: the pane a strip of its tabs' marks at the window's edge, the conversations wide again; a mark (or a path in a
+// reply) clicked opens it again
+function pvMin(on) {
+  pv.el.classList.toggle('min', on); $('#pvSash').hidden = on;
+  const b = pv.el.querySelector('[data-pv=min]'); b.title = on ? '展开预览' : '收起预览'; b.innerHTML = svg(on ? I.max : I.min);
+}
 function pvDraw() {
   const t = pv.on, up = pvUp(t.p), tab = pv.el.querySelector('[data-pv=tab]');
   pv.el.querySelector('.pvTabList').innerHTML = pv.tabs.map((x, i) => `<button class="pvTab${x === t ? ' on' : ''}" role="tab" aria-selected="${x === t}" data-pvt="${i}" title="${esc(x.p)}">${svg(x.dir ? I.folder : I.file)}<span>${esc(pvName(x.p))}</span><i class="x" data-pvx="${i}" title="关闭">${svg(I.close, 2)}</i></button>`).join('');
-  pv.el.querySelector('.pvName b').textContent = pvName(t.p); pv.el.querySelector('.pvName small').textContent = t.p;
+  const at = pv.el.querySelector('.pvPath'); at.textContent = t.p; at.title = t.p;
   pv.el.querySelector('[data-pv=up]').hidden = !up || up === t.p;
   tab.hidden = !t.q; if (t.q) tab.href = t.q;
 }
@@ -3344,7 +3425,7 @@ function pvClose(t) {
   if (i < 0) return;
   pv.tabs.splice(i, 1); t.body.remove(); t.gen = -1;
   if (!pv.tabs.length) { pv.on = null; pv.el.hidden = true; $('#pvSash').hidden = true; pv.el.querySelector('.pvTabList').innerHTML = ''; return; }
-  if (pv.on === t) pvShow(pv.tabs[Math.min(i, pv.tabs.length - 1)]); else pvDraw();
+  if (pv.on === t) pvShow(pv.tabs[Math.min(i, pv.tabs.length - 1)], pv.el.classList.contains('min')); else pvDraw();
 }
 // a tab's path into its body: a folder's folders (gone into in the tab) and files (each opened in a tab of its own); a file
 // as the browser shows it, after asking what it is (an Office one's PDF begun meanwhile)
@@ -3355,9 +3436,7 @@ async function pvLoad(t) {
   if (gen !== t.gen) return;
   t.dir = !r.err;
   if (t.dir) {
-    const at = r.path.replace(/[\\/]?$/, '\\');
-    body.innerHTML = r.dirs.map((d) => `<button class="pvRow" data-pvgo="${esc(d)}">${svg(I.folder)}<span>${esc(d.split(/[\\/]/).pop())}</span></button>`).join('')
-      + r.files.map((f) => `<button class="pvRow" data-pvp="${esc(at + f)}">${svg(I.file)}<span>${esc(f)}</span></button>`).join('') || '<div class="pvWait">这个文件夹是空的</div>';
+    body.innerHTML = dirRows(r) || '<div class="pvWait">这个文件夹是空的</div>';
     if (r.files.some((f) => OFFICE.test(f))) fetch('/api/peek?' + new URLSearchParams({ path: r.path, warm: 1 })).catch(() => {}); // its Office files' PDFs made meanwhile
     if (pv.on === t) pvDraw();
     return;
@@ -3384,13 +3463,53 @@ pv.el.addEventListener('click', (e) => {
   const x = e.target.closest('[data-pvx]'); if (x) return pvClose(pv.tabs[+x.dataset.pvx]);
   const tb = e.target.closest('[data-pvt]'); if (tb) return pvShow(pv.tabs[+tb.dataset.pvt]);
   if (e.target.closest('[data-pv=close]')) { for (const t of [...pv.tabs]) pvClose(t); return; }
+  if (e.target.closest('[data-pv=min]')) return pvMin(!pv.el.classList.contains('min'));
   const go = e.target.closest('[data-pvgo]')?.dataset.pvgo ?? (e.target.closest('[data-pv=up]') && pvUp(pv.on.p)); // into a folder, or one up: in this tab
   if (go) { pv.on.p = go; pvLoad(pv.on); return pvDraw(); }
   const f = e.target.closest('[data-pvp]'); if (f) preview(f.dataset.pvp);
 });
+pv.el.addEventListener('mousedown', (e) => { if (e.button === 1 && e.target.closest('[data-pvt]')) e.preventDefault(); }); // a middle click closes, doesn't scroll
+pv.el.addEventListener('auxclick', (e) => { const t = e.target.closest('[data-pvt]'); if (t && e.button === 1) pvClose(pv.tabs[+t.dataset.pvt]); });
 // a phone's pane covers the page: Esc closes it (a computer's sits beside the conversation, where Esc stops Claude)
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && NARROW.matches && !pv.el.hidden) { e.preventDefault(); e.stopImmediatePropagation(); for (const t of [...pv.tabs]) pvClose(t); } }, true);
 document.addEventListener('click', (e) => { const c = e.target.closest('[data-peek]'); if (c) { e.preventDefault(); preview(c.dataset.peek); } });
+// a conversation's folder button: the mouse on it a moment, what's in it under it (a folder gone into there, ← back; a file
+// opened in 预览), gone once the mouse is off both; clicked, the folder itself in 预览. A phone's (no hover): a tap shows it
+const dp = { el: document.createElement('div'), btn: null, root: '', p: '', gen: 0, t: 0 };
+dp.el.className = 'dirPop'; dp.el.hidden = true; document.body.append(dp.el);
+function dpShow(b) {
+  if (dp.btn !== b) { dp.btn?.classList.remove('on'); dp.btn = b; b.classList.add('on'); dp.root = b.dataset.dir; dpGo(dp.root); }
+  dp.el.hidden = false;
+  const r = b.getBoundingClientRect();
+  dp.el.style.left = `${Math.max(8, Math.min(r.left, innerWidth - dp.el.offsetWidth - 8))}px`; dp.el.style.top = `${r.bottom + 4}px`;
+}
+function dpHide() { clearTimeout(dp.t); dp.el.hidden = true; dp.btn?.classList.remove('on'); dp.btn = null; dp.gen++; }
+async function dpGo(p) {
+  const gen = ++dp.gen; dp.p = p;
+  dp.el.innerHTML = `<div class="dpHead">${p !== dp.root ? `<button class="ico" data-dpup title="上一级">${svg(I.back, 2)}</button>` : ''}<span>${esc(p)}</span></div><div class="dpList"><div class="dpNote">正在读…</div></div>`;
+  const r = await fetch('/api/dirs?' + new URLSearchParams({ path: p })).then((x) => x.json()).catch(() => ({ err: '连不上网页服务' }));
+  if (gen !== dp.gen) return;
+  dp.el.querySelector('.dpList').innerHTML = r.err ? `<div class="dpNote">读不到这个文件夹：${esc(r.err)}</div>` : dirRows(r) || '<div class="dpNote">这个文件夹是空的</div>';
+}
+if (FINE) document.addEventListener('mouseover', (e) => {
+  const b = e.target.closest?.('button.dirBtn');
+  clearTimeout(dp.t);
+  if (b) { if (dp.btn !== b || dp.el.hidden) dp.t = setTimeout(() => dpShow(b), 250); }
+  else if (!dp.el.hidden && !dp.el.contains(e.target)) dp.t = setTimeout(dpHide, 300);
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button.dirBtn');
+  if (b) { if (FINE) { dpHide(); preview(b.dataset.dir); } else if (dp.btn === b && !dp.el.hidden) dpHide(); else dpShow(b); }
+  else if (!dp.el.hidden) dpHide(); // (a click in it doesn't come here)
+});
+dp.el.addEventListener('click', (e) => {
+  e.stopPropagation(); // what's clicked may be gone by the time the page's own click comes (a folder gone into)
+  const go = e.target.closest('[data-pvgo]')?.dataset.pvgo ?? (e.target.closest('[data-dpup]') && pvUp(dp.p));
+  if (go) return dpGo(go);
+  const f = e.target.closest('[data-pvp]'); if (f) { dpHide(); preview(f.dataset.pvp); }
+});
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && !dp.el.hidden) { e.preventDefault(); e.stopImmediatePropagation(); dpHide(); } }, true);
+addEventListener('resize', () => dp.el.hidden || dpHide());
 // 复制: a code block's code, or an answer as Claude wrote it (its Markdown). 展开全部 / 收起 a long message of yours
 // (folded again, kept in sight)
 document.addEventListener('click', (e) => {

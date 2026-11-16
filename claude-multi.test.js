@@ -476,6 +476,7 @@ if (SESSION0) {
   const pk = md('`D:\\论文 04\\图7.pptx` `D:/a/` `npm i` `/Users/me/x`');
   const lk = /^<a class="peek" data-peek="D:\\论文 04\\图7\.pptx" title="D:\\论文 04\\图7\.pptx">(<svg.*?<\/svg>)图7\.pptx<\/a> <a class="peek" data-peek="D:\/a\/" title="D:\/a\/">(<svg.*?<\/svg>)a<\/a> <code>npm i<\/code> <code>\/Users\/me\/x<\/code>$/.exec(pk);
   assert.ok(lk && lk[1] !== lk[2], pk); // a file's mark, a folder's
+  assert.equal(md('`C:/x/runs/<id>` `D:\\a "b"`'), '<code>C:/x/runs/&lt;id&gt;</code> <code>D:\\a &quot;b&quot;</code>'); // a stand-in (runs/<id>), a ": no path
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
