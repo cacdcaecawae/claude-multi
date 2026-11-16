@@ -2663,6 +2663,62 @@ const PEEK_TEXT = new Set([...TEXT_EXT, '', 'html', 'htm', 'svg', 'xml', 'css', 
 const RUNS = /\.(exe|com|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|ws|msi|msp|msc|lnk|scr|pif|hta|cpl|reg|inf|scf|jar|url|py|pyw|sh|appref-ms|application|gadget)$/i;
 const shellCmd = (f, how, dir) => dir ? ['explorer.exe', `"${f}"`] : how === 'with' ? ['rundll32.exe', `shell32.dll,OpenAs_RunDLL ${f}`] // (its path bare, as Windows' own "Open with" has it)
   : how === 'open' && !RUNS.test(f) ? ['explorer.exe', `"${f}"`] : ['explorer.exe', `/select,"${f}"`];
+// …then brought to the front: Windows keeps a window a background process opens (the service is one) behind, flashing in
+// the taskbar. FRONT_PS finds it (an Explorer window at CM_DIR; Windows' "Open with" chooser; else one titled with the
+// file's name, its own program's) and brings it up: the foreground's input borrowed, else an Alt press, else Alt+Tab's own
+// switch; what it did, said (set, alt, switch, no; none: no such window came)
+const FRONT_PS = `$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -TypeDefinition @'
+using System; using System.Text; using System.Runtime.InteropServices;
+public static class Fg {
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool on);
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int n);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] static extern void SwitchToThisWindow(IntPtr h, bool alt);
+  [DllImport("user32.dll")] static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+  public static IntPtr Find(string part, int pid) {
+    IntPtr hit = IntPtr.Zero;
+    EnumWindows((h, l) => { if (!IsWindowVisible(h)) return true; uint p; GetWindowThreadProcessId(h, out p);
+      var s = new StringBuilder(512); GetWindowText(h, s, 512);
+      if (pid > 0 ? p == (uint)pid : s.Length > 0 && s.ToString().IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0) { hit = h; return false; } return true; }, IntPtr.Zero);
+    return hit;
+  }
+  public static string Front(IntPtr h) {
+    if (IsIconic(h)) ShowWindow(h, 9);
+    uint p, me = GetCurrentThreadId(), fg = GetWindowThreadProcessId(GetForegroundWindow(), out p);
+    if (fg != me) AttachThreadInput(me, fg, true);
+    SetForegroundWindow(h); BringWindowToTop(h);
+    if (fg != me) AttachThreadInput(me, fg, false);
+    if (GetForegroundWindow() == h) return "set";
+    keybd_event(0x12, 0, 0, UIntPtr.Zero); SetForegroundWindow(h); keybd_event(0x12, 0, 2, UIntPtr.Zero);
+    if (GetForegroundWindow() == h) return "alt";
+    SwitchToThisWindow(h, true);
+    return GetForegroundWindow() == h ? "switch" : "no";
+  }
+}
+'@
+$p = $env:CM_PATH; $dir = $env:CM_DIR; $how = $env:CM_HOW
+$name = [IO.Path]::GetFileName($p); $stem = [IO.Path]::GetFileNameWithoutExtension($p)
+$sh = New-Object -ComObject Shell.Application
+$end = (Get-Date).AddSeconds($(if ($dir) { 8 } else { 20 })); $h = [IntPtr]::Zero
+while ((Get-Date) -lt $end -and $h -eq [IntPtr]::Zero) {
+  Start-Sleep -Milliseconds 200
+  if ($dir) { foreach ($w in $sh.Windows()) { try { if ($w.Document.Folder.Self.Path -eq $dir) { $h = [IntPtr][long]$w.HWND } } catch {} } }
+  elseif ($how -eq 'with') { foreach ($o in Get-Process OpenWith | Sort-Object StartTime -Descending) { $h = [Fg]::Find('', $o.Id); if ($h -ne [IntPtr]::Zero) { break } } }
+  else { $h = [Fg]::Find($name, 0); if ($h -eq [IntPtr]::Zero -and $stem.Length -ge 3) { $h = [Fg]::Find($stem, 0) } }
+}
+if ($h -eq [IntPtr]::Zero) { 'none' } else { [Fg]::Front($h) }
+`;
+const frontOf = (f, how, dir) => ({ CM_PATH: f, CM_HOW: how, CM_DIR: dir ? f : how === 'with' || (how === 'open' && !RUNS.test(f)) ? '' : path.dirname(f) });
 const OFFICE_KIND = { ppt: 'ppt', pptx: 'ppt', doc: 'doc', docx: 'doc', rtf: 'doc', xls: 'xls', xlsx: 'xls' };
 function peekHead(name, office = false) {
   const ext = path.extname(name).slice(1).toLowerCase(), type = office ? 'application/pdf' : PEEK_MEDIA[ext] ?? (PEEK_TEXT.has(ext) ? 'text/plain; charset=utf-8' : null);
@@ -3602,6 +3658,9 @@ async function web() {
       let dir; try { dir = fs.statSync(f).isDirectory(); } catch { throw new Error(`没有这个文件：${p}`); }
       const [exe, line] = shellCmd(f, how, dir);
       require('child_process').spawn(exe, [line], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).on('error', () => {}).unref();
+      const env = frontOf(f, how, dir); // (its window to the front: logged, to see what Windows let it do)
+      require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(FRONT_PS, 'utf16le').toString('base64')],
+        { env: { ...process.env, ...env }, windowsHide: true, encoding: 'utf8', timeout: 30000 }, (e, out) => log('shell_front', { how, dir, front: String(out || e?.message || '').trim().slice(-80) }));
       return { said: !dir && how === 'open' && RUNS.test(f) ? `${path.basename(f)} 是程序或脚本，没有运行它，在资源管理器里选中了它` : '' };
     },
     'POST /api/rename': (q, b) => {
@@ -4216,7 +4275,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { peekHead, peekPdf, slashKeep, shellCmd, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { peekHead, peekPdf, slashKeep, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

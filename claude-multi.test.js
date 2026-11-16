@@ -1572,7 +1572,23 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
 // path, time and size; two asks at once: one making), none half-made left, a failure said. `/`'s list: no internal,
 // removed or renamed ones
 {
-  const { peekHead, peekPdf, slashKeep, shellCmd } = require('./claude-multi');
+  const { peekHead, peekPdf, slashKeep, shellCmd, frontOf, FRONT_PS } = require('./claude-multi');
+  // …and the window it opens brought to the front: an Explorer window at the folder (a file shown in its own, a script
+  // never opened: shown); Windows' chooser; a file's own program's (no folder: found by its name)
+  assert.equal(frontOf('D:\\a b', 'open', true).CM_DIR, 'D:\\a b');
+  assert.equal(frontOf('D:\\a\\x.md', 'reveal', false).CM_DIR, 'D:\\a');
+  assert.equal(frontOf('D:\\a\\run.bat', 'open', false).CM_DIR, 'D:\\a');
+  assert.equal(frontOf('D:\\a\\x.md', 'open', false).CM_DIR, '');
+  assert.deepEqual(frontOf('D:\\x.md', 'with', false), { CM_PATH: 'D:\\x.md', CM_HOW: 'with', CM_DIR: '' });
+  assert.equal(frontOf('D:\\x.md', 'reveal', false).CM_DIR, 'D:\\'); // a drive's own file: Explorer at the drive
+  if (process.platform === 'win32') (async () => { // the script as PowerShell reads it (its C# too): no window asked for, none found
+    // at once (apart, not spawnSync: that would hold up the timed tests running beside it)
+    const ps = FRONT_PS.replace('AddSeconds($(if ($dir) { 8 } else { 20 }))', 'AddSeconds(1)');
+    const r = await new Promise((ok) => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')],
+      { env: { ...process.env, CM_PATH: 'Z:\\cmv-no-such\\x.cmvnone', CM_HOW: 'open', CM_DIR: '' }, encoding: 'utf8', windowsHide: true }, (e, out, err) => ok({ out, err })));
+    assert.equal(r.out.trim(), 'none', r.err);
+    console.log('front ok');
+  })();
   // 右键's opening on this PC: a file with its own program, Windows' chooser (its path bare), Explorer at it; a program or a
   // script never opened (it'd run): Explorer at it instead; a folder in Explorer; anything else asked: Explorer at it
   assert.deepEqual(shellCmd('D:\\论文 04\\图7.pptx', 'open', false), ['explorer.exe', '"D:\\论文 04\\图7.pptx"']);
