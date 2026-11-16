@@ -243,8 +243,17 @@ async function askApply(url, what, body) {
   return { status: r.status, ...j };
 }
 function joinAccount(j, key) {
-  const had = load().profiles.find((p) => p.api?.join === j.id);
+  const reg = load(), had = reg.profiles.find((p) => p.api?.join === j.id);
   if (had) return had;
+  // the same address again (its key taken back, applied anew): that account takes the new key, no second one
+  const same = reg.profiles.find((p) => p.api?.join && p.api.baseURL === j.url), own = same && path.join(same.configDir, 'settings.json');
+  if (same && fs.existsSync(own)) {
+    const s = JSON.parse(fs.readFileSync(own, 'utf8'));
+    fs.writeFileSync(own, JSON.stringify({ ...s, env: { ...s.env, ANTHROPIC_AUTH_TOKEN: key } }, null, 2) + '\n');
+    update((r) => { r.profiles.find((p) => p.id === same.id).api.join = j.id; });
+    log('profile_rejoined', { profile_id: same.id, base_url: j.url });
+    return same;
+  }
   let mine = {};
   try { mine = JSON.parse(fs.readFileSync(path.join(SHARED, 'settings.json'), 'utf8')); } catch {}
   const env = { ...mine.env, ANTHROPIC_BASE_URL: j.url, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1' };
@@ -257,24 +266,27 @@ function joinAccount(j, key) {
 }
 async function joinApply(b) {
   const url = String(b.url ?? '').trim().replace(/\/+$/, '');
-  if (!/^https?:\/\/[^\s/]+/.test(url)) throw Error('地址要以 https:// 开头');
+  if (!/^https?:\/\/[^\s/]+/.test(url)) throw Error('地址要以 https:// 或 http:// 开头');
   const r = await askApply(url, 'apply', { name: b.name, note: b.note });
   if (!r.ticket) throw Error(r.status === 404 ? '这个地址不收申请' : '接入地址没给回执');
   saveJoins([...readJoins().filter((j) => j.url !== url), // one per address: a new one replaces the last
     { id: require('crypto').randomBytes(6).toString('hex'), url, name: String(b.name ?? ''), ticket: r.ticket, state: 'pending', at: now() }]);
   return joinsShown();
 }
-// each one waiting, asked once; approved: its account, then the record dropped, then the service told it can forget the key
+// each one waiting, asked once; approved: its account, then the record dropped, then the service told it can forget the
+// key. How many became accounts.
 async function checkJoins() {
+  let made = 0;
   for (const j of readJoins().filter((x) => x.state === 'pending')) {
     let r;
     try { r = await askApply(j.url, 'apply/status', { ticket: j.ticket }); } catch { continue; } // away: asked again later
     if (r.state === 'approved' && r.key) {
-      joinAccount(j, r.key);
+      joinAccount(j, r.key); made++;
       editJoin(j.id, () => []);
       askApply(j.url, 'apply/done', { ticket: j.ticket }).catch(() => {});
     } else if (r.state !== 'pending') editJoin(j.id, (x) => [{ ...x, state: r.status === 404 || r.state === 'approved' ? 'gone' : r.state }]);
   }
+  return made;
 }
 
 function newProfile() {
@@ -3079,7 +3091,11 @@ async function web() {
     } catch (e) { log('ext_error', { err: e.message }); return null; }
   })();
   let joining = false; // 申请接入: one round of asking at a time (the minute's, or 设置 opened)
-  const joinRound = async () => { if (joining) return; joining = true; try { await checkJoins(); } finally { joining = false; } };
+  const joinRound = async () => { // a new account: 额度 read again on the page's next look, not up to a minute later
+    if (joining) return;
+    joining = true;
+    try { if (await checkJoins()) usageAt = 0; } finally { joining = false; }
+  };
   setInterval(() => { if (readJoins().some((j) => j.state === 'pending')) joinRound().catch(() => {}); }, 60000);
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;

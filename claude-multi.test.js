@@ -1742,6 +1742,11 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   await joinApply({ url, name: 'no' }); // a new one at the same address replaces the last
   await checkJoins();
   assert.deepEqual(readJoins().map((j) => [j.name, j.state]), [['no', 'rejected']]);
+  // applied there again and approved (a new application, a new key): the same account takes it, no second one
+  fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'join.json'), JSON.stringify([{ ...rec, id: 'again1', state: 'pending' }]));
+  assert.equal(await checkJoins(), 1);
+  assert.deepEqual([mine().length, mine()[0].id, mine()[0].api.join], [1, p.id, 'again1']);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8')).env.KEEP, '1');
   srv.close();
   console.log('申请接入 ok');
 })();
