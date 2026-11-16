@@ -466,7 +466,7 @@ if (SESSION0) {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
   const part = (re) => src.match(re)[0];
   const md = new Function('katex', `${part(/^const esc = .*$/m)}\n${part(/^const svg = .*$/m)}\n${part(/^const I = [\s\S]*?\};$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}
-    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^const PEEKABLE = .*$/m)}\n${part(/^const peekLink = [\s\S]*?\};$/m)}\n${part(/^const BLOCKS = .*$/m)}\n${part(/^const block = [\s\S]*?'<hr>';$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
+    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^const PEEKABLE = .*$/m)}\n${part(/^const peekLink = [\s\S]*?\};$/m)}\n${part(/^const BLOCKS = .*$/m)}\n${part(/^const block = [\s\S]*?'<hr>';$/m)}\n${part(/^const PV_LANG = .*$/m)}\n${part(/^const hl = [\s\S]*?^};$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
   // a list's items, a rule and a quote: blocks, each line's end taken with it; a - inside a line, or in code, stays
   const h = md('看\n- 一\n  - 二\n---\n> 引\n正文 - 不是\n```\n- 代码\n```');
   assert.ok(h.startsWith('看\n<span class="li" style="margin-left:0em">一</span><span class="li" style="margin-left:1em">二</span><hr><span class="bq">引</span>正文 - 不是\n'), h);

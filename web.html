@@ -814,11 +814,11 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pvRow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 18px; text-align: left; color: var(--fg); }
   .pvRow:hover { background: var(--hover); } .pvRow svg { flex: none; width: 16px; height: 16px; color: var(--fg3); }
   .pvRow span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* a text file: numbered lines (the numbers not copied with them), a long one scrolled to, 换行 wraps it; code in GitHub's
-     colors for its language (highlight.js's names for the parts) */
-  .pvCode { counter-reset: ln; width: max-content; min-width: 100%; padding: 6px 0 14px; font: 12.5px/1.6 var(--mono); color: var(--fg); tab-size: 4;
-    --hk: #ff7b72; --hs: #a5d6ff; --hn: #79c0ff; --ht: #d2a8ff; --hb: #ffa657; --hc: #8b949e; --hg: #7ee787; --hd: #ffa198; }
-  :root[data-theme=light] .pvCode { --hk: #cf222e; --hs: #0a3069; --hn: #0550ae; --ht: #8250df; --hb: #953800; --hc: #6e7781; --hg: #116329; --hd: #82071e; }
+  /* a text file: numbered lines (the numbers not copied with them), a long one scrolled to, 换行 wraps it. Code there and
+     in a reply's code block in GitHub's colors for its language (highlight.js's names for the parts) */
+  .pvCode { counter-reset: ln; width: max-content; min-width: 100%; padding: 6px 0 14px; font: 12.5px/1.6 var(--mono); color: var(--fg); tab-size: 4; }
+  :root { --hk: #ff7b72; --hs: #a5d6ff; --hn: #79c0ff; --ht: #d2a8ff; --hb: #ffa657; --hc: #8b949e; --hg: #7ee787; --hd: #ffa198; }
+  :root[data-theme=light] { --hk: #cf222e; --hs: #0a3069; --hn: #0550ae; --ht: #8250df; --hb: #953800; --hc: #6e7781; --hg: #116329; --hd: #82071e; }
   .pvCode .l { position: relative; min-height: 1.6em; padding: 0 18px 0 calc(var(--g) + 30px); white-space: pre; }
   .pvCode .l::before { counter-increment: ln; content: counter(ln); position: absolute; left: 14px; width: var(--g); text-align: right; color: var(--fg3); opacity: .75; user-select: none; }
   @media (hover: hover) { .pvCode .l:hover { background: var(--hover); } }
@@ -892,12 +892,12 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 <script src="/lib/@xterm/addon-webgl/lib/addon-webgl.js?0.19.0"></script>
 <script src="/lib/@xterm/addon-web-links/lib/addon-web-links.js?0.12.0"></script>
 <script src="/lib/katex/dist/katex.min.js?0.19.1"></script>
-<!-- code's colors in 预览, needed only once a file's opened: after the page (defer), in this order (a language after the core) -->
-<script defer src="/lib/@highlightjs/cdn-assets/highlight.min.js?11.12.0"></script>
-<script defer src="/lib/@highlightjs/cdn-assets/languages/matlab.min.js?11.12.0"></script>
-<script defer src="/lib/@highlightjs/cdn-assets/languages/powershell.min.js?11.12.0"></script>
-<script defer src="/lib/@highlightjs/cdn-assets/languages/dos.min.js?11.12.0"></script>
-<script defer src="/lib/@highlightjs/cdn-assets/languages/latex.min.js?11.12.0"></script>
+<!-- code's colors, in replies' code blocks and 预览 (before the page's script: a reply's drawn once, at once) -->
+<script src="/lib/@highlightjs/cdn-assets/highlight.min.js?11.12.0"></script>
+<script src="/lib/@highlightjs/cdn-assets/languages/matlab.min.js?11.12.0"></script>
+<script src="/lib/@highlightjs/cdn-assets/languages/powershell.min.js?11.12.0"></script>
+<script src="/lib/@highlightjs/cdn-assets/languages/dos.min.js?11.12.0"></script>
+<script src="/lib/@highlightjs/cdn-assets/languages/latex.min.js?11.12.0"></script>
 <script src="/screen.js"></script>
 <script>
 /* global parseScreen */ // screen.js
@@ -3390,9 +3390,19 @@ const peekLink = (c) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop(
 const BLOCKS = /^( *)[-*] (.*)\n?|^ *(?:-{3,}|\*{3,}) *(?:\n|$)|^&gt; ?(.*)\n?/gm;
 const block = (m, sp, li, q) => li != null ? `<span class="li" style="margin-left:${Math.min(sp.length, 8) * 0.5}em">${li}</span>`
   : q != null ? `<span class="bq">${q}</span>` : '<hr>';
+// code in its language's colors (highlight.js, by a name or an ending of its: py, cs, .m is MATLAB); as it is without one,
+// or past 1 MB (seconds)
+const PV_LANG = { __proto__: null, m: 'matlab', htm: 'html', vue: 'html', ipynb: 'json', cfg: 'ini', conf: 'ini', txt: '' };
+const hl = (s, lang) => {
+  lang = PV_LANG[lang] ?? lang;
+  if (lang && s.length < 1 << 20 && globalThis.hljs?.getLanguage(lang)) try { return hljs.highlight(s, { language: lang, ignoreIllegals: true }).value; } catch {}
+  return esc(s);
+};
 function md(t) {
-  return t.split(/```[^\n]*\n?/).map((p, i) => {
-    if (i % 2) return `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${esc(p.replace(/\n$/, ''))}</pre></div>`;
+  const ps = t.split(/```([^\n]*)\n?/); // words, a fence's word (an opening one's: the code's language), code, a fence's word, words…
+  return ps.map((p, i) => {
+    if (i % 2) return '';
+    if (i % 4) return `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${hl(p.replace(/\n$/, ''), /^\s*([\w#+.-]*)/.exec(ps[i - 1])[1].toLowerCase())}</pre></div>`;
     const math = [];
     p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
     return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (PEEKABLE.test(c) ? peekLink(c) : `<code>${c}</code>`))
@@ -3498,7 +3508,6 @@ async function pvLoad(t) {
 // a text file in the pane itself, as an editor shows it: its lines numbered, code in its language's colors (highlight.js,
 // by the file's ending: .m is MATLAB), a long line scrolled to (a text one's wrapped); a Markdown one as a reply shows it
 // (源码: as written). The service sends 2 MB at most
-const PV_LANG = { m: 'matlab', htm: 'html', vue: 'html', ipynb: 'json', cfg: 'ini', conf: 'ini', txt: '' };
 // a text file's bytes as words: UTF-16 by its mark (as PowerShell 5.1 writes), else UTF-8, else GBK (as MATLAB on a Chinese
 // Windows saves). Cut at 2 MB: its last character may be half, so UTF-8 not checked
 const textOf = (b) => {
@@ -3510,7 +3519,7 @@ async function pvText(t, q, gen) {
   if (gen !== t.gen) return;
   if (!b) { t.body.innerHTML = '<div class="pvWait">打不开这个文件</div>'; return; }
   const ext = /\.([^.\\/]+)$/.exec(t.p)?.[1].toLowerCase() ?? '', lang = PV_LANG[ext] ?? ext;
-  Object.assign(t, { text: textOf(b), cut: b.byteLength >= 2 << 20, md: ext === 'md' || ext === 'markdown', src: false, lang: window.hljs?.getLanguage(lang) ? lang : null });
+  Object.assign(t, { text: textOf(b), cut: b.byteLength >= 2 << 20, md: ext === 'md' || ext === 'markdown', src: false, lang: lang && window.hljs?.getLanguage(lang) ? lang : null });
   t.wrap = !t.lang || t.md;
   pvTextDraw(t);
   if (pv.on === t) pvDraw();
@@ -3518,8 +3527,7 @@ async function pvText(t, q, gen) {
 function pvTextDraw(t) {
   if (t.md && !t.src) { t.body.innerHTML = `<div class="hm pvMd">${md(t.text)}</div>`; return; }
   const s = t.text.replace(/\r\n?/g, '\n').replace(/\n$/, '');
-  let h = esc(s);
-  if (t.lang && s.length < 1 << 20) try { h = hljs.highlight(s, { language: t.lang, ignoreIllegals: true }).value; } catch {} // (past 1 MB: seconds)
+  const h = hl(s, t.lang);
   // a line each: the colors open at its end (a comment or a string over lines) closed there and opened again on the next
   const open = [], ls = h.split('\n').map((l) => {
     const at = open.join('');

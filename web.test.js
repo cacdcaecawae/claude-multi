@@ -247,6 +247,10 @@ const press = async (key, shift = false) => {
   await evaluate('closeConv(oc)'); oai = { items: [], busy: false };
   // a table's cell with math in it: the formula, not its stand-in
   assert.equal(await evaluate("(() => { const h = md('| 算法 | 复杂度 |\\n|---|---|\\n| 快排 | $O(n \\\\log n)$ |'); return [h.includes('|0|'), /<td>[^|]*katex/.test(h)].join(); })()"), 'false,true');
+  // a reply's code block in its language's colors, by the fence's word (py, m: MATLAB; none or an unknown one: as it is), its
+  // words as they are for 复制; one still coming in colored too
+  assert.equal(await evaluate("(() => { const k = (s) => { const d = document.createElement('div'); d.innerHTML = md(s); return [...d.querySelectorAll('pre')].map((p) => p.textContent + ':' + [...new Set([...p.querySelectorAll('span')].map((x) => x.className))].join('+')).join(' / ') + (d.querySelector('b') ? ' b' : ''); }; return [k('```python\\nimport os\\n```'), k('```\\nimport os\\n```'), k('a\\n```m\\nx = 1; % c\\n```\\n**b**'), k('```js\\nlet a'), k('```constructor\\nx\\n```')].join(' | '); })()"),
+    'import os:hljs-keyword | import os: | x = 1; % c:hljs-number+hljs-comment b | let a:hljs-keyword | x:');
   console.log('browser GPT draft kept while sending, math in a table ok');
   // 设置 as your avatar: your name's first character (none: the gear); the name in 设置
   state.user = '刘洋'; await evaluate('load()');
