@@ -2790,6 +2790,22 @@ function peekTurn() {
 // SDK asks (its initialize request: no model call; hooks and MCP servers off), its process let go of cleanly (killed, its
 // sessions\<pid>.json stayed). Not the internal ones (_…), nor those it says are gone or renamed.
 const slashKeep = (c) => !/^_/.test(c.name) && !/^\(removed\)|^Renamed to /.test(c.description ?? '');
+const slashOf = (cmds) => cmds.filter(slashKeep).map((c) => ({ name: c.name, desc: c.description ?? '', hint: c.argumentHint ?? '', also: c.aliases ?? [], builtin: !!c.builtin }));
+// `/` in a Mac's conversation: what Claude Code lists there (its skills, commands, plugins), asked the same way over ssh, on
+// the account its conversations there use (macEnv), in its folder there; its input ended after the ask (it answers, then
+// goes), its keychain unlocked as for anything run there, no session kept (its pid's file gone after)
+const SLASH_INIT = JSON.stringify({ type: 'control_request', request_id: 'cm', request: { subtype: 'initialize' } });
+const macSlashCmd = (m, cwd) => `security unlock-keychain -p "$LC_MACKC" >/dev/null 2>&1; unset LC_MACKC; { cd ${sq(cwd)} || cd ${macSh(m.dir)}; } 2>/dev/null; `
+  + `printf '%s\\n' ${sq(SLASH_INIT)} | ${macEnv(m)}~/.local/bin/claude -p --input-format stream-json --output-format stream-json --verbose --strict-mcp-config --no-session-persistence --settings '{"disableAllHooks":true}' & p=$!; `
+  + `wait $p; find ${m.config ? macSh(m.config) : '"$HOME/.claude"'}/sessions -name "$p.*" -delete 2>/dev/null; true`;
+// its answer among what it printed: the list, or why not (its error, else the ssh's last words)
+const slashParse = (r) => {
+  let j = null;
+  for (const l of String(r.out ?? '').split('\n')) if (l.includes('"control_response"')) try { j = JSON.parse(l); } catch {}
+  if (j?.response?.subtype !== 'success') throw new Error(j?.response?.error || String(r.err ?? '').trim().split('\n').pop() || `退出码 ${r.status}`);
+  return slashOf(j.response.response?.commands ?? []);
+};
+const macSlash = (m, cwd, timeout = 30000) => Promise.race([macRun(m, macSlashCmd(m, cwd)), new Promise((ok) => setTimeout(() => ok({ status: -1, out: '', err: '30 秒没回' }), timeout).unref())]).then(slashParse);
 function slashList(exe, configDir, cwd, timeout = 20000) {
   return new Promise((ok, no) => {
     const p = require('child_process').spawn(exe, ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--strict-mcp-config', '--settings', '{"disableAllHooks":true}'],
@@ -2803,7 +2819,7 @@ function slashList(exe, configDir, cwd, timeout = 20000) {
         let j; try { j = JSON.parse(buf.slice(0, i)); } catch { continue; }
         if (j.type !== 'control_response') continue;
         if (j.response?.subtype !== 'success') settle(new Error(j.response?.error || '没拿到命令列表'));
-        else settle(null, (j.response.response?.commands ?? []).filter(slashKeep).map((c) => ({ name: c.name, desc: c.description ?? '', hint: c.argumentHint ?? '', also: c.aliases ?? [], builtin: !!c.builtin })));
+        else settle(null, slashOf(j.response.response?.commands ?? []));
         p.stdin.end(); setTimeout(() => p.kill(), 5000).unref(); // it goes on its own at the end of its input
       }
     });
@@ -3541,13 +3557,22 @@ async function web() {
     // skills are the Mac's, and nothing is run there to ask)
     'GET /api/commands': async (q) => {
       const s = q.get('id') ? sessions().find((x) => x.id === q.get('id')) : null, reg = load(), mac = s ? s.mac : q.get('mac');
-      const p = mac ? reg.profiles[0] : reg.profiles[s ? s.acct : (Number(q.get('acct')) || 0) - 1], cwd = mac ? ROOT : s ? s.cwd : q.get('dir') ?? '';
-      if (s?.gpt || !p || !isDir(cwd)) return { commands: [] };
-      const k = `${p.configDir}|${path.resolve(cwd).toLowerCase()}`;
-      let c = slashCache.get(k);
-      if (!c || Date.now() - c.at > 600000) { c = { at: Date.now(), list: slashList(claudeExe, p.configDir, cwd) }; slashCache.set(k, c); c.list.catch(() => slashCache.delete(k)); }
-      const list = await c.list;
-      return mac ? { commands: list.filter((x) => x.builtin), note: 'Mac 上装的技能这里列不出，可以直接打完整的名字' } : { commands: list };
+      const got = (k, make) => { let c = slashCache.get(k); if (!c || Date.now() - c.at > 600000) { c = { at: Date.now(), list: make() }; slashCache.set(k, c); c.list.catch(() => slashCache.delete(k)); } return c.list; };
+      const pc = (p, cwd) => got(`${p.configDir}|${path.resolve(cwd).toLowerCase()}`, () => slashList(claudeExe, p.configDir, cwd));
+      if (s?.gpt) return { commands: [] };
+      if (mac) { // the Mac's own list; that Mac not answering: Claude Code's own commands, as listed here, and why
+        const m = macOf(mac, reg), at = s?.macCwd ?? m?.dir ?? '';
+        try { // (one without its own config dir, the Mac mini: its default account, the owner's to keep to: not run there)
+          if (!m) throw new Error('没有这台 Mac');
+          if (!m.config) throw new Error(`${m.label} 用的是那台 Mac 默认的账号，不在上面跑 Claude Code`);
+          return { commands: await got(`mac|${m.id}|${at}`, () => macSlash(m, at)) }; } catch (e) {
+          const list = reg.profiles[0] ? await pc(reg.profiles[0], ROOT).catch(() => []) : [];
+          return { commands: list.filter((x) => x.builtin), note: `没读到 Mac 上的命令和技能（${e.message}），这里只列内置命令；技能可以直接打完整的名字` };
+        }
+      }
+      const p = reg.profiles[s ? s.acct : (Number(q.get('acct')) || 0) - 1], cwd = s ? s.cwd : q.get('dir') ?? '';
+      if (!p || !isDir(cwd)) return { commands: [] };
+      return { commands: await pc(p, cwd) };
     },
     // your name, for the page's avatar (its first character; none: the gear), kept in the registry
     'POST /api/me': (q, b) => {
@@ -4275,7 +4300,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { peekHead, peekPdf, slashKeep, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

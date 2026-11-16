@@ -2398,7 +2398,11 @@ function makeConv(body, title) {
     const m = /^\/(\S*)$/.exec(line.value);
     if (!m || document.activeElement !== line) return void (slash.hidden = true); // (a draft put back: not while it's not typed in)
     if (c.gpt) { cmds = []; slashNote = 'GPT（Codex）对话的命令这里列不出，可以直接打完整的命令'; }
-    if (!cmds) { askCmds(); return void (slash.hidden = true); }
+    if (!cmds) { // asked for (a Mac's: from that Mac, the first time a few seconds: said meanwhile)
+      askCmds();
+      if (c.mac) { slash.innerHTML = '<div class="slashNote">正在从 Mac 读命令和技能…（第一次要几秒）</div>'; slash.hidden = false; } else slash.hidden = true;
+      return;
+    }
     const q = m[1].toLowerCase(), names = (x) => [x.name, ...(x.also ?? [])].map((n) => n.toLowerCase()), starts = (x) => names(x).some((n) => n.startsWith(q));
     if (q !== slashQ) { slashQ = q; picked = 0; }
     offered = [...cmds.filter(starts), ...cmds.filter((x) => !starts(x) && names(x).some((n) => n.includes(q)))].slice(0, 60); // by its name or another it goes by

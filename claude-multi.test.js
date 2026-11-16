@@ -1572,7 +1572,19 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
 // path, time and size; two asks at once: one making), none half-made left, a failure said. `/`'s list: no internal,
 // removed or renamed ones
 {
-  const { peekHead, peekPdf, slashKeep, shellCmd, frontOf, FRONT_PS } = require('./claude-multi');
+  const { peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, shellCmd, frontOf, FRONT_PS } = require('./claude-multi');
+  // `/` in a Mac's conversation: asked on that Mac, in its folder (its own folder if that's gone), on the account its
+  // conversations use; the answer found among what it printed, or why not
+  const mc = macSlashCmd({ id: 'm', dir: '~/work', config: '~/.claude-cm' }, "/Users/x/it's");
+  assert.ok(mc.includes(`cd '/Users/x/it'\\''s' || cd "$HOME"/'work'`), mc);
+  assert.ok(mc.includes(`printf '%s\\n' '{"type":"control_request","request_id":"cm","request":{"subtype":"initialize"}}' | CLAUDE_CONFIG_DIR="$HOME"/'.claude-cm' ~/.local/bin/claude -p --input-format stream-json`), mc);
+  assert.ok(mc.includes(`find "$HOME"/'.claude-cm'/sessions -name "$p.*" -delete`) && mc.includes('--no-session-persistence') && mc.startsWith('security unlock-keychain'), mc);
+  assert.ok(macSlashCmd({ id: 'm', dir: '~/w' }, '/w').includes(`find "$HOME/.claude"/sessions`));
+  const ans = (cmds) => JSON.stringify({ type: 'control_response', response: { subtype: 'success', response: { commands: cmds } } });
+  assert.deepEqual(slashParse({ out: `{"type":"system"}\n${ans([{ name: 'maintain-formal-verification-skill', description: 'x' }, { name: '_hidden' }])}\n` }),
+    [{ name: 'maintain-formal-verification-skill', desc: 'x', hint: '', also: [], builtin: false }]);
+  assert.throws(() => slashParse({ status: 255, out: '', err: 'ssh: connect to host x port 22: Connection refused\n' }), /Connection refused/);
+  assert.throws(() => slashParse({ status: -1, out: '', err: '30 秒没回' }), /30 秒没回/);
   // …and the window it opens brought to the front: an Explorer window at the folder (a file shown in its own, a script
   // never opened: shown); Windows' chooser; a file's own program's (no folder: found by its name)
   assert.equal(frontOf('D:\\a b', 'open', true).CM_DIR, 'D:\\a b');
