@@ -999,6 +999,7 @@ const ac = (n, cls = '', gpt = false) => {
     return `<i class="ac g${cls}${left == null ? ' nq' : ''}" style="--c:var(--gpt);--p:${left ?? 0}" title="${esc(tip)}">G${n}</i>`;
   }
   const a = state?.usage?.accounts?.[n - 1], w = !a?.err && a?.windows?.find((x) => x.k === 'five_hour');
+  if (a?.api) return `<i class="ac${cls}" style="--c:${ACCT[(n - 1) % ACCT.length]};--p:100" title="${esc(`账号 ${n} · ${a.label}：API，按用量计费，没有额度窗口`)}">${n}</i>`; // (本地代理)
   const left = w ? Math.max(0, 100 - w.pct) : null;
   const tip = left == null ? `账号 ${n} · 额度没读到` : `账号 ${n} · 5 小时额度还剩 ${left}%${w.reset ? `（${w.reset}后重置）` : ''}`;
   return `<i class="ac${cls}${left == null ? ' nq' : ''}" style="--c:${ACCT[(n - 1) % ACCT.length]};--p:${left ?? 0}" title="${esc(tip)}">${n}</i>`;
@@ -1101,7 +1102,7 @@ const shownConvs = () => (butler ? [peek ?? bConv] : groups.filter((g) => !g.min
 function pickAcct(s) {
   if (s.gpt) return Promise.resolve(s.acct + 1); // a GPT one: its own account (it can't change)
   const u = state?.usage, a = u?.accounts?.[s.acct], b = u?.accounts?.[u?.rec];
-  if (!u || u.rec == null || u.rec === s.acct || !a || a.err || a.runway >= 1 || !b || b.runway <= a.runway) return Promise.resolve(s.acct + 1);
+  if (!u || u.rec == null || u.rec === s.acct || !a || a.err || a.api || a.runway >= 1 || !b || b.runway <= a.runway) return Promise.resolve(s.acct + 1);
   const own = s.acct + 1, other = u.rec + 1;
   return new Promise((done) => {
     $('#sheetIn').innerHTML = `<div class="stitle">换个账号继续？</div>
@@ -1607,7 +1608,7 @@ function drawButler() {
 // the 管家's models, and the accounts as the choices show them
 const MODELS = [['sonnet', 'Sonnet', '日常够用，省额度'], ['opus', 'Opus', '更聪明，额度用得多'], ['haiku', 'Haiku', '最快最省']];
 const modelName = (m) => MODELS.find(([v]) => v === m)?.[1] ?? m ?? '模型';
-const acctOpts = () => (state?.usage?.accounts ?? []).map((a, i) => ({ v: i + 1, label: `账号 ${i + 1}`, sub: a.err ? '读不到额度' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满' }));
+const acctOpts = () => (state?.usage?.accounts ?? []).map((a, i) => ({ v: i + 1, label: `账号 ${i + 1}`, sub: a.api ? '按用量计费' : a.err ? '读不到额度' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满' }));
 let startAcct = 0; // the account picked on its start page (0: the recommended one)
 async function setButlerModel(m) { await post('/api/butler-model', { model: m }); state.butlerModel = m; }
 // its thinking effort (Claude Code's levels); Claude's own when none is set: xhigh
@@ -1748,7 +1749,7 @@ function drawDesk() {
   head('deskAcct', '账号', !u.open ? shut(u) : ra ? `推荐 ${u.rec + 1} · 可连续用 ${ra.runway}h` : '');
   $('#deskAcct').html = u.accounts?.length ? `${today ? `<div class="m tot">今天共 ${fmtTok(all(today))} token</div>` : ''}${u.accounts.map((a, i) => {
     const on = state.sessions.filter((x) => x.pid && !x.gpt && x.acct === i).length; // a GPT one's acct is its G number
-    return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="pill g">推荐</span>' : ''}<span class="grow"></span><span class="pill ${a.err ? '' : a.runway >= 2 ? 'g' : a.runway > 0 ? 'o' : 'r'}">${a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
+    return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="pill g">推荐</span>' : ''}<span class="grow"></span><span class="pill ${a.err || a.api ? '' : a.runway >= 2 ? 'g' : a.runway > 0 ? 'o' : 'r'}">${a.api ? '按用量计费' : a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
       ${a.err ? '' : (a.windows ?? []).filter((w) => w.k === 'five_hour' || w.k === 'seven_day').map((w) => gauge(w.k === 'five_hour' ? '5 小时' : '7 天', w.pct, `${w.pct}% · ${esc(w.reset)}后重置`)).join('')}
       ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · <b>${about(today.by[i].usd)}</b></div>` : ''}
       ${on ? `<span class="pill b">${on} 个对话在用</span>` : '<div class="m">没有对话在用</div>'}</div>`;
@@ -1887,7 +1888,8 @@ function renderUsage() {
     <div data-machine="here">${machineRows('here')}</div>
     ${u.accounts.map((a, i) => `<div class="card"><div class="cardHead">${ac(i + 1)}<b>账号 ${i + 1}</b>
       <span class="m grow">${esc(a.label)}</span>${renew(a.sub)}${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
-      ${a.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(a.err)}</div>` : `
+      ${a.api ? '<div class="m" style="margin-top:4px">API，按用量计费，没有 5 小时和 7 天额度</div>'
+        : a.err ? `<div class="m" style="color:var(--orange);margin-top:6px;white-space:normal">${esc(a.err)}</div>` : `
       <div class="m" style="margin-top:4px">可连续用 ${a.runway} 小时</div>
       ${a.windows.map(winRow).join('')}`}</div>`).join('')}
     ${(u.macs ?? []).map((m) => `<div class="card"><div class="cardHead">${mark(false, 0, m.id)}<b>${esc(m.label)}</b><span class="m grow">${esc(m.dir)}</span>${m.plan ? `<span class="m">${esc(m.plan)}</span>` : ''}</div>
@@ -2032,7 +2034,7 @@ function newSheet() {
     const gpt = gptOn && !chat, oai = gptOn && chat, mac = gptOn ? null : macOf(acct) ?? null;
     const accts = gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
       : [...u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
-        账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`),
+        账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.api ? ' · 按用量计费' : a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`),
         ...(state.macs ?? []).map((m) => `<button class="opt ${mac?.id === m.id ? 'on' : ''}" data-a="${esc(m.id)}">${esc(m.label)}</button>`)];
     $('#sheetIn').innerHTML = `<div class="stitle">新对话</div>
       ${gp.length || state.oai ? `<div class="seg kind">${[['', 'Claude'], ['1', 'GPT']].map(([v, l]) => `<button data-g="${v}"${!!v === gptOn ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : ''}
@@ -2826,7 +2828,7 @@ function makeConv(body, title) {
     const me = state?.sessions.find(isButler), accts = state?.usage?.accounts ?? [];
     const draw = () => {
       const cur = c.acct ?? (me ? me.acct + 1 : 0), m = state?.butlerModel ?? MODELS.find(([, l]) => (me?.line?.model ?? '').startsWith(l))?.[0];
-      pop.innerHTML = `<div class="h">账号</div><div class="seg">${accts.map((a, i) => `<button class="${i + 1 === cur ? 'on' : ''}" data-ba="${i + 1}">账号 ${i + 1}<small>${a.err ? '读不到' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满'}${state.usage.rec === i ? ' · 推荐' : ''}</small></button>`).join('')}</div>
+      pop.innerHTML = `<div class="h">账号</div><div class="seg">${accts.map((a, i) => `<button class="${i + 1 === cur ? 'on' : ''}" data-ba="${i + 1}">账号 ${i + 1}<small>${a.api ? '按用量计费' : a.err ? '读不到' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满'}${state.usage.rec === i ? ' · 推荐' : ''}</small></button>`).join('')}</div>
         <div class="h">模型</div><div class="seg">${MODELS.map(([v, l, sub]) => `<button class="${v === m ? 'on' : ''}" data-bm="${v}" title="${esc(sub)}">${l}</button>`).join('')}</div>
         ${effortRow(EFFORTS, effortOf(me))}`;
       effortSlide(pop, EFFORTS, async (v, l) => {
@@ -2865,7 +2867,7 @@ function makeConv(body, title) {
     const draw = () => {
       $('#sheetIn').innerHTML = `<div class="stitle">换账号继续</div><div class="m" style="margin-top:4px">${esc(c.title)}</div>
         <div class="m" style="margin-top:14px">换到</div><div class="opts">${accts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}"${i === cur ? ' disabled' : ''}>
-          账号 ${i + 1}<small>${i === cur ? '当前' : a.err ? '读不到额度' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满'}${rec === i && i !== cur ? ' · 推荐' : ''}</small></button>`).join('')}</div>
+          账号 ${i + 1}<small>${i === cur ? '当前' : a.api ? '按用量计费' : a.err ? '读不到额度' : a.runway > 0 ? `可用 ${a.runway}h` : '已用满'}${rec === i && i !== cur ? ' · 推荐' : ''}</small></button>`).join('')}</div>
         ${busyNow ? `<div class="m">它正在回答</div><div class="opts"><button class="opt ${now ? '' : 'on'}" data-now="">答完再换</button><button class="opt ${now ? 'on' : ''}" data-now="1">立即换</button></div>` : ''}
         <div class="btns" style="margin-top:16px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="swapGo" style="flex:2">换到账号 ${acct}</button></div>`;
       document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));

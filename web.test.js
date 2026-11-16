@@ -253,6 +253,13 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate("(() => { const k = (s) => { const d = document.createElement('div'); d.innerHTML = md(s); return [...d.querySelectorAll('pre')].map((p) => p.textContent + ':' + [...new Set([...p.querySelectorAll('span')].map((x) => x.className))].join('+')).join(' / ') + (d.querySelector('b') ? ' b' : ''); }; return [k('```python\\nimport os\\n```'), k('```\\nimport os\\n```'), k('a\\n```m\\nx = 1; % c\\n```\\n**b**'), k('```js\\nlet a'), k('```constructor\\nx\\n```'), k('```py\\nif a < b: print(f(x))\\n```'), k('```m\\ny(i) = 1;\\n```')].join(' | '); })()"),
     'import os:hljs-keyword flow+hl-var | import os: | x = 1; % c:hl-var+hljs-number+hljs-comment b | let a:hljs-keyword+hl-var | x:'
     + ' | if a < b: print(f(x)):hljs-keyword flow+hl-var+hljs-built_in hl-call+hl-call | y(i) = 1;:hl-var+hljs-built_in+hljs-number');
+  // an API account (本地代理, no quota to read): its ring full and saying so, 按用量计费 where an account's hours would be (not
+  // 已用满), and a conversation on it not offered another account
+  assert.equal(await evaluate(`(async () => {
+    const keep = JSON.stringify(state.usage), u = state.usage;
+    u.accounts = [{ label: 'a@x', windows: [], runway: 0.5 }, { label: '本地代理', api: true, err: null, runway: null, windows: [] }, { label: 'b@x', windows: [], runway: 3 }]; u.rec = 2; u.open = true;
+    const r = ac(2), out = [r.includes('--p:100') && !r.includes(' nq'), /本地代理：API，按用量计费/.test(r), acctOpts().map((o) => o.sub).join(','), await pickAcct({ acct: 1 })];
+    state.usage = JSON.parse(keep); return out.join(' | '); })()`), 'true | true | 可用 0.5h,按用量计费,可用 3h | 2');
   console.log('browser GPT draft kept while sending, math in a table ok');
   // 设置 as your avatar: your name's first character (none: the gear); the name in 设置
   state.user = '刘洋'; await evaluate('load()');

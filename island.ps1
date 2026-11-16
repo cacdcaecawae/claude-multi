@@ -557,7 +557,8 @@ function Render {
       if ($i -eq $d.rec) { continue }
       if ($first) { [void]$PillAccts.Children.Add((X "<Border $ns Width='1' Height='14' Background='#33FFFFFF' Margin='14,0,12,0' VerticalAlignment='Center'/>")) }
       $p = Pct5 $all[$i]
-      $num = if ($all[$i].err) { "<TextBlock Text='—' FontSize='11' Foreground='#73FFFFFF' Margin='6,0,0,0' VerticalAlignment='Center'/>" }
+      $num = if ($all[$i].api) { "<TextBlock Text='API' FontSize='11' Foreground='#73FFFFFF' Margin='6,0,0,0' VerticalAlignment='Center'/>" } # 本地代理: no window to show
+        elseif ($all[$i].err) { "<TextBlock Text='—' FontSize='11' Foreground='#73FFFFFF' Margin='6,0,0,0' VerticalAlignment='Center'/>" }
         else { "$(Bar $p 36 4 '6,0,0,0' 0.7)<TextBlock Text='$p%' FontSize='11' Foreground='#8CFFFFFF' Margin='6,0,0,0' VerticalAlignment='Center'/>" }
       [void]$PillAccts.Children.Add((X ("<StackPanel $ns Orientation='Horizontal' Margin='$(if ($first) { 0 } else { 12 }),0,0,0'>" +
         "<TextBlock Text='$($i + 1)' ToolTip='$(Esc $all[$i].label)' FontSize='12' Foreground='#73FFFFFF' VerticalAlignment='Center'/>$num</StackPanel>")))
@@ -593,9 +594,10 @@ function Render {
     # the rest sit on a fainter card in greyer text with a small launch icon.
     $a = $all[$i]; $rec = $i -eq $d.rec
     $accent = if ($d.open) { '30D158' } else { 'FF9F0A' }
-    $right = if ($a.err) { '' } elseif ($rec -and -not $d.open) { "$($d.ready)后恢复" } elseif ($a.runway -gt 0) { "可连续用 $($a.runway) 小时" } else { '已用满' }
-    $rightFg = if ($rec) { "#$accent" } elseif ($a.runway -gt 0) { '#8CFFFFFF' } else { '#B3FF453A' }
-    $lines = if ($a.err) { "<TextBlock Text='$(Esc $a.err)' Margin='0,8,0,0' FontSize='11' Foreground='#B3FFD60A' TextWrapping='Wrap'/>" } else {
+    $right = if ($a.api) { '按用量计费' } elseif ($a.err) { '' } elseif ($rec -and -not $d.open) { "$($d.ready)后恢复" } elseif ($a.runway -gt 0) { "可连续用 $($a.runway) 小时" } else { '已用满' }
+    $rightFg = if ($rec) { "#$accent" } elseif ($a.api -or $a.runway -gt 0) { '#8CFFFFFF' } else { '#B3FF453A' }
+    $lines = if ($a.api) { "<TextBlock Text='API，没有 5 小时和 7 天额度' Margin='0,8,0,0' FontSize='11' Foreground='#8CFFFFFF' TextWrapping='Wrap'/>" }
+      elseif ($a.err) { "<TextBlock Text='$(Esc $a.err)' Margin='0,8,0,0' FontSize='11' Foreground='#B3FFD60A' TextWrapping='Wrap'/>" } else {
       foreach ($w in $a.windows) {
         $main = $w.k -eq 'five_hour'
         $reset = if ($w.reset) { "$($w.reset)后重置" } else { '' }
@@ -984,7 +986,7 @@ function Pick-Account($s) {
   $own = [int]$s.acct + 1; $u = $script:data
   if (-not $u -or $null -eq $u.rec -or [int]$u.rec -eq [int]$s.acct) { return $own }
   $a = $u.accounts[$s.acct]; $b = $u.accounts[$u.rec]
-  if ($a.err -or $a.runway -ge 1 -or $b.runway -le $a.runway) { return $own }
+  if ($a.err -or $a.api -or $a.runway -ge 1 -or $b.runway -le $a.runway) { return $own } # an API one never runs out
   Ask-Account $s $own ([int]$u.rec + 1)
 }
 # Accounts don't share their prompt cache, so the other one reads the whole conversation in again on its
@@ -1155,7 +1157,7 @@ function Draw-NewBar {
   if ($accs.Count + $gs.Count -lt 2) { return }
   $chips = @(for ($i = 0; $i -lt $accs.Count; $i++) {
     $a = $accs[$i]
-    $note = if ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
+    $note = if ($a.api) { '按用量计费' } elseif ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
     @{ tag = $i + 1; text = "账号 $($i + 1)"; note = $note; tip = $a.label }
   }) + @(for ($i = 0; $i -lt $gs.Count; $i++) { # the GPT accounts, by how much of their most used window is left
     $w = @($gs[$i].windows | Sort-Object { $_.pct } -Descending)[0]
@@ -1919,7 +1921,7 @@ function Pick-Switch($s) {
   $first = if ($rec -ge 0 -and $rec -ne $own) { $rec + 1 } else { ($own + 1) % $accs.Count + 1 }
   $chips = @(for ($i = 0; $i -lt $accs.Count; $i++) {
     $a = $accs[$i]
-    $note = if ($i -eq $own) { '当前' } elseif ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
+    $note = if ($i -eq $own) { '当前' } elseif ($a.api) { '按用量计费' } elseif ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
     if ($i -eq $rec -and $i -ne $own) { $note += ' · 推荐' }
     Chip-Xaml ($i + 1) "账号 $($i + 1)" $note ($i -eq $own)
   }) -join ''

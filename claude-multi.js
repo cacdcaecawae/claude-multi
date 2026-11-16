@@ -336,6 +336,7 @@ function list() {
 // Same endpoint /usage uses (found in claude.exe, internal, may change). Token stays in memory,
 // no refresh: refreshing would race a running Claude writing the same .credentials.json.
 async function fetchUsage(p) {
+  if (p.api) return { api: true }; // an API account (本地代理): billed by what it uses, no 5-hour or weekly window to read
   let c;
   try { c = JSON.parse(fs.readFileSync(path.join(p.configDir, '.credentials.json'), 'utf8')).claudeAiOauth; } catch {}
   if (!c?.accessToken) return { err: '未找到登录凭据' };
@@ -411,6 +412,7 @@ async function warmup() {
   console.log(`\n  ${c(1, '预热 5 小时窗口')}\n`);
   for (const [i, p] of reg.profiles.entries()) {
     const head = `  ${i + 1}. ${pad(p.label, lw)}  `;
+    if (before[i].api) { console.log(`${head}${c(2, 'API 账号，没有 5 小时窗口，跳过')}`); continue; }
     if (running(before[i])) {
       console.log(`${head}${c(2, `已在计时，${until(before[i].u.five_hour.resets_at)}后重置，跳过`)}`);
       continue;
@@ -2092,7 +2094,7 @@ async function usageState(reg = load(), { macFresh = false } = {}) {
   const cols = WINDOWS.filter(([k]) => !k.startsWith('seven_day_') || ok.some((r) => r.u[k]?.utilization));
   const json = { rec: rec?.i ?? null, open: open.length > 0,
     ready: !open.length && rec ? until(readyAt(rec.u)) : null,
-    accounts: reg.profiles.map((p, i) => ({ label: p.label, dir: p.configDir, err: res[i].err ?? null,
+    accounts: reg.profiles.map((p, i) => ({ label: p.label, dir: p.configDir, err: res[i].err ?? null, api: !!res[i].api,
       runway: res[i].u ? Math.round(runway(res[i].u) * 10) / 10 : null,
       windows: cols.filter(([k]) => res[i].u?.[k]).map(([k]) => ({ k, pct: Math.round(res[i].u[k].utilization),
         reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })), sub: subscription(p, states[i]),
@@ -2164,7 +2166,7 @@ async function usage(args) {
   reg.profiles.forEach((p, i) => {
     const mark = p.id === reg.active ? '*' : ' ';
     const tag = rec?.i === i ? '  ' + c('1;32', open.length ? '← 推荐' : '← 最早恢复') : '';
-    const cells = res[i].err ? c(33, res[i].err) : cols.map(([k]) => cell(res[i].u[k])).join('   ');
+    const cells = res[i].api ? c(2, 'API：没有额度窗口，按用量计费') : res[i].err ? c(33, res[i].err) : cols.map(([k]) => cell(res[i].u[k])).join('   ');
     console.log(`  ${i + 1}. ${mark} ${c(1, pad(p.label, lw))}  ${c(2, pad(p.subscriptionType ?? '', pw))}   ${cells}${tag}`);
   });
   console.log();
@@ -4095,14 +4097,15 @@ function tokenRoots(reg = load()) {
       macList(reg).map((m) => ({ id: `${m.id}-other`, of: m.id, label: '', dir: path.join(macHome(m), 'others'), other: true })));
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
-// input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5).
+// input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5); a gateway's
+// name for it (本地代理's claude/claude-opus-5-5) by what follows its provider/.
 // ponytail: copied by hand from Anthropic's price list (2026-06; Fable 5.2 from Claude Code 2.1.321's notes); a model not
 // listed is priced as Opus 5.5, so add a row when a new one shows up
 const PRICES = { 'claude-fable-5-2': [8, 40, 0.2], 'claude-fable-5-1': [10, 50, 0.25], 'claude-fable-5': [10, 50, 1], 'claude-opus-5-5': [4, 20, 0.2],
   'claude-opus-5': [5, 25, 0.5], 'claude-opus-4': [5, 25, 0.5], 'claude-sonnet-5': [2, 10, 0.2], 'claude-sonnet-4': [3, 15, 0.3],
   'claude-haiku-4': [1, 5, 0.1], '<synthetic>': [0, 0, 0] };
 function replyCost([, , i, o, w5, w1, r, model, fast]) {
-  const k = Object.keys(PRICES).filter((p) => (model ?? '').startsWith(p)).sort((a, b) => b.length - a.length)[0];
+  const name = (model ?? '').replace(/^[\w.-]+\//, ''), k = Object.keys(PRICES).filter((p) => name.startsWith(p)).sort((a, b) => b.length - a.length)[0];
   const [pi, po, pr] = PRICES[k ?? 'claude-opus-5-5'];
   return ((i + w5 * 1.25 + w1 * 2) * pi + o * po + r * pr) / 1e6 * (fast ? 2 : 1);
 }
@@ -4300,7 +4303,7 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

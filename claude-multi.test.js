@@ -298,6 +298,11 @@ if (SESSION0) {
   const fresh = { five_hour: { utilization: 10, resets_at: null } };
   keepLast([{ id: 'b' }], [{ u: fresh }], cache, now);
   assert.deepEqual(cache.b, { at: now, u: fresh }); // a good read is kept for next time
+  // an API account (本地代理): no quota asked for (no sign-in to ask with), no error either; nothing kept for it
+  require('./claude-multi').fetchUsage({ id: 'local', configDir: 'C:/nowhere', api: { baseURL: 'http://127.0.0.1:3425' } }).then((r) => {
+    assert.deepEqual(r, { api: true }); assert.deepEqual(keepLast([{ id: 'local' }], [r], cache, now), [{ api: true }]); assert.ok(!cache.local);
+    console.log('quota of an API account ok');
+  }, (e) => { console.error(e); process.exitCode = 1; });
   console.log('quota ok');
 }
 // Notes (projects\<folder>\memory) shared by every account: a real one merged into ~/.claude's and made a junction to
@@ -1331,6 +1336,8 @@ if (SESSION0) {
   const replyCost = vm.runInNewContext(part(js, 'const PRICES', '\nfunction tokenStats') + ';replyCost;');
   assert.equal(replyCost(['k', 'd', 1e6, 1e6, 0, 0, 1e6, 'claude-fable-5-2', false]), 48.2);
   assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5-20260101', false]), 0.2); assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5', false]), 1);
+  // 本地代理's names (a gateway's provider/ before the model's): its own price, not Opus 5.5's for any it doesn't know
+  assert.equal(replyCost(['k', 'd', 1e6, 0, 0, 0, 0, 'claude/claude-sonnet-5-5', false]), 2); assert.equal(replyCost(['k', 'd', 1e6, 0, 0, 0, 0, 'claude/claude-fable-5-1', false]), 10);
   // the web service's last guard: a throw before it listens ends it; listening, it's logged (the same once in 10 min) and it goes on
   const guardLog = [], exits = [];
   const guard = (listening) => vm.runInNewContext(part(js, '  const fell = new Map();', '\n  process.on(') + '\nkeepOn;', {
