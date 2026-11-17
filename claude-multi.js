@@ -4453,7 +4453,7 @@ async function setup() {
       { env: { ...process.env, CM_NODE: process.execPath, CM_JS: __filename }, windowsHide: true })
     : cp.spawn(process.execPath, [__filename, 'web'], { cwd: HOME, detached: true, stdio: 'ignore' }).unref();
   if (process.platform === 'darwin') {
-    // a launch agent: started at login and now, again if it crashes. HOME and PATH as here: launchd's PATH has no claude
+    // a launch agent: started at login and now, again if it crashes. HOME, PATH and LANG as here: launchd's PATH has no claude
     const plist = path.join(HOME, 'Library', 'LaunchAgents', `${LOGIN_LABEL}.plist`), dom = `gui/${process.getuid()}`, log = path.join(ROOT, 'web.log');
     const x = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;'), str = (v) => `<string>${x(v)}</string>`;
     fs.mkdirSync(path.dirname(plist), { recursive: true });
@@ -4463,7 +4463,7 @@ async function setup() {
   <key>Label</key>${str(LOGIN_LABEL)}
   <key>ProgramArguments</key><array>${str(process.execPath)}${str(__filename)}${str('web')}</array>
   <key>WorkingDirectory</key>${str(HOME)}
-  <key>EnvironmentVariables</key><dict><key>HOME</key>${str(HOME)}<key>PATH</key>${str(process.env.PATH)}</dict>
+  <key>EnvironmentVariables</key><dict>${Object.entries({ HOME, PATH: process.env.PATH, LANG: process.env.LANG }).filter(([, v]) => v).map(([k, v]) => `<key>${k}</key>${str(v)}`).join('')}</dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>StandardOutPath</key>${str(log)}<key>StandardErrorPath</key>${str(log)}
