@@ -1832,7 +1832,7 @@ function openSettings() {
       <div class="setting"><span>桌面灵动岛</span>${island == null ? '<span class="m">读取中…</span>' : `<button class="switch${island ? ' on' : ''}" data-island title="${island ? '关闭：电脑桌面上不再显示和弹提示，网页和手机不受影响' : '打开'}"></button>`}</div>
       <h3>接入</h3>
       ${(joins ?? []).map((j) => `<div class="setting"><span>${esc(j.url.replace(/^https?:\/\//, ''))}</span><span class="m">${esc(JOIN_STATE[j.state] ?? j.state)}</span></div>`).join('')}
-      ${joinForm ? `<div class="setting"><span>地址</span><input type="text" inputmode="url" id="joinUrl" placeholder="https://…/magpie"></div>
+      ${joinForm ? `<div class="setting"><span>地址</span><input type="text" inputmode="url" id="joinUrl" placeholder="对方给你的接入地址"></div>
       <div class="setting"><span>名字</span><input type="text" id="joinName" maxlength="32" placeholder="对方看到的名字"></div>
       <div class="setting"><span>备注</span><input type="text" id="joinNote" maxlength="100" placeholder="选填，比如微信名"></div>
       <div class="setting"><span></span><button class="btn primary" data-joinsend>提交申请</button></div>`
