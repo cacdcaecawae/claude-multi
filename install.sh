@@ -11,10 +11,10 @@ main() {
   command -v git >/dev/null || stop '没有 git：运行 xcode-select --install 装上命令行工具，再运行一次'
   command -v node >/dev/null || stop '没有 Node.js：到 https://nodejs.org 下载安装 20 或更新的版本，再运行一次'
   [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 20 ] || stop "Node.js 要 20 或更新，现在是 $(node -v)"
+  export PATH="$HOME/.local/bin:$PATH" # where Claude Code's installer puts claude (not on every PATH); the web service is given this one
   if ! command -v claude >/dev/null; then
     echo '安装 Claude Code…'
     curl -fsSL https://claude.ai/install.sh | bash
-    export PATH="$HOME/.local/bin:$PATH" # where it puts claude; the web service is given this PATH
     command -v claude >/dev/null || stop '没装上 Claude Code：照 https://docs.claude.com/en/docs/claude-code 装好，再运行一次'
   fi
   if [ -d "$dir/.git" ]; then git -C "$dir" pull -q --ff-only

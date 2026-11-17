@@ -10,10 +10,10 @@
   if (-not (& $has git)) { Write-Host '没有 git：到 https://git-scm.com 下载安装，再运行一次'; return }
   if (-not (& $has node)) { Write-Host '没有 Node.js：到 https://nodejs.org 下载安装 20 或更新的版本，再运行一次'; return }
   if ([int](node -p "process.versions.node.split('.')[0]") -lt 20) { Write-Host "Node.js 要 20 或更新，现在是 $(node -v)"; return }
+  $env:Path = "$env:USERPROFILE\.local\bin;$env:Path" # where Claude Code's installer puts claude (not on every PATH)
   if (-not (& $has claude)) {
     Write-Host '安装 Claude Code…'
     Invoke-RestMethod https://claude.ai/install.ps1 | Invoke-Expression
-    $env:Path = "$env:USERPROFILE\.local\bin;$env:Path" # where it puts claude
     if (-not (& $has claude)) { Write-Host '没装上 Claude Code：照 https://docs.claude.com/en/docs/claude-code 装好，再运行一次'; return }
   }
   if (Test-Path "$dir\.git") { git -C $dir pull -q --ff-only }
