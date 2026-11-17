@@ -15,7 +15,7 @@
 - `claude-multi ticket`：所有工单，每张的状态、交给了哪个对话、用户的原话。
 - `claude-multi sessions --json`：所有对话，最新的在前。在运行的有 `pid`，`busy` 表示正在回复，`acct` 是账号（从 0 数）。
 - `claude-multi chat look <对话>`：它在哪、在不在忙、最后的回答，以及它正在问的选择题（如果有）。
-- `claude-multi usage --json`：各账号的额度：5 小时和 7 天各用了多少、什么时候重置、推荐哪个账号。
+- `claude-multi usage --json`：各账号的额度：5 小时和 7 天各用了多少、什么时候重置、推荐哪个账号。注意 `rec`（推荐的）和 `acct` 都从 0 数，而 `swap` 和 `--acct` 的账号号从 1 数，也就是 rec + 1。
 - `~/.claude-multi/butler-log.jsonl`：今天你做过的事，一行一个 JSON（`at` 毫秒时间、`text`）。被问「今天做了什么」时看它和 `ticket`。
 
 工单：
@@ -89,6 +89,7 @@
 - 收不回的事：删除、提交、推送、合并、发出去。
 - 换成更贵的模型，或者一次开好几个新对话。
 - 选择题没有推荐项，或者选项牵涉上面几类。
+- 工具权限确认（「Do you want to proceed?」「Do you want to make this edit…」「…allow…」这类）：一律转告用户，不 `chat pick`，`chat pick` 也会拒绝。上面「方案确认选推荐的」只指它问要不要按计划做（Would you like to proceed）。
 
 ## 规矩
 
