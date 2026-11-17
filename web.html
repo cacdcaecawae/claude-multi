@@ -1267,7 +1267,7 @@ function drawSide() {
 }
 // no Claude account open, as said everywhere: none at all, none read (no recommendation: the quota unknown, which isn't
 // the same as used up), or all at their limits
-const shut = (u) => (!u.accounts?.length ? '还没有 Claude 账号' : u.rec == null ? '额度暂时读不到' : `都到上限了，${u.ready ?? '稍后'}后恢复`);
+const shut = (u) => (!u.accounts?.length ? '还没有 Claude 账号' : u.rec == null ? (u.accounts.every((a) => a.api) ? '接入已失效' : '额度暂时读不到') : `都到上限了，${u.ready ?? '稍后'}后恢复`);
 function drawStatus() {
   const u = state.usage, w = u.accounts?.[u.rec]?.windows?.find((x) => x.k === 'five_hour'), n = state.sessions.filter((s) => s.pid).length;
   const b = state.sessions.filter((s) => s.busy).length;
@@ -1429,7 +1429,7 @@ async function menuPick(e) {
     try { toast((await post('/api/rename', { id: s.id, name, oai: s.oai })).said); } catch (er) { toast(er.message, 4000); }
   } else if (k === 'del') {
     if (!confirm(s.gpt && !s.oai ? `归档「${s.title}」？\n归档后不在列表里显示，在 Codex 里用 codex unarchive 能找回。`
-      : `删除「${s.title}」？\n${s.oai && s.busy ? '正在回答的那一条会停下。' : ''}对话记录会移到电脑的回收站，可以找回。`)) return;
+      : `删除「${s.title}」？\n${s.oai && s.busy ? '正在回答的那一条会停下。' : ''}对话记录会移到电脑的${win() ? '回收站' : '废纸篓'}，可以找回。`)) return;
     deleting.add(s.id); drawSide(); toast(`正在${s.gpt && !s.oai ? '归档' : '删除'}「${s.title}」…`, 120000);
     try {
       toast((await post('/api/delete', { id: s.id, gpt: s.gpt, oai: s.oai })).said);
@@ -1828,8 +1828,8 @@ function openSettings() {
       <h3>通知</h3>
       <div class="setting"><span>通知</span><button class="switch${pushOn ? ' on' : ''}" data-push title="${pushOn ? '关闭' : '开启'}"></button></div>
       ${pushOn ? '<div class="setting"><span>测试通知</span><button class="btn" data-pushtest>发送</button></div>' : ''}
-      <h3>电脑</h3>
-      <div class="setting"><span>桌面灵动岛</span>${island == null ? '<span class="m">读取中…</span>' : `<button class="switch${island ? ' on' : ''}" data-island title="${island ? '关闭：电脑桌面上不再显示和弹提示，网页和手机不受影响' : '打开'}"></button>`}</div>
+      ${!win() ? '' : `<h3>电脑</h3>
+      <div class="setting"><span>桌面灵动岛</span>${island == null ? '<span class="m">读取中…</span>' : `<button class="switch${island ? ' on' : ''}" data-island title="${island ? '关闭：电脑桌面上不再显示和弹提示，网页和手机不受影响' : '打开'}"></button>`}</div>`}
       <h3>接入</h3>
       ${(joins ?? []).map((j) => `<div class="setting"><span>${esc(j.url.replace(/^https?:\/\//, ''))}</span><span class="m">${esc(JOIN_STATE[j.state] ?? j.state)}</span></div>`).join('')}
       ${joinForm ? `<div class="setting"><span>地址</span><input type="text" inputmode="url" id="joinUrl" placeholder="对方给你的接入地址"></div>
@@ -1907,7 +1907,7 @@ function renderUsage() {
   const u = state.usage, gp = state.gpt ?? [];
   $('#sideActs').html = `<button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   $('#view').html = `<div class="panel"><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : esc(shut(u))}</div>
-    <div data-machine="here">${machineRows('here')}</div>
+    ${win() ? `<div data-machine="here">${machineRows('here')}</div>` : ''}
     ${u.accounts.map((a, i) => `<div class="card"><div class="cardHead">${ac(i + 1)}<b>账号 ${i + 1}</b>
       <span class="m grow">${esc(a.label)}</span>${renew(a.sub)}${u.rec === i && u.open ? '<span class="rec">推荐</span>' : ''}</div>
       ${a.api && !a.err ? '<div class="m" style="margin-top:4px">API，按用量计费，没有 5 小时和 7 天额度</div>'
@@ -1919,12 +1919,14 @@ function renderUsage() {
       ${m.runway != null ? `<div class="m" style="margin-top:4px">可连续用 ${m.runway} 小时 · 在 Mac 上读的，不参与推荐</div>` : ''}
       ${m.windows.map(winRow).join('')}`}<div data-machine="mac:${esc(macOf(m.id)?.host ?? '')}">${machineRows(`mac:${macOf(m.id)?.host}`)}</div></div>`).join('')}
     <div class="btns"><button class="btn" data-refresh${usageBusy ? ' disabled' : ''}>${usageBusy === 'refresh' ? '刷新中…' : '刷新'}</button>
-      <button class="btn" data-warm${usageBusy ? ' disabled' : ''}>${usageBusy === 'warm' ? '预热中…' : '预热'}</button></div>
-    <div class="m" style="margin-top:8px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div>
+      ${win() ? `<button class="btn" data-warm${usageBusy ? ' disabled' : ''}>${usageBusy === 'warm' ? '预热中…' : '预热'}</button>` : ''}</div>
+    ${!win() ? '' : `<div class="m" style="margin-top:8px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div>
     <h3>GPT 账号</h3>${gp.length ? gp.map((g, i) => `<div class="card"><div class="cardHead">${ac(i + 1, '', true)}<b>G${i + 1}</b><span class="m grow">${esc(g.label)}</span>${g.plan ? `<span class="m">${esc(g.plan)}</span>` : ''}</div>
       ${g.windows?.length ? g.windows.map(winRow).join('') : '<div class="m" style="margin-top:4px;white-space:normal">额度还没读到：在它上面回复过一次后才有</div>'}</div>`).join('')
-      : '<div class="m" style="white-space:normal">还没有。在电脑上运行 claude-multi new gpt，用 ChatGPT 登录后，就能在这里新开 GPT 对话。</div>'}</div>`;
+      : '<div class="m" style="white-space:normal">还没有。在电脑上运行 claude-multi new gpt，用 ChatGPT 登录后，就能在这里新开 GPT 对话。</div>'}`}</div>`;
 }
+// a Windows computer's service (an older one doesn't say: Windows too). A Mac's: no CPU and memory rows, 预热 or GPT
+const win = () => state?.win !== false;
 // 额度's CPU and memory, a computer's where it's shown ([data-machine]: here, under 推荐账号; mac, in its card), Claude Code's part first.
 // Asked every 3 s while the panel is in sight (it's drawn again from the state every 5 s: these patch themselves in)
 let machines = null;
@@ -3407,8 +3409,9 @@ const link = (m, words, u) => {
 const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]*?[^$\s])\$(?!\d)/g; // no lookbehind: an older Safari fails to read the whole script on one
 const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
 // a path of this PC as Claude writes one in `code` (D:\… or D:/…): opened by 预览 (preview). Not one with a stand-in in it
-// (runs/<id>: its < > here as &lt; &gt;, the code being escaped already) nor a "
-const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/;
+// (runs/<id>: its < > here as &lt; &gt;, the code being escaped already) nor a ". A Mac's service: its own paths too
+// (/Users/…; under its usual tops, not a /command); on Windows one of those is a Mac's, out of reach
+const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, MAC_PEEKABLE = /^\/(?:Users|Volumes|private|tmp|Applications|Library|opt)\/(?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, peekable = (c) => PEEKABLE.test(c) || (typeof state !== 'undefined' && state?.win === false && MAC_PEEKABLE.test(c));
 // as Codex shows one: its kind's mark and its name (a folder's: one ending in \ or /, or with no .ext), the whole path on hover
 const peekLink = (c) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || c, dir = /[\\/]$/.test(c) || !/\.\w{1,8}$/.test(n);
   return `<a class="peek" data-peek="${c}" title="${c}">${svg(dir ? I.folder : I.file)}${n}</a>`; };
@@ -3445,7 +3448,7 @@ function md(t) {
     if (i % 4) return `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${hl(p.replace(/\n$/, ''), /^\s*([\w#+.-]*)/.exec(ps[i - 1])[1].toLowerCase())}</pre></div>`;
     const math = [];
     p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
-    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (PEEKABLE.test(c) ? peekLink(c) : `<code>${c}</code>`))
+    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (peekable(c) ? peekLink(c) : `<code>${c}</code>`))
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)
       .replace(/\u0000(\d+)\u0000/g, (_, k) => tex(...math[k]));
   }).join('');
@@ -3642,8 +3645,9 @@ document.addEventListener('contextmenu', (e) => {
   const dir = el.dataset.dir != null || el.dataset.pvgo != null || (t ? t.dir : el.dataset.pvp == null && isDirPath(p));
   const away = !/^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname) && '在电脑的屏幕上打开，不在这台设备上'; // (looked at from another device)
   e.preventDefault(); menuFor = { file: { p, dir } };
-  popMenu(pvName(p), dir ? [['pv', '预览'], ['open', '在资源管理器中打开', away, true], ['copy', '复制路径']]
-    : [['pv', '预览'], ['open', '在电脑上打开', away, true], ['with', '打开方式…'], ['reveal', '在资源管理器中显示'], ['-'], ['dl', '下载'], ['copy', '复制路径'], ['text', '复制文件内容']], e.clientX, e.clientY);
+  const fm = win() ? '资源管理器' : '访达'; // a Mac's: Finder, and no 打开方式 (Windows' own chooser)
+  popMenu(pvName(p), dir ? [['pv', '预览'], ['open', `在${fm}中打开`, away, true], ['copy', '复制路径']]
+    : [['pv', '预览'], ['open', '在电脑上打开', away, true], win() && ['with', '打开方式…'], ['reveal', `在${fm}中显示`], ['-'], ['dl', '下载'], ['copy', '复制路径'], ['text', '复制文件内容']].filter(Boolean), e.clientX, e.clientY);
 });
 const copyText = (t, said = '已复制') => (navigator.clipboard?.writeText(t) ?? Promise.reject()).then(() => toast(said, 1200), () => toast('复制失败', 2000));
 async function fileAct(k, { p }) {

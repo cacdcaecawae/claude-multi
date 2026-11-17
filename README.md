@@ -66,9 +66,18 @@
 
 - Windows 10 / 11，自带 PowerShell 5.1（灵动岛用到）
 - [Node.js](https://nodejs.org/) 20 或更新版本（用 GPT 要 22.13 或更新：读 Codex 的对话记录要用 Node 自带的 SQLite）
-- [Claude Code](https://docs.claude.com/en/docs/claude-code)，命令行里能直接运行 `claude`
+- [git](https://git-scm.com/)
+- [Claude Code](https://docs.claude.com/en/docs/claude-code)，命令行里能直接运行 `claude`（用下面的一行命令装时，没有会自动装上）
 - 可选：Windows Terminal（灵动岛的「整理窗口」功能要用）
 - 可选：[Codex](https://github.com/openai/codex)（`npm i -g @openai/codex`），用 GPT 时要装
+
+**一行装好。**在 PowerShell 里运行（再运行一次就是更新）：
+
+```powershell
+irm https://raw.githubusercontent.com/cacdcaecawae/claude-multi/master/install.ps1 | iex
+```
+
+它会克隆到 `%USERPROFILE%\.claude-multi`，装依赖，把下面第 3 步的通知和状态栏加进 `%USERPROFILE%\.claude\settings.json`（原来的设置保留，改之前的文件存为 `settings.json.before-claude-multi`），在「启动」文件夹放一个快捷方式（开机启动网页服务和灵动岛），然后打开网页。要手动装，按下面 1 到 3 步做。
 
 **1. 放到固定位置。**程序固定从 `%USERPROFILE%\.claude-multi` 读写数据，所以仓库必须克隆到这个位置：
 
@@ -103,6 +112,22 @@ npm install
 
 - 通知钩子：Claude 回复完（`Stop`）或在等你确认权限时（`Notification`），提示会出现在灵动岛和网页上。
 - 状态栏：每个终端底部会显示账号、模型和所在文件夹。网页底部状态栏里的模型、上下文用量也是从这里来的。
+
+### macOS（只有网页）
+
+Mac 上只能用网页，账号只能是「设置 → 接入」申请来的 API 账号。灵动岛、终端窗口、Claude 订阅账号的额度和 GPT 都没有。
+
+需要 git（没有的话运行 `xcode-select --install`）和 [Node.js](https://nodejs.org/) 20 或更新版本。在终端里运行（再运行一次就是更新）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cacdcaecawae/claude-multi/master/install.sh | bash
+```
+
+没有 Claude Code 时它会先装上，然后克隆到 `~/.claude-multi`，装依赖，把通知和状态栏加进 `~/.claude/settings.json`（原来的设置保留），设成开机自动启动网页服务，最后打开网页。之后在网页的「设置 → 接入」里申请，对方批准后，账号会出现在「额度」里。
+
+网页的链接忘了：运行 `node ~/.claude-multi/claude-multi.js web-link`。
+
+删除的对话会进废纸篓。
 
 ## 快速上手
 
@@ -317,6 +342,7 @@ server {
 | 文件 | 内容 |
 |---|---|
 | `claude-multi.js` | 命令行和网页服务 |
+| `install.ps1` / `install.sh` | Windows / Mac 的一行安装：检查环境、拉代码、装依赖，再运行 `claude-multi setup`（设置、开机启动、打开网页） |
 | `island.ps1` | 灵动岛（WPF）。必须保存为带 BOM 的 UTF-8，否则 PowerShell 5.1 会读错中文 |
 | `console-bridge.ps1` | 读取电脑上 Claude 窗口的画面并转发按键，网页的终端视图靠它 |
 | `web.html` | 网页，单个文件，每次刷新直接读取，改完不用重启服务 |

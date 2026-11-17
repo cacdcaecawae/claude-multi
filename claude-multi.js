@@ -18,7 +18,12 @@ const ISLAND = path.join(ROOT, 'island.ps1');
 // the island switched off in the page's settings: not started (not by a note, not by the CLI; at login island.ps1
 // only starts the web service), and nothing put in its inbox. The web pages and phones get their notes as ever.
 const ISLAND_OFF = path.join(ROOT, 'island-off');
-const islandOff = () => fs.existsSync(ISLAND_OFF);
+// macOS: the web page only (its conversations, 申请接入's accounts); no island, terminal windows, Recycle Bin or PowerShell
+const WIN = process.platform === 'win32';
+const islandOff = () => !WIN || fs.existsSync(ISLAND_OFF);
+const TRASH = WIN ? '回收站' : '废纸篓';
+// where a command is on the PATH ('' if not)
+const whereIs = (c) => spawnSync(WIN ? 'where' : 'which', [c], { encoding: 'utf8', windowsHide: true }).stdout?.split(/\r?\n/).find(Boolean)?.trim() ?? '';
 // the 管家, a 开发功能: off till it's switched on in the page's settings (then this file is there)
 const BUTLER_ON = path.join(ROOT, 'butler-on');
 const butlerOn = () => fs.existsSync(BUTLER_ON), BUTLER_SHUT = '管家没有开启：在设置的「开发功能」里打开';
@@ -259,6 +264,10 @@ function joinAccount(j, key) {
   const env = { ...mine.env, ANTHROPIC_BASE_URL: j.url, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1' };
   delete env.ANTHROPIC_API_KEY; delete mine.apiKeyHelper; // the gateway's key only
   const { id, dir } = accountDir({ ...mine, env });
+  // no sign-in to walk through: Claude's first-run screens (its theme, its notes) skipped, the page has no cards for them.
+  // A Claude Code just installed, never run, stopped there.
+  const cj = path.join(dir, '.claude.json');
+  fs.writeFileSync(cj, JSON.stringify({ ...JSON.parse(fs.readFileSync(cj, 'utf8')), hasCompletedOnboarding: true }, null, 2) + '\n');
   const p = { id, label: new URL(j.url).host, subscriptionType: 'API', configDir: dir, createdAt: now(), lastUsedAt: null, api: { baseURL: j.url, join: j.id } };
   update((reg) => { reg.profiles.push(p); });
   log('profile_joined', { profile_id: id, base_url: j.url });
@@ -588,7 +597,8 @@ function lastTyped(tail, before = Infinity) {
   return null;
 }
 
-// Start times (Windows FILETIME, as sessions/<pid>.json's procStart) of these pids; null if PowerShell failed.
+// Start times of these pids, as sessions/<pid>.json's procStart has them: Windows' FILETIME (PowerShell), a Mac's ps's
+// lstart in UTC and C's words (as Claude Code writes it there, whatever your language); null if that failed.
 // The same pids within a minute: the last answer (PowerShell takes ~0.2 s, and the web service asks every few seconds).
 // The web service sets procStarts.beside: there it runs beside, never waited on (waiting froze the service, and every
 // terminal with it, once a minute); till it answers, or for a minute after it failed, null: the pid alone.
@@ -597,13 +607,23 @@ function procStarts(pids) {
   if (!pids.length) return new Map();
   const key = [...pids].sort().join(',');
   if (startsSeen.key === key && Date.now() - startsSeen.at < 60000) return startsSeen.map;
-  const args = ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
-    + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'];
-  const took = (out) => (startsSeen = { key, at: Date.now(), map: out == null ? null : new Map(out.trim().split(/\r?\n/).filter(Boolean).map((l) => l.split(' '))) }).map;
-  if (!procStarts.beside) { const r = spawnSync('powershell.exe', args, { encoding: 'utf8', windowsHide: true }); return r.status === 0 ? took(r.stdout) : null; }
-  startsRun ??= require('child_process').execFile('powershell.exe', args, { encoding: 'utf8', windowsHide: true }, (err, out) => { startsRun = null; took(err ? null : out); });
+  const [exe, args, env] = WIN ? ['powershell.exe', ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
+    + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'], process.env] : ['ps', ['-o', 'pid=,lstart=', '-p', pids.join(',')], { ...process.env, LC_ALL: 'C', TZ: 'UTC' }];
+  const took = (out) => (startsSeen = { key, at: Date.now(), map: out == null ? null
+    : new Map(out.split(/\r?\n/).flatMap((l) => { const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(l); return m ? [[m[1], m[2]]] : []; })) }).map;
+  // a Mac's ps exits 1 when one of them is gone, the others said all the same
+  const failed = (status, err) => (WIN ? status !== 0 : !!err);
+  if (!procStarts.beside) { const r = spawnSync(exe, args, { encoding: 'utf8', windowsHide: true, env }); return failed(r.status, r.error) ? null : took(r.stdout); }
+  startsRun ??= require('child_process').execFile(exe, args, { encoding: 'utf8', windowsHide: true, env }, (err, out) => {
+    startsRun = null; took(failed(err ? 1 : 0, err && typeof err.code !== 'number') ? null : out);
+  });
   return startsSeen.key === key ? startsSeen.map : null;
 }
+// the same start: Windows' FILETIME as written; a Mac's the same second (ps's, and Claude's, a date in UTC with no zone
+// said; one with its zone, as it says). One that can't be read as a date: not told apart, the pid alone
+const utcTime = (s) => { const t = Date.parse(`${s} UTC`); return Number.isFinite(t) ? t : Date.parse(s); };
+const sameStart = (now, was, win = WIN) => win ? now === String(was)
+  : !Number.isFinite(utcTime(was)) || Math.abs(utcTime(now) - utcTime(was)) < 2000;
 
 const readHeads = new Map(); // record file -> { at: its mtime, cwd, title, prompt }
 // The session files (sessions/<pid>.json) of a config dir whose pid still runs: each Claude started on it writes one.
@@ -619,9 +639,9 @@ function sessionFiles(dir) {
   }
   return out;
 }
-// a Claude that didn't exit cleanly leaves its file, and Windows soon gives its pid to another program:
-// running means that pid also started when Claude wrote down (without PowerShell, the pid alone)
-const stillClaude = (js) => { const starts = procStarts(js.map((j) => j.pid)); return js.filter((j) => !starts || !j.procStart || starts.get(String(j.pid)) === String(j.procStart)); };
+// a Claude that didn't exit cleanly leaves its file, and the system soon gives its pid to another program:
+// running means that pid also started when Claude wrote down (without PowerShell or ps, the pid alone)
+const stillClaude = (js) => { const starts = procStarts(js.map((j) => j.pid)); return js.filter((j) => !starts || !j.procStart || sameStart(starts.get(String(j.pid)), j.procStart)); };
 // Whether any Claude runs on an account, for removing it: from its session files, not the conversation list, which
 // leaves out one with nothing said yet (no record), no title, or its folder gone.
 // ponytail: one the web service has just spawned writes its file within a moment; that moment isn't covered
@@ -958,7 +978,7 @@ const longPath = (p) => String(p ?? '').replace(/^\\\\\?\\/, ''); // Codex keeps
 // child, which under a pseudo-terminal left Codex a grandchild, running on when its terminal was ended. The launcher
 // itself once that layout changes.
 function codexCmd() {
-  const shim = spawnSync('where', ['codex'], { encoding: 'utf8', windowsHide: true }).stdout?.split(/\r?\n/).find(Boolean)?.trim();
+  const shim = WIN && whereIs('codex'); // GPT: Windows only
   if (!shim) return null;
   const pkg = path.join(path.dirname(shim), 'node_modules', '@openai', 'codex');
   const exe = path.join(pkg, 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe');
@@ -1936,10 +1956,22 @@ function del(id) {
   const r = recycle(paths);
   if (r.status !== 0 || paths.some((f) => fs.existsSync(f))) { console.log(`删除失败：${(r.stderr || '').trim().split('\n')[0]}`); process.exit(1); }
   log('session_deleted', { session_id: id, files: paths.length });
-  console.log(`已删除「${s.title}」，可以在回收站里找回。`);
+  console.log(`已删除「${s.title}」，可以在${TRASH}里找回。`);
 }
 // Session 0 (ssh, a service) has no Recycle Bin: there it deletes for good without a word, so it's refused (exit 3)
 function recycle(paths) {
+  if (!WIN) { // macOS: moved into the Trash, a name of its own there (as Finder names a second one: name 2, name 3…), never over one
+    const taken = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
+    try {
+      for (const p of paths) {
+        const t = path.join(HOME, '.Trash', path.basename(p));
+        let to = t;
+        for (let n = 2; taken(to); n++) to = `${t} ${n}`;
+        fs.renameSync(p, to);
+      }
+      return { status: 0, stderr: '' };
+    } catch (e) { return { status: 1, stderr: `没放进废纸篓：${e.message}` }; }
+  }
   const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', 'if ([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) { exit 3 }; '
     + 'Add-Type -AssemblyName Microsoft.VisualBasic; foreach ($p in ($env:CM_DEL | ConvertFrom-Json)) { if (Test-Path -PathType Container $p) '
     + '{ [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, "OnlyErrorDialogs", "SendToRecycleBin") } '
@@ -1978,8 +2010,8 @@ function remove(x) {
   log('profile_removed', { profile_id: p.id });
   let r = {}; // a link it couldn't take out: the folder stays (deleted for good past the Recycle Bin, it'd go through the link)
   try { unlinkAll(p.configDir); r = recycle([p.configDir]); } catch {}
-  if (fs.existsSync(p.configDir)) console.log(`已移除账号 ${p.label}，但文件夹没能放进回收站（${(r.stderr || '').trim().split('\n')[0] || '可能有程序开着里面的文件'}），可以之后手动删：${p.configDir}`);
-  else console.log(`已移除账号 ${p.label}，文件夹在回收站里。`);
+  if (fs.existsSync(p.configDir)) console.log(`已移除账号 ${p.label}，但文件夹没能放进${TRASH}（${(r.stderr || '').trim().split('\n')[0] || '可能有程序开着里面的文件'}），可以之后手动删：${p.configDir}`);
+  else console.log(`已移除账号 ${p.label}，文件夹在${TRASH}里。`);
 }
 
 // True while a helper the conversation started is still at work, read from its transcript's tail. With
@@ -2166,9 +2198,11 @@ async function usageState(reg = load(), { macFresh = false } = {}) {
   const ok = res.map((r, i) => ({ ...r, i })).filter((r) => r.u);
   const open = ok.filter((r) => runway(r.u) > 0);
   const rec = open.length ? pickOpen(open) : [...ok].sort((a, b) => readyAt(a.u) - readyAt(b.u))[0];
+  // API accounts only (a Mac's, 申请接入's): no quota to read, the first one not refused is the one to use
+  const api = reg.profiles.length && reg.profiles.every((p) => p.api) ? res.findIndex((r) => r.api && !r.err) : -1;
   // One column per window. Model windows get a column only once some account used them.
   const cols = WINDOWS.filter(([k]) => !k.startsWith('seven_day_') || ok.some((r) => r.u[k]?.utilization));
-  const json = { rec: rec?.i ?? null, open: open.length > 0,
+  const json = { rec: api >= 0 ? api : rec?.i ?? null, open: open.length > 0 || api >= 0,
     ready: !open.length && rec ? until(readyAt(rec.u)) : null,
     accounts: reg.profiles.map((p, i) => ({ label: p.label, dir: p.configDir, err: res[i].err ?? null, api: !!res[i].api,
       runway: res[i].u ? Math.round(runway(res[i].u) * 10) / 10 : null,
@@ -2739,6 +2773,8 @@ const PEEK_TEXT = new Set([...TEXT_EXT, '', 'html', 'htm', 'svg', 'xml', 'css', 
 // shown in Explorer instead), 打开方式 (Windows' own chooser), 在资源管理器中显示; a folder opened in Explorer. [what's
 // started, its command line as Windows takes it (a path can't hold a ")]
 const RUNS = /\.(exe|com|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|ws|msi|msp|msc|lnk|scr|pif|hta|cpl|reg|inf|scf|jar|url|py|pyw|sh|appref-ms|application|gadget)$/i;
+// what a Mac's open would run (or install): besides RUNS's, and a file it may run (chmod +x)
+const MAC_RUNS = /\.(command|tool|zsh|bash|csh|pl|rb|pkg|mpkg|dmg|workflow|action|scpt|scptd|applescript|terminal|webloc|inetloc|prefpane|kext|osax)$/i;
 const shellCmd = (f, how, dir) => dir ? ['explorer.exe', `"${f}"`] : how === 'with' ? ['rundll32.exe', `shell32.dll,OpenAs_RunDLL ${f}`] // (its path bare, as Windows' own "Open with" has it)
   : how === 'open' && !RUNS.test(f) ? ['explorer.exe', `"${f}"`] : ['explorer.exe', `/select,"${f}"`];
 // …then brought to the front: Windows keeps a window a background process opens (the service is one) behind, flashing in
@@ -3098,9 +3134,9 @@ async function web() {
   };
   setInterval(() => { if (readJoins().some((j) => j.state === 'pending')) joinRound().catch(() => {}); }, 60000);
   const http = require('http'), pty = require('@lydell/node-pty');
-  const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
+  const claudeExe = whereIs('claude') || CLAUDE;
   const codex = codexCmd(); // GPT conversations: none started without it
-  const sshExe = spawnSync('where', ['ssh'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || 'ssh'; // the Mac's
+  const sshExe = whereIs('ssh') || 'ssh'; // the Mac's
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
   const slashCache = new Map(); // `${configDir}|${folder}` -> { at, list }: / in a conversation's box
   // the quota as the page last got it, kept on disk: after a restart the page shows it at once (read again behind it)
@@ -3362,6 +3398,7 @@ async function web() {
   }
   // a conversation open in a terminal window here: its screen through the console bridge, while anyone watches
   function mirror(pid, dir) {
+    if (!WIN) throw new Error('这个对话正在别处的终端里运行，网页接不上它：在那个终端里接着用，或者先关掉它');
     const key = `w${pid}`;
     if (terms.has(key) && !terms.get(key).gone) return terms.get(key);
     const proc = require('child_process').spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
@@ -3557,7 +3594,7 @@ async function web() {
   const UNREAD = { cpu: null, mem: null, n: null, prev: null };
   let share = { ...UNREAD, at: 0 }, sharing = false;
   const machines = () => {
-    if (!sharing && Date.now() - share.at >= 3000) {
+    if (WIN && !sharing && Date.now() - share.at >= 3000) { // macOS: no Claude part (CLAUDE_PS is PowerShell)
       sharing = true; const at = Date.now();
       require('child_process').execFile('powershell.exe', ['-NoProfile', '-Command', CLAUDE_PS], { windowsHide: true, timeout: 15000 }, (e, out) => {
         sharing = false;
@@ -3645,7 +3682,7 @@ async function web() {
       // the Macs (the Mac mini, more): 新对话 offers them
       const reg = load(), macs = macList(reg).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
       return { user: reg.user ?? null, usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
-        tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects() };
+        tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects(), win: WIN };
     },
     'POST /api/project': (q, b) => editProjects((all) => projectOp(all, b)),
     'GET /api/dirs': (q) => dirsIn(q.get('path') ?? ''),
@@ -3778,9 +3815,15 @@ async function web() {
     // 右键 a path of this PC on the page (shellCmd): opened on this PC's screen, where the service runs (your session)
     'POST /api/shell': (q, b) => {
       const p = String(b.path ?? ''), how = String(b.how ?? '');
-      if (!/^[A-Za-z]:[\\/]/.test(p) || netPath(p)) throw new Error('只能打开这台电脑上的文件（像 D:\\… 这样的完整路径）');
+      if (WIN ? !/^[A-Za-z]:[\\/]/.test(p) || netPath(p) : !path.isAbsolute(p)) throw new Error(`只能打开这台电脑上的文件（像 ${WIN ? 'D:\\…' : '/Users/…'} 这样的完整路径）`);
       const f = path.resolve(p);
-      let dir; try { dir = fs.statSync(f).isDirectory(); } catch { throw new Error(`没有这个文件：${p}`); }
+      let st; try { st = fs.statSync(f); } catch { throw new Error(`没有这个文件：${p}`); }
+      const dir = st.isDirectory();
+      if (!WIN) { // a Mac's Finder: opened, else shown in its folder (-R). A program, script or app (one it can run) only shown, never run
+        const runs = dir ? /\.app$/i.test(f) : RUNS.test(f) || MAC_RUNS.test(f) || !!(st.mode & 0o111);
+        require('child_process').spawn('open', how === 'open' && !runs ? [f] : ['-R', f], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+        return { said: how === 'open' && runs ? `${path.basename(f)} 是程序或脚本，没有运行它，在访达里选中了它` : '' };
+      }
       const [exe, line] = shellCmd(f, how, dir);
       require('child_process').spawn(exe, [line], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).on('error', () => {}).unref();
       const env = frontOf(f, how, dir); // (its window to the front: logged, to see what Windows let it do)
@@ -4022,9 +4065,10 @@ async function web() {
       // it can't show)
       if (req.method === 'GET' && (url.pathname === '/api/peek' || url.pathname.startsWith('/api/peek/'))) { // (/api/peek/<name>: its name for the PDF viewer's title)
         const p = url.searchParams.get('path') ?? '';
-        if (!/^[A-Za-z]:[\\/]/.test(p)) return out(400, '只能预览这台电脑上的文件（像 D:\\… 这样的完整路径）', text);
+        if (WIN ? !/^[A-Za-z]:[\\/]/.test(p) : !path.isAbsolute(p)) return out(400, `只能预览这台电脑上的文件（像 ${WIN ? 'D:\\…' : '/Users/…'} 这样的完整路径）`, text);
         let st; try { st = await fs.promises.stat(p); } catch { return out(404, `没有这个文件：${p}`, text); }
-        const raw = url.searchParams.has('raw'), office = !raw && !!OFFICE_KIND[path.extname(p).slice(1).toLowerCase()], warm = url.searchParams.has('warm'); // raw: the file itself, downloaded
+        // an Office one as its PDF: made by Office on Windows; a Mac's as the file itself
+        const raw = url.searchParams.has('raw'), office = WIN && !raw && !!OFFICE_KIND[path.extname(p).slice(1).toLowerCase()], warm = url.searchParams.has('warm'); // raw: the file itself, downloaded
         if (st.isDirectory()) { // listed: its Office files' PDFs made meanwhile (20 at most), for when one's opened
           const ls = await dirsIn(p);
           if (warm) for (const f of ls.files.filter((n) => OFFICE_KIND[path.extname(n).slice(1).toLowerCase()]).slice(0, 20)) peekPdf(path.join(ls.path, f)).catch(() => {});
@@ -4402,7 +4446,88 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { joinApply, checkJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+// claude-multi setup: what install.sh / install.ps1 run once the code is in ~/.claude-multi (run again: an update). Your
+// ~/.claude/settings.json gets the notes and the status line (added to what's there; the file as it was kept beside it),
+// the web service starts at login and now (a Mac's restarted, on the new code), and its page opens.
+const LOGIN_LABEL = 'com.claude-multi.web'; // the Mac's launch agent
+// the notes (Stop, Notification) and the status line, ours added once; a status line of your own kept (theirs)
+function withHooks(s, script) {
+  const cmd = (a) => `node "${script}" ${a}`;
+  const has = (list, a) => (list ?? []).some((e) => (e.hooks ?? []).some((h) => String(h.command ?? '').includes(`claude-multi.js" ${a}`)));
+  const hooks = { ...s.hooks };
+  if (!has(hooks.Stop, 'notify done')) hooks.Stop = [...(hooks.Stop ?? []), { hooks: [{ type: 'command', command: cmd('notify done') }] }];
+  if (!has(hooks.Notification, 'notify ask')) hooks.Notification = [...(hooks.Notification ?? []), { matcher: 'permission_prompt', hooks: [{ type: 'command', command: cmd('notify ask') }] }];
+  const theirs = !!s.statusLine && !String(s.statusLine.command ?? '').includes('claude-multi.js');
+  return { s: { ...s, hooks, ...(!theirs && { statusLine: { type: 'command', command: cmd('statusline') } }) }, theirs };
+}
+async function setup() {
+  // only the copy in ~/.claude-multi: your settings never point at another checkout
+  if (path.relative(fs.realpathSync(ROOT), __filename) !== 'claude-multi.js') { console.log(`setup 只用 ${ROOT} 里的代码运行`); process.exit(1); }
+  const f = path.join(SHARED, 'settings.json'), bak = `${f}.before-claude-multi`;
+  let s = {};
+  try { s = JSON.parse(fs.readFileSync(f, 'utf8').trim() || '{}'); } catch (e) { if (e.code !== 'ENOENT') { console.log(`${f} 读不出来（${e.message}），改好再运行一次`); process.exit(1); } }
+  const w = withHooks(s, __filename.replace(/\\/g, '/'));
+  if (JSON.stringify(w.s) !== JSON.stringify(s)) {
+    fs.mkdirSync(SHARED, { recursive: true });
+    if (fs.existsSync(f) && !fs.existsSync(bak)) fs.copyFileSync(f, bak);
+    fs.writeFileSync(f, JSON.stringify(w.s, null, 2) + '\n');
+    console.log(`通知和状态栏加进了 ${f}`);
+  }
+  if (w.theirs) console.log('状态栏还是你自己的那个，网页底部就看不到模型和上下文用量');
+  const cp = require('child_process'), up = async () => { try { await fetch(`http://127.0.0.1:${WEB_PORT}/`, { signal: AbortSignal.timeout(1500) }); return true; } catch { return false; } };
+  const was = await up();
+  // started on its own, as island.ps1 starts it on Windows (a hidden console of its own for what it runs)
+  const start = () => WIN
+    ? spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Start-Process $env:CM_NODE -ArgumentList (\'"\' + $env:CM_JS + \'" web\') -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE'],
+      { env: { ...process.env, CM_NODE: process.execPath, CM_JS: __filename }, windowsHide: true })
+    : cp.spawn(process.execPath, [__filename, 'web'], { cwd: HOME, detached: true, stdio: 'ignore' }).unref();
+  if (process.platform === 'darwin') {
+    // a launch agent: started at login and now, again if it crashes. HOME, PATH and LANG as here: launchd's PATH has no claude
+    const plist = path.join(HOME, 'Library', 'LaunchAgents', `${LOGIN_LABEL}.plist`), dom = `gui/${process.getuid()}`, log = path.join(ROOT, 'web.log');
+    const x = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;'), str = (v) => `<string>${x(v)}</string>`;
+    fs.mkdirSync(path.dirname(plist), { recursive: true });
+    fs.writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key>${str(LOGIN_LABEL)}
+  <key>ProgramArguments</key><array>${str(process.execPath)}${str(__filename)}${str('web')}</array>
+  <key>WorkingDirectory</key>${str(HOME)}
+  <key>EnvironmentVariables</key><dict>${Object.entries({ HOME, PATH: process.env.PATH, LANG: process.env.LANG }).filter(([, v]) => v).map(([k, v]) => `<key>${k}</key>${str(v)}`).join('')}</dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>StandardOutPath</key>${str(log)}<key>StandardErrorPath</key>${str(log)}
+</dict></plist>
+`);
+    // the one running ended first (an update: its conversations are taken up again once it's back), then loaded again
+    spawnSync('launchctl', ['bootout', `${dom}/${LOGIN_LABEL}`]);
+    for (let i = 0; i < 50 && spawnSync('launchctl', ['print', `${dom}/${LOGIN_LABEL}`]).status === 0; i++) await sleep(100);
+    const r = spawnSync('launchctl', ['bootstrap', dom, plist], { encoding: 'utf8' });
+    if (r.status !== 0) { console.log(`没设成开机启动（${(r.stderr || '').trim()}），这次先直接启动`); start(); }
+  } else if (WIN) {
+    // at login: a shortcut in Startup, as the island's own (island.ps1 starts the web service, and the island unless it's off)
+    const lnk = path.join(process.env.APPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Claude Island.lnk');
+    if (!fs.existsSync(lnk)) {
+      fs.mkdirSync(path.dirname(lnk), { recursive: true });
+      spawnSync('powershell.exe', ['-NoProfile', '-Command', '$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:CM_LNK); '
+        + '$s.TargetPath = (Get-Command powershell.exe).Source; $s.Arguments = $env:CM_ARGS; $s.WindowStyle = 7; $s.Save()'],
+      { env: { ...process.env, CM_LNK: lnk, CM_ARGS: `-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "${ISLAND}"` }, windowsHide: true });
+      if (!fs.existsSync(lnk)) console.log('没设成开机启动：「启动」文件夹里的快捷方式没建出来');
+    }
+    // the claude-multi command: beside npm's own, when that folder is on the PATH
+    const bin = path.join(process.env.APPDATA ?? '', 'npm'), shim = path.join(bin, 'claude-multi.cmd');
+    if ((process.env.PATH ?? '').toLowerCase().split(';').includes(bin.toLowerCase()) && !fs.existsSync(shim)) fs.writeFileSync(shim, `@node "${__filename}" %*\r\n`);
+    if (was) console.log('网页服务已经开着，重启它才用上新代码');
+    else { start(); island(); }
+  } else if (!was) start();
+  for (let i = 0; i < 40 && !(await up()); i++) await sleep(500);
+  if (!(await up())) { console.log(`网页服务没起来${process.platform === 'darwin' ? `，看 ${path.join(ROOT, 'web.log')}` : ''}`); process.exit(1); }
+  const link = `http://127.0.0.1:${WEB_PORT}/?key=${webKey()}`;
+  console.log(`装好了。网页：${link}`);
+  // over ssh nobody sits at this screen: the link only
+  if (!process.env.SSH_CONNECTION) cp.spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+}
+
+module.exports = { sameStart, withHooks, usageState,joinApply, checkJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -4427,6 +4552,7 @@ if (require.main === module) {
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'remove') remove(process.argv[3]);
   else if (cmd === 'web') web();
+  else if (cmd === 'setup') setup();
   else if (cmd === 'web-link') console.log(`${WEB_URL}/?key=${webKey(process.argv[3] === 'new')}`); // new: the old key's browsers are out
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));
   else if (cmd === 'wt-bind') wtBind();

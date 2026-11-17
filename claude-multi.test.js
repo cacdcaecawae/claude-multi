@@ -1158,6 +1158,7 @@ if (SESSION0) {
   assert.deepEqual([usd(7012.4), usd(154.66), usd(0), usd(0.42), about(154.66), about(0.42), about(0)], ['$7,012', '$155', '$0', '不到 $1', '约 $155', '不到 $1', '约 $0']);
   const shut = new Function(`${part(/^const shut = .*$/m)}\nreturn shut;`)();
   assert.deepEqual([shut({ accounts: [] }), shut({ accounts: [{}], rec: null }), shut({ accounts: [{}], rec: 0, ready: '2小时' })], ['还没有 Claude 账号', '额度暂时读不到', '都到上限了，2小时后恢复']);
+  assert.deepEqual([shut({ accounts: [{ api: true }], rec: null }), shut({ accounts: [{}, { api: true }], rec: null })], ['接入已失效', '额度暂时读不到']); // API ones only: none takes the key
   console.log('review page ok');
 })();
 
@@ -1732,6 +1733,7 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual([p.api.join, p.subscriptionType, readJoins().length], [rec.id, 'API', 0]);
   assert.deepEqual([s.env.ANTHROPIC_BASE_URL, s.env.ANTHROPIC_AUTH_TOKEN, s.env.KEEP, s.env.ANTHROPIC_API_KEY, s.apiKeyHelper, !!s.hooks], [url, 'sk-cm-test', '1', undefined, undefined, true]);
   assert.ok(!fs.lstatSync(path.join(p.configDir, 'settings.json')).isSymbolicLink(), 'its own, not the shared one');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(p.configDir, '.claude.json'), 'utf8')).hasCompletedOnboarding, true); // no first-run screens
   fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'join.json'), JSON.stringify([rec])); // asked again: the same one
   await checkJoins();
   assert.deepEqual([mine().length, readJoins().length], [1, 0]);
@@ -1750,3 +1752,44 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   srv.close();
   console.log('申请接入 ok');
 })();
+// API accounts only (a Mac's, 申请接入's): the first one not refused is recommended, nothing to read; a subscription beside
+// one: as before (its quota unread is said so, the API one not taken in its place)
+(async () => {
+  const { usageState } = require('./claude-multi'), path = require('path');
+  const api = (id) => ({ id, configDir: path.join(TEST_HOME, id), api: { baseURL: 'http://127.0.0.1:9' } });
+  const a = (await usageState({ profiles: [api('x1'), api('x2')] })).json;
+  assert.deepEqual([a.rec, a.open], [0, true]);
+  const b = (await usageState({ profiles: [{ id: 'sub1', configDir: path.join(TEST_HOME, 'sub1') }, api('x3')] })).json;
+  assert.deepEqual([b.rec, b.open], [null, false]);
+  console.log('API accounts only: the first recommended ok');
+})();
+// setup's settings: our notes and status line added to yours, once (run again: nothing new); your own status line kept
+{
+  const { withHooks } = require('./claude-multi'), js = 'C:/Users/me/.claude-multi/claude-multi.js';
+  const mine = { model: 'opus', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } };
+  const a = withHooks(mine, js);
+  assert.deepEqual(a.s.hooks.Stop.map((e) => e.hooks[0].command), ['say done', `node "${js}" notify done`]);
+  assert.deepEqual([a.s.hooks.Notification[0].matcher, a.s.hooks.Notification[0].hooks[0].command, a.s.statusLine.command, a.s.model, a.theirs],
+    ['permission_prompt', `node "${js}" notify ask`, `node "${js}" statusline`, 'opus', false]);
+  assert.equal(JSON.stringify(withHooks(a.s, js).s), JSON.stringify(a.s)); // again: the same
+  const b = withHooks({ statusLine: { type: 'command', command: 'my-line' } }, js);
+  assert.deepEqual([b.s.statusLine.command, b.theirs], ['my-line', true]);
+  assert.equal(withHooks({ statusLine: { type: 'command', command: 'node "/old/claude-multi.js" statusline' } }, js).s.statusLine.command, `node "${js}" statusline`); // ours, moved
+  console.log('setup settings ok');
+}
+// a Mac's running check: the pid's start (ps, in UTC) as Claude wrote it down, to the second; another program on a pid
+// reused, or gone: not Claude; a start that can't be read: the pid alone
+{
+  const { sameStart } = require('./claude-multi');
+  const was = 'Tue Nov 17 03:26:30 2026';
+  assert.deepEqual([sameStart('Tue Nov 17 03:26:30 2026', was, false), sameStart('Tue Nov 17 03:26:31 2026', was, false),
+    sameStart('Tue Nov 17 04:26:30 2026', was, false), sameStart(undefined, was, false), sameStart('Tue Nov 17 03:26:30 2026', 'garbage', false),
+    sameStart('Thu Jan  1 00:00:00 1970', '1970-01-01T00:00:00.000Z', false), sameStart('Tue Nov 17 03:26:30 2026', '1970-01-01T00:00:00.000Z', false),
+    sameStart('133', 133, true), sameStart('133', 134, true)], [true, true, false, false, true, true, false, true, false]);
+  // a Mac's page: its own paths (/Users/…) are 预览 links, a /command isn't; on Windows a Mac's path stays code
+  const line = /^const PEEKABLE = .*$/m.exec(fs.readFileSync(require('path').join(__dirname, 'web.html'), 'utf8'))[0];
+  const pk = (win) => new Function('state', `${line}; return peekable;`)({ win });
+  assert.deepEqual(['/Users/me/a.md', '/private/tmp/x', 'C:/a.md', '/model', '/api/state', '/Users/me/&lt;id&gt;'].map((c) => pk(false)(c)), [true, true, true, false, false, false]);
+  assert.deepEqual(['/Users/me/a.md', 'C:/a.md'].map((c) => pk(true)(c)), [false, true]);
+  console.log('a Mac\'s start check and paths ok');
+}
