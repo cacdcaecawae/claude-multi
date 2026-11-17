@@ -1762,3 +1762,17 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual([b.rec, b.open], [null, false]);
   console.log('API accounts only: the first recommended ok');
 })();
+// setup's settings: our notes and status line added to yours, once (run again: nothing new); your own status line kept
+{
+  const { withHooks } = require('./claude-multi'), js = 'C:/Users/me/.claude-multi/claude-multi.js';
+  const mine = { model: 'opus', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } };
+  const a = withHooks(mine, js);
+  assert.deepEqual(a.s.hooks.Stop.map((e) => e.hooks[0].command), ['say done', `node "${js}" notify done`]);
+  assert.deepEqual([a.s.hooks.Notification[0].matcher, a.s.hooks.Notification[0].hooks[0].command, a.s.statusLine.command, a.s.model, a.theirs],
+    ['permission_prompt', `node "${js}" notify ask`, `node "${js}" statusline`, 'opus', false]);
+  assert.equal(JSON.stringify(withHooks(a.s, js).s), JSON.stringify(a.s)); // again: the same
+  const b = withHooks({ statusLine: { type: 'command', command: 'my-line' } }, js);
+  assert.deepEqual([b.s.statusLine.command, b.theirs], ['my-line', true]);
+  assert.equal(withHooks({ statusLine: { type: 'command', command: 'node "/old/claude-multi.js" statusline' } }, js).s.statusLine.command, `node "${js}" statusline`); // ours, moved
+  console.log('setup settings ok');
+}

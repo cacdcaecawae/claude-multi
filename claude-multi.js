@@ -4417,7 +4417,84 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { usageState, joinApply, checkJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+// claude-multi setup: what install.sh / install.ps1 run once the code is in ~/.claude-multi (run again: an update). Your
+// ~/.claude/settings.json gets the notes and the status line (added to what's there; the file as it was kept beside it),
+// the web service starts at login and now (a Mac's restarted, on the new code), and its page opens.
+const LOGIN_LABEL = 'com.claude-multi.web'; // the Mac's launch agent
+// the notes (Stop, Notification) and the status line, ours added once; a status line of your own kept (theirs)
+function withHooks(s, script) {
+  const cmd = (a) => `node "${script}" ${a}`;
+  const has = (list, a) => (list ?? []).some((e) => (e.hooks ?? []).some((h) => String(h.command ?? '').includes(`claude-multi.js" ${a}`)));
+  const hooks = { ...s.hooks };
+  if (!has(hooks.Stop, 'notify done')) hooks.Stop = [...(hooks.Stop ?? []), { hooks: [{ type: 'command', command: cmd('notify done') }] }];
+  if (!has(hooks.Notification, 'notify ask')) hooks.Notification = [...(hooks.Notification ?? []), { matcher: 'permission_prompt', hooks: [{ type: 'command', command: cmd('notify ask') }] }];
+  const theirs = !!s.statusLine && !String(s.statusLine.command ?? '').includes('claude-multi.js');
+  return { s: { ...s, hooks, ...(!theirs && { statusLine: { type: 'command', command: cmd('statusline') } }) }, theirs };
+}
+async function setup() {
+  // only the copy in ~/.claude-multi: your settings never point at another checkout
+  if (path.relative(fs.realpathSync(ROOT), __filename) !== 'claude-multi.js') { console.log(`setup 只用 ${ROOT} 里的代码运行`); process.exit(1); }
+  const f = path.join(SHARED, 'settings.json'), bak = `${f}.before-claude-multi`;
+  let s = {};
+  try { s = JSON.parse(fs.readFileSync(f, 'utf8').trim() || '{}'); } catch (e) { if (e.code !== 'ENOENT') { console.log(`${f} 读不出来（${e.message}），改好再运行一次`); process.exit(1); } }
+  const w = withHooks(s, __filename.replace(/\\/g, '/'));
+  if (JSON.stringify(w.s) !== JSON.stringify(s)) {
+    fs.mkdirSync(SHARED, { recursive: true });
+    if (fs.existsSync(f) && !fs.existsSync(bak)) fs.copyFileSync(f, bak);
+    fs.writeFileSync(f, JSON.stringify(w.s, null, 2) + '\n');
+    console.log(`通知和状态栏加进了 ${f}`);
+  }
+  if (w.theirs) console.log('状态栏还是你自己的那个，网页底部就看不到模型和上下文用量');
+  const cp = require('child_process'), up = async () => { try { await fetch(`http://127.0.0.1:${WEB_PORT}/`, { signal: AbortSignal.timeout(1500) }); return true; } catch { return false; } };
+  const was = await up();
+  // started on its own, as island.ps1 starts it on Windows (a hidden console of its own for what it runs)
+  const start = () => WIN
+    ? spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Start-Process $env:CM_NODE -ArgumentList (\'"\' + $env:CM_JS + \'" web\') -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE'],
+      { env: { ...process.env, CM_NODE: process.execPath, CM_JS: __filename }, windowsHide: true })
+    : cp.spawn(process.execPath, [__filename, 'web'], { cwd: HOME, detached: true, stdio: 'ignore' }).unref();
+  if (process.platform === 'darwin') {
+    // a launch agent: started at login and now, again if it crashes. HOME and PATH as here: launchd's PATH has no claude
+    const plist = path.join(HOME, 'Library', 'LaunchAgents', `${LOGIN_LABEL}.plist`), dom = `gui/${process.getuid()}`, log = path.join(ROOT, 'web.log');
+    const x = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;'), str = (v) => `<string>${x(v)}</string>`;
+    fs.mkdirSync(path.dirname(plist), { recursive: true });
+    fs.writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key>${str(LOGIN_LABEL)}
+  <key>ProgramArguments</key><array>${str(process.execPath)}${str(__filename)}${str('web')}</array>
+  <key>WorkingDirectory</key>${str(HOME)}
+  <key>EnvironmentVariables</key><dict><key>HOME</key>${str(HOME)}<key>PATH</key>${str(process.env.PATH)}</dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>StandardOutPath</key>${str(log)}<key>StandardErrorPath</key>${str(log)}
+</dict></plist>
+`);
+    // the one running ended first (an update: its conversations are taken up again once it's back), then loaded again
+    spawnSync('launchctl', ['bootout', `${dom}/${LOGIN_LABEL}`]);
+    for (let i = 0; i < 50 && spawnSync('launchctl', ['print', `${dom}/${LOGIN_LABEL}`]).status === 0; i++) await sleep(100);
+    const r = spawnSync('launchctl', ['bootstrap', dom, plist], { encoding: 'utf8' });
+    if (r.status !== 0) { console.log(`没设成开机启动（${(r.stderr || '').trim()}），这次先直接启动`); start(); }
+  } else if (WIN) {
+    // at login: a shortcut in Startup, as the island's own (island.ps1 starts the web service, and the island unless it's off)
+    const lnk = path.join(process.env.APPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Claude Island.lnk');
+    if (!fs.existsSync(lnk)) spawnSync('powershell.exe', ['-NoProfile', '-Command', '$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:CM_LNK); '
+      + '$s.TargetPath = (Get-Command powershell.exe).Source; $s.Arguments = $env:CM_ARGS; $s.WindowStyle = 7; $s.Save()'],
+    { env: { ...process.env, CM_LNK: lnk, CM_ARGS: `-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "${ISLAND}"` }, windowsHide: true });
+    // the claude-multi command: beside npm's own, when that folder is on the PATH
+    const bin = path.join(process.env.APPDATA ?? '', 'npm'), shim = path.join(bin, 'claude-multi.cmd');
+    if ((process.env.PATH ?? '').toLowerCase().split(';').includes(bin.toLowerCase()) && !fs.existsSync(shim)) fs.writeFileSync(shim, `@node "${__filename}" %*\r\n`);
+    if (was) console.log('网页服务已经开着，重启它才用上新代码');
+    else { start(); island(); }
+  } else if (!was) start();
+  for (let i = 0; i < 40 && !(await up()); i++) await sleep(500);
+  if (!(await up())) { console.log(`网页服务没起来${process.platform === 'darwin' ? `，看 ${path.join(ROOT, 'web.log')}` : ''}`); process.exit(1); }
+  const link = `http://127.0.0.1:${WEB_PORT}/?key=${webKey()}`;
+  console.log(`装好了。网页：${link}`);
+  // over ssh nobody sits at this screen: the link only
+  if (!process.env.SSH_CONNECTION) cp.spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+}
+
+module.exports = { withHooks, usageState,joinApply, checkJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -4442,6 +4519,7 @@ if (require.main === module) {
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'remove') remove(process.argv[3]);
   else if (cmd === 'web') web();
+  else if (cmd === 'setup') setup();
   else if (cmd === 'web-link') console.log(`${WEB_URL}/?key=${webKey(process.argv[3] === 'new')}`); // new: the old key's browsers are out
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));
   else if (cmd === 'wt-bind') wtBind();
