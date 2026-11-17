@@ -1777,3 +1777,19 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.equal(withHooks({ statusLine: { type: 'command', command: 'node "/old/claude-multi.js" statusline' } }, js).s.statusLine.command, `node "${js}" statusline`); // ours, moved
   console.log('setup settings ok');
 }
+// a Mac's running check: the pid's start (ps, in UTC) as Claude wrote it down, to the second; another program on a pid
+// reused, or gone: not Claude; a start that can't be read: the pid alone
+{
+  const { sameStart } = require('./claude-multi');
+  const was = 'Tue Nov 17 03:26:30 2026';
+  assert.deepEqual([sameStart('Tue Nov 17 03:26:30 2026', was, false), sameStart('Tue Nov 17 03:26:31 2026', was, false),
+    sameStart('Tue Nov 17 04:26:30 2026', was, false), sameStart(undefined, was, false), sameStart('Tue Nov 17 03:26:30 2026', 'garbage', false),
+    sameStart('Thu Jan  1 00:00:00 1970', '1970-01-01T00:00:00.000Z', false), sameStart('Tue Nov 17 03:26:30 2026', '1970-01-01T00:00:00.000Z', false),
+    sameStart('133', 133, true), sameStart('133', 134, true)], [true, true, false, false, true, true, false, true, false]);
+  // a Mac's page: its own paths (/Users/…) are 预览 links, a /command isn't; on Windows a Mac's path stays code
+  const line = /^const PEEKABLE = .*$/m.exec(fs.readFileSync(require('path').join(__dirname, 'web.html'), 'utf8'))[0];
+  const pk = (win) => new Function('state', `${line}; return peekable;`)({ win });
+  assert.deepEqual(['/Users/me/a.md', '/private/tmp/x', 'C:/a.md', '/model', '/api/state', '/Users/me/&lt;id&gt;'].map((c) => pk(false)(c)), [true, true, true, false, false, false]);
+  assert.deepEqual(['/Users/me/a.md', 'C:/a.md'].map((c) => pk(true)(c)), [false, true]);
+  console.log('a Mac\'s start check and paths ok');
+}

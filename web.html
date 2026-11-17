@@ -3409,8 +3409,9 @@ const link = (m, words, u) => {
 const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]*?[^$\s])\$(?!\d)/g; // no lookbehind: an older Safari fails to read the whole script on one
 const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
 // a path of this PC as Claude writes one in `code` (D:\… or D:/…): opened by 预览 (preview). Not one with a stand-in in it
-// (runs/<id>: its < > here as &lt; &gt;, the code being escaped already) nor a "
-const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/;
+// (runs/<id>: its < > here as &lt; &gt;, the code being escaped already) nor a ". A Mac's service: its own paths too
+// (/Users/…; under its usual tops, not a /command); on Windows one of those is a Mac's, out of reach
+const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, MAC_PEEKABLE = /^\/(?:Users|Volumes|private|tmp|Applications|Library|opt)\/(?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, peekable = (c) => PEEKABLE.test(c) || (typeof state !== 'undefined' && state?.win === false && MAC_PEEKABLE.test(c));
 // as Codex shows one: its kind's mark and its name (a folder's: one ending in \ or /, or with no .ext), the whole path on hover
 const peekLink = (c) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || c, dir = /[\\/]$/.test(c) || !/\.\w{1,8}$/.test(n);
   return `<a class="peek" data-peek="${c}" title="${c}">${svg(dir ? I.folder : I.file)}${n}</a>`; };
@@ -3447,7 +3448,7 @@ function md(t) {
     if (i % 4) return `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${hl(p.replace(/\n$/, ''), /^\s*([\w#+.-]*)/.exec(ps[i - 1])[1].toLowerCase())}</pre></div>`;
     const math = [];
     p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
-    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (PEEKABLE.test(c) ? peekLink(c) : `<code>${c}</code>`))
+    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (peekable(c) ? peekLink(c) : `<code>${c}</code>`))
       .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)
       .replace(/\u0000(\d+)\u0000/g, (_, k) => tex(...math[k]));
   }).join('');
@@ -3644,8 +3645,9 @@ document.addEventListener('contextmenu', (e) => {
   const dir = el.dataset.dir != null || el.dataset.pvgo != null || (t ? t.dir : el.dataset.pvp == null && isDirPath(p));
   const away = !/^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname) && '在电脑的屏幕上打开，不在这台设备上'; // (looked at from another device)
   e.preventDefault(); menuFor = { file: { p, dir } };
-  popMenu(pvName(p), dir ? [['pv', '预览'], ['open', '在资源管理器中打开', away, true], ['copy', '复制路径']]
-    : [['pv', '预览'], ['open', '在电脑上打开', away, true], ['with', '打开方式…'], ['reveal', '在资源管理器中显示'], ['-'], ['dl', '下载'], ['copy', '复制路径'], ['text', '复制文件内容']], e.clientX, e.clientY);
+  const fm = win() ? '资源管理器' : '访达'; // a Mac's: Finder, and no 打开方式 (Windows' own chooser)
+  popMenu(pvName(p), dir ? [['pv', '预览'], ['open', `在${fm}中打开`, away, true], ['copy', '复制路径']]
+    : [['pv', '预览'], ['open', '在电脑上打开', away, true], win() && ['with', '打开方式…'], ['reveal', `在${fm}中显示`], ['-'], ['dl', '下载'], ['copy', '复制路径'], ['text', '复制文件内容']].filter(Boolean), e.clientX, e.clientY);
 });
 const copyText = (t, said = '已复制') => (navigator.clipboard?.writeText(t) ?? Promise.reject()).then(() => toast(said, 1200), () => toast('复制失败', 2000));
 async function fileAct(k, { p }) {

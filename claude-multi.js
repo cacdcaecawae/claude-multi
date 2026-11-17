@@ -597,23 +597,33 @@ function lastTyped(tail, before = Infinity) {
   return null;
 }
 
-// Start times (Windows FILETIME, as sessions/<pid>.json's procStart) of these pids; null if PowerShell failed.
+// Start times of these pids, as sessions/<pid>.json's procStart has them: Windows' FILETIME (PowerShell), a Mac's ps's
+// lstart in UTC and C's words (as Claude Code writes it there, whatever your language); null if that failed.
 // The same pids within a minute: the last answer (PowerShell takes ~0.2 s, and the web service asks every few seconds).
 // The web service sets procStarts.beside: there it runs beside, never waited on (waiting froze the service, and every
 // terminal with it, once a minute); till it answers, or for a minute after it failed, null: the pid alone.
 let startsSeen = { key: '', at: 0, map: null }, startsRun = null;
 function procStarts(pids) {
   if (!pids.length) return new Map();
-  if (!WIN) return null; // shortcut: macOS goes by the pid alone (procStart there is a date, not a FILETIME); a reused pid is taken for Claude
   const key = [...pids].sort().join(',');
   if (startsSeen.key === key && Date.now() - startsSeen.at < 60000) return startsSeen.map;
-  const args = ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
-    + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'];
-  const took = (out) => (startsSeen = { key, at: Date.now(), map: out == null ? null : new Map(out.trim().split(/\r?\n/).filter(Boolean).map((l) => l.split(' '))) }).map;
-  if (!procStarts.beside) { const r = spawnSync('powershell.exe', args, { encoding: 'utf8', windowsHide: true }); return r.status === 0 ? took(r.stdout) : null; }
-  startsRun ??= require('child_process').execFile('powershell.exe', args, { encoding: 'utf8', windowsHide: true }, (err, out) => { startsRun = null; took(err ? null : out); });
+  const [exe, args, env] = WIN ? ['powershell.exe', ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
+    + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'], process.env] : ['ps', ['-o', 'pid=,lstart=', '-p', pids.join(',')], { ...process.env, LC_ALL: 'C', TZ: 'UTC' }];
+  const took = (out) => (startsSeen = { key, at: Date.now(), map: out == null ? null
+    : new Map(out.split(/\r?\n/).flatMap((l) => { const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(l); return m ? [[m[1], m[2]]] : []; })) }).map;
+  // a Mac's ps exits 1 when one of them is gone, the others said all the same
+  const failed = (status, err) => (WIN ? status !== 0 : !!err);
+  if (!procStarts.beside) { const r = spawnSync(exe, args, { encoding: 'utf8', windowsHide: true, env }); return failed(r.status, r.error) ? null : took(r.stdout); }
+  startsRun ??= require('child_process').execFile(exe, args, { encoding: 'utf8', windowsHide: true, env }, (err, out) => {
+    startsRun = null; took(failed(err ? 1 : 0, err && typeof err.code !== 'number') ? null : out);
+  });
   return startsSeen.key === key ? startsSeen.map : null;
 }
+// the same start: Windows' FILETIME as written; a Mac's the same second (ps's, and Claude's, a date in UTC with no zone
+// said; one with its zone, as it says). One that can't be read as a date: not told apart, the pid alone
+const utcTime = (s) => { const t = Date.parse(`${s} UTC`); return Number.isFinite(t) ? t : Date.parse(s); };
+const sameStart = (now, was, win = WIN) => win ? now === String(was)
+  : !Number.isFinite(utcTime(was)) || Math.abs(utcTime(now) - utcTime(was)) < 2000;
 
 const readHeads = new Map(); // record file -> { at: its mtime, cwd, title, prompt }
 // The session files (sessions/<pid>.json) of a config dir whose pid still runs: each Claude started on it writes one.
@@ -629,9 +639,9 @@ function sessionFiles(dir) {
   }
   return out;
 }
-// a Claude that didn't exit cleanly leaves its file, and Windows soon gives its pid to another program:
-// running means that pid also started when Claude wrote down (without PowerShell, the pid alone)
-const stillClaude = (js) => { const starts = procStarts(js.map((j) => j.pid)); return js.filter((j) => !starts || !j.procStart || starts.get(String(j.pid)) === String(j.procStart)); };
+// a Claude that didn't exit cleanly leaves its file, and the system soon gives its pid to another program:
+// running means that pid also started when Claude wrote down (without PowerShell or ps, the pid alone)
+const stillClaude = (js) => { const starts = procStarts(js.map((j) => j.pid)); return js.filter((j) => !starts || !j.procStart || sameStart(starts.get(String(j.pid)), j.procStart)); };
 // Whether any Claude runs on an account, for removing it: from its session files, not the conversation list, which
 // leaves out one with nothing said yet (no record), no title, or its folder gone.
 // ponytail: one the web service has just spawned writes its file within a moment; that moment isn't covered
@@ -1950,9 +1960,15 @@ function del(id) {
 }
 // Session 0 (ssh, a service) has no Recycle Bin: there it deletes for good without a word, so it's refused (exit 3)
 function recycle(paths) {
-  if (!WIN) { // macOS: moved into the Trash, a name of its own there
+  if (!WIN) { // macOS: moved into the Trash, a name of its own there (as Finder names a second one: name 2, name 3…), never over one
+    const taken = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
     try {
-      for (const p of paths) { const t = path.join(HOME, '.Trash', path.basename(p)); fs.renameSync(p, fs.existsSync(t) ? `${t} ${Date.now()}` : t); }
+      for (const p of paths) {
+        const t = path.join(HOME, '.Trash', path.basename(p));
+        let to = t;
+        for (let n = 2; taken(to); n++) to = `${t} ${n}`;
+        fs.renameSync(p, to);
+      }
       return { status: 0, stderr: '' };
     } catch (e) { return { status: 1, stderr: `没放进废纸篓：${e.message}` }; }
   }
@@ -2757,6 +2773,8 @@ const PEEK_TEXT = new Set([...TEXT_EXT, '', 'html', 'htm', 'svg', 'xml', 'css', 
 // shown in Explorer instead), 打开方式 (Windows' own chooser), 在资源管理器中显示; a folder opened in Explorer. [what's
 // started, its command line as Windows takes it (a path can't hold a ")]
 const RUNS = /\.(exe|com|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|ws|msi|msp|msc|lnk|scr|pif|hta|cpl|reg|inf|scf|jar|url|py|pyw|sh|appref-ms|application|gadget)$/i;
+// what a Mac's open would run (or install): besides RUNS's, and a file it may run (chmod +x)
+const MAC_RUNS = /\.(command|tool|zsh|bash|csh|pl|rb|pkg|mpkg|dmg|workflow|action|scpt|scptd|applescript|terminal|webloc|inetloc|prefpane|kext|osax)$/i;
 const shellCmd = (f, how, dir) => dir ? ['explorer.exe', `"${f}"`] : how === 'with' ? ['rundll32.exe', `shell32.dll,OpenAs_RunDLL ${f}`] // (its path bare, as Windows' own "Open with" has it)
   : how === 'open' && !RUNS.test(f) ? ['explorer.exe', `"${f}"`] : ['explorer.exe', `/select,"${f}"`];
 // …then brought to the front: Windows keeps a window a background process opens (the service is one) behind, flashing in
@@ -3797,9 +3815,15 @@ async function web() {
     // 右键 a path of this PC on the page (shellCmd): opened on this PC's screen, where the service runs (your session)
     'POST /api/shell': (q, b) => {
       const p = String(b.path ?? ''), how = String(b.how ?? '');
-      if (!/^[A-Za-z]:[\\/]/.test(p) || netPath(p)) throw new Error('只能打开这台电脑上的文件（像 D:\\… 这样的完整路径）');
+      if (WIN ? !/^[A-Za-z]:[\\/]/.test(p) || netPath(p) : !path.isAbsolute(p)) throw new Error(`只能打开这台电脑上的文件（像 ${WIN ? 'D:\\…' : '/Users/…'} 这样的完整路径）`);
       const f = path.resolve(p);
-      let dir; try { dir = fs.statSync(f).isDirectory(); } catch { throw new Error(`没有这个文件：${p}`); }
+      let st; try { st = fs.statSync(f); } catch { throw new Error(`没有这个文件：${p}`); }
+      const dir = st.isDirectory();
+      if (!WIN) { // a Mac's Finder: opened, else shown in its folder (-R). A program, script or app (one it can run) only shown, never run
+        const runs = dir ? /\.app$/i.test(f) : RUNS.test(f) || MAC_RUNS.test(f) || !!(st.mode & 0o111);
+        require('child_process').spawn('open', how === 'open' && !runs ? [f] : ['-R', f], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+        return { said: how === 'open' && runs ? `${path.basename(f)} 是程序或脚本，没有运行它，在访达里选中了它` : '' };
+      }
       const [exe, line] = shellCmd(f, how, dir);
       require('child_process').spawn(exe, [line], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).on('error', () => {}).unref();
       const env = frontOf(f, how, dir); // (its window to the front: logged, to see what Windows let it do)
@@ -4041,9 +4065,10 @@ async function web() {
       // it can't show)
       if (req.method === 'GET' && (url.pathname === '/api/peek' || url.pathname.startsWith('/api/peek/'))) { // (/api/peek/<name>: its name for the PDF viewer's title)
         const p = url.searchParams.get('path') ?? '';
-        if (!/^[A-Za-z]:[\\/]/.test(p)) return out(400, '只能预览这台电脑上的文件（像 D:\\… 这样的完整路径）', text);
+        if (WIN ? !/^[A-Za-z]:[\\/]/.test(p) : !path.isAbsolute(p)) return out(400, `只能预览这台电脑上的文件（像 ${WIN ? 'D:\\…' : '/Users/…'} 这样的完整路径）`, text);
         let st; try { st = await fs.promises.stat(p); } catch { return out(404, `没有这个文件：${p}`, text); }
-        const raw = url.searchParams.has('raw'), office = !raw && !!OFFICE_KIND[path.extname(p).slice(1).toLowerCase()], warm = url.searchParams.has('warm'); // raw: the file itself, downloaded
+        // an Office one as its PDF: made by Office on Windows; a Mac's as the file itself
+        const raw = url.searchParams.has('raw'), office = WIN && !raw && !!OFFICE_KIND[path.extname(p).slice(1).toLowerCase()], warm = url.searchParams.has('warm'); // raw: the file itself, downloaded
         if (st.isDirectory()) { // listed: its Office files' PDFs made meanwhile (20 at most), for when one's opened
           const ls = await dirsIn(p);
           if (warm) for (const f of ls.files.filter((n) => OFFICE_KIND[path.extname(n).slice(1).toLowerCase()]).slice(0, 20)) peekPdf(path.join(ls.path, f)).catch(() => {});
@@ -4502,7 +4527,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION) cp.spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { withHooks, usageState,joinApply, checkJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { sameStart, withHooks, usageState,joinApply, checkJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
