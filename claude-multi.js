@@ -4477,9 +4477,13 @@ async function setup() {
   } else if (WIN) {
     // at login: a shortcut in Startup, as the island's own (island.ps1 starts the web service, and the island unless it's off)
     const lnk = path.join(process.env.APPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Claude Island.lnk');
-    if (!fs.existsSync(lnk)) spawnSync('powershell.exe', ['-NoProfile', '-Command', '$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:CM_LNK); '
-      + '$s.TargetPath = (Get-Command powershell.exe).Source; $s.Arguments = $env:CM_ARGS; $s.WindowStyle = 7; $s.Save()'],
-    { env: { ...process.env, CM_LNK: lnk, CM_ARGS: `-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "${ISLAND}"` }, windowsHide: true });
+    if (!fs.existsSync(lnk)) {
+      fs.mkdirSync(path.dirname(lnk), { recursive: true });
+      spawnSync('powershell.exe', ['-NoProfile', '-Command', '$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:CM_LNK); '
+        + '$s.TargetPath = (Get-Command powershell.exe).Source; $s.Arguments = $env:CM_ARGS; $s.WindowStyle = 7; $s.Save()'],
+      { env: { ...process.env, CM_LNK: lnk, CM_ARGS: `-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "${ISLAND}"` }, windowsHide: true });
+      if (!fs.existsSync(lnk)) console.log('没设成开机启动：「启动」文件夹里的快捷方式没建出来');
+    }
     // the claude-multi command: beside npm's own, when that folder is on the PATH
     const bin = path.join(process.env.APPDATA ?? '', 'npm'), shim = path.join(bin, 'claude-multi.cmd');
     if ((process.env.PATH ?? '').toLowerCase().split(';').includes(bin.toLowerCase()) && !fs.existsSync(shim)) fs.writeFileSync(shim, `@node "${__filename}" %*\r\n`);
