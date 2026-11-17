@@ -18,7 +18,12 @@ const ISLAND = path.join(ROOT, 'island.ps1');
 // the island switched off in the page's settings: not started (not by a note, not by the CLI; at login island.ps1
 // only starts the web service), and nothing put in its inbox. The web pages and phones get their notes as ever.
 const ISLAND_OFF = path.join(ROOT, 'island-off');
-const islandOff = () => fs.existsSync(ISLAND_OFF);
+// macOS: the web page only (its conversations, 申请接入's accounts); no island, terminal windows, Recycle Bin or PowerShell
+const WIN = process.platform === 'win32';
+const islandOff = () => !WIN || fs.existsSync(ISLAND_OFF);
+const TRASH = WIN ? '回收站' : '废纸篓';
+// where a command is on the PATH ('' if not)
+const whereIs = (c) => spawnSync(WIN ? 'where' : 'which', [c], { encoding: 'utf8', windowsHide: true }).stdout?.split(/\r?\n/).find(Boolean)?.trim() ?? '';
 // the 管家, a 开发功能: off till it's switched on in the page's settings (then this file is there)
 const BUTLER_ON = path.join(ROOT, 'butler-on');
 const butlerOn = () => fs.existsSync(BUTLER_ON), BUTLER_SHUT = '管家没有开启：在设置的「开发功能」里打开';
@@ -113,13 +118,13 @@ function shareMemory(extra = [], roots = [SHARED, ...load().profiles.map((p) => 
 // one added in one account or in plain claude was missing in the others. Kept as one set: what was added, changed or
 // removed in any of them since it was last seen there (mcp-shared.json: the set, and each file as last seen) goes
 // into the set, which is written to ~/.claude.json and to the config about to start; the others get it when they start.
+const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } }; // null: none, or not JSON
 function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profiles.map((p) => path.join(p.configDir, '.claude.json'))],
   stateFile = path.join(ROOT, 'mcp-shared.json')) {
-  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  const st = read(stateFile) ?? { set: {}, seen: {} }, set = st.set;
+  const st = readJson(stateFile) ?? { set: {}, seen: {} }, set = st.set;
   for (const f of files) {
-    const j = read(f), was = st.seen[f];
+    const j = readJson(f), was = st.seen[f];
     if (!j) continue; // missing, or caught mid-write: not a removal
     const m = j.mcpServers ?? {};
     for (const [k, v] of Object.entries(m)) if (!was || !same(v, was[k])) set[k] = v; // new there, or changed
@@ -127,7 +132,7 @@ function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profi
     st.seen[f] = m;
   }
   for (const f of [files[0], path.join(dir, '.claude.json')]) {
-    const j = read(f);
+    const j = readJson(f);
     if (!j) continue;
     try {
       if (!same(j.mcpServers ?? {}, set)) { // written only on a change: a Claude running there rewrites this file too
@@ -147,9 +152,8 @@ function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profi
 // is trusted in all: the config about to start gets every folder another one trusts.
 // extra: folders (as C:/a/b) trusted besides, as clicking Yes on their trust question does
 function shareTrust(dir, files = [path.join(HOME, '.claude.json'), ...load().profiles.map((p) => path.join(p.configDir, '.claude.json'))], extra = []) {
-  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const trusted = new Set([...extra, ...files.flatMap((f) => Object.entries(read(f)?.projects ?? {}).filter(([, v]) => v?.hasTrustDialogAccepted).map(([k]) => k))]);
-  const f = path.join(dir, '.claude.json'), j = read(f);
+  const trusted = new Set([...extra, ...files.flatMap((f) => Object.entries(readJson(f)?.projects ?? {}).filter(([, v]) => v?.hasTrustDialogAccepted).map(([k]) => k))]);
+  const f = path.join(dir, '.claude.json'), j = readJson(f);
   const add = j ? [...trusted].filter((k) => !j.projects?.[k]?.hasTrustDialogAccepted) : [];
   if (!add.length) return; // written only on a change: a Claude running there rewrites this file too
   j.projects ??= {};
@@ -207,8 +211,9 @@ function ask(q) {
   return null;
 }
 
-function newProfile() {
-  console.log('正在创建新的 Claude 账号配置……');
+// A new account's folder, acct-<day>-<n>: the shared files linked in, your preferences (theme, onboarding) copied.
+// settings: its own settings.json (an API account's), written first so the shared one isn't linked in its place.
+function accountDir(settings) {
   fs.mkdirSync(ACCOUNTS, { recursive: true });
   const day = new Date().toLocaleDateString('sv').replace(/-/g, ''); // local YYYYMMDD
   let id, dir;
@@ -217,6 +222,7 @@ function newProfile() {
     dir = path.join(ACCOUNTS, id);
     try { fs.mkdirSync(dir); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
   }
+  if (settings) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings, null, 2) + '\n');
   ensureLinks(dir);
   const prefs = {};
   try {
@@ -224,6 +230,77 @@ function newProfile() {
     for (const k of PREF_KEYS) if (k in g) prefs[k] = g[k];
   } catch {}
   fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify(prefs, null, 2) + '\n');
+  return { id, dir };
+}
+
+// 申请接入: your applications to a gateway's apply service, in join.json (never in git: each keeps its ticket, the
+// secret the service knows it by). Approved, one becomes an API account: your settings (the shared settings.json) with
+// the gateway's address and the key it gave. Once per application (api.join), however often it's asked.
+const JOINS = path.join(ROOT, 'join.json');
+const readJoins = () => { try { return JSON.parse(fs.readFileSync(JOINS, 'utf8')); } catch { return []; } };
+const saveJoins = (js) => { fs.writeFileSync(JOINS + '.tmp', JSON.stringify(js, null, 2)); fs.renameSync(JOINS + '.tmp', JOINS); };
+const editJoin = (id, fn) => saveJoins(readJoins().flatMap((j) => (j.id === id ? fn(j) : [j])));
+const joinsShown = () => readJoins().map(({ ticket, ...j }) => j);
+async function askApply(url, what, body) {
+  const r = await fetch(`${url}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+  const j = await r.json().catch(() => null);
+  if (!j || (!r.ok && r.status !== 404)) throw Error(j?.err ?? `接入地址答 ${r.status}`);
+  return { status: r.status, ...j };
+}
+function joinAccount(j, key) {
+  const reg = load(), had = reg.profiles.find((p) => p.api?.join === j.id);
+  if (had) return had;
+  // the same address again (its key taken back, applied anew): that account takes the new key, no second one
+  const same = reg.profiles.find((p) => p.api?.join && p.api.baseURL === j.url), own = same && path.join(same.configDir, 'settings.json');
+  if (same && fs.existsSync(own)) {
+    const s = JSON.parse(fs.readFileSync(own, 'utf8'));
+    fs.writeFileSync(own, JSON.stringify({ ...s, env: { ...s.env, ANTHROPIC_AUTH_TOKEN: key } }, null, 2) + '\n');
+    update((r) => { r.profiles.find((p) => p.id === same.id).api.join = j.id; });
+    log('profile_rejoined', { profile_id: same.id, base_url: j.url });
+    return same;
+  }
+  let mine = {};
+  try { mine = JSON.parse(fs.readFileSync(path.join(SHARED, 'settings.json'), 'utf8')); } catch {}
+  const env = { ...mine.env, ANTHROPIC_BASE_URL: j.url, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1' };
+  delete env.ANTHROPIC_API_KEY; delete mine.apiKeyHelper; // the gateway's key only
+  const { id, dir } = accountDir({ ...mine, env });
+  // no sign-in to walk through: Claude's first-run screens (its theme, its notes) skipped, the page has no cards for them.
+  // A Claude Code just installed, never run, stopped there.
+  const cj = path.join(dir, '.claude.json');
+  fs.writeFileSync(cj, JSON.stringify({ ...JSON.parse(fs.readFileSync(cj, 'utf8')), hasCompletedOnboarding: true }, null, 2) + '\n');
+  const p = { id, label: new URL(j.url).host, subscriptionType: 'API', configDir: dir, createdAt: now(), lastUsedAt: null, api: { baseURL: j.url, join: j.id } };
+  update((reg) => { reg.profiles.push(p); });
+  log('profile_joined', { profile_id: id, base_url: j.url });
+  return p;
+}
+async function joinApply(b) {
+  const url = String(b.url ?? '').trim().replace(/\/+$/, '');
+  if (!/^https?:\/\/[^\s/]+/.test(url)) throw Error('地址要以 https:// 或 http:// 开头');
+  const r = await askApply(url, 'apply', { name: b.name, note: b.note });
+  if (!r.ticket) throw Error(r.status === 404 ? '这个地址不收申请' : '接入地址没给回执');
+  saveJoins([...readJoins().filter((j) => j.url !== url), // one per address: a new one replaces the last
+    { id: require('crypto').randomBytes(6).toString('hex'), url, name: String(b.name ?? ''), ticket: r.ticket, state: 'pending', at: now() }]);
+  return joinsShown();
+}
+// each one waiting, asked once; approved: its account, then the record dropped, then the service told it can forget the
+// key. How many became accounts.
+async function checkJoins() {
+  let made = 0;
+  for (const j of readJoins().filter((x) => x.state === 'pending')) {
+    let r;
+    try { r = await askApply(j.url, 'apply/status', { ticket: j.ticket }); } catch { continue; } // away: asked again later
+    if (r.state === 'approved' && r.key) {
+      joinAccount(j, r.key); made++;
+      editJoin(j.id, () => []);
+      askApply(j.url, 'apply/done', { ticket: j.ticket }).catch(() => {});
+    } else if (r.state !== 'pending') editJoin(j.id, (x) => [{ ...x, state: r.status === 404 || r.state === 'approved' ? 'gone' : r.state }]);
+  }
+  return made;
+}
+
+function newProfile() {
+  console.log('正在创建新的 Claude 账号配置……');
+  const { id, dir } = accountDir();
   log('profile_created', { profile_id: id });
 
   console.log(`Profile：${id}`);
@@ -337,6 +414,14 @@ function list() {
 // Same endpoint /usage uses (found in claude.exe, internal, may change). Token stays in memory,
 // no refresh: refreshing would race a running Claude writing the same .credentials.json.
 async function fetchUsage(p) {
+  if (p.api) { // an API account (本地代理, or one 申请接入 got): billed by what it uses, no 5-hour or weekly window to read
+    if (p.api.join) try { // the gateway took its key back: 401
+      const key = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8')).env?.ANTHROPIC_AUTH_TOKEN;
+      const r = await fetch(`${p.api.baseURL}/v1/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
+      if (r.status === 401) return { api: true, err: '接入已失效，可在设置里重新申请' };
+    } catch {}
+    return { api: true };
+  }
   let c;
   try { c = JSON.parse(fs.readFileSync(path.join(p.configDir, '.credentials.json'), 'utf8')).claudeAiOauth; } catch {}
   if (!c?.accessToken) return { err: '未找到登录凭据' };
@@ -404,13 +489,15 @@ const until = (t) => {
 // saved session. Running windows are skipped: a message there changes nothing.
 async function warmup() {
   const reg = load();
-  if (!reg.profiles.length) return console.log('没有已保存账号，请先运行 claude-multi new。');
+  const macs = macList(reg);
+  if (!reg.profiles.length && !macs.length) return console.log('没有已保存账号，请先运行 claude-multi new。');
   const running = (r) => r.u?.five_hour?.resets_at && new Date(r.u.five_hour.resets_at) > Date.now();
   const before = await Promise.all(reg.profiles.map(fetchUsage));
-  const lw = Math.max(...reg.profiles.map((p) => width(p.label)));
+  const lw = Math.max(...reg.profiles.map((p) => width(p.label)), ...macs.map((m) => width(m.label)));
   console.log(`\n  ${c(1, '预热 5 小时窗口')}\n`);
   for (const [i, p] of reg.profiles.entries()) {
     const head = `  ${i + 1}. ${pad(p.label, lw)}  `;
+    if (before[i].api) { console.log(`${head}${c(2, 'API 账号，没有 5 小时窗口，跳过')}`); continue; }
     if (running(before[i])) {
       console.log(`${head}${c(2, `已在计时，${until(before[i].u.five_hour.resets_at)}后重置，跳过`)}`);
       continue;
@@ -430,6 +517,19 @@ async function warmup() {
       : r.status === 0 ? c(33, `已发送，但还没查到窗口开始计时（${after.err ?? '稍后用 usage 再看'}）`)
         : c(31, `失败：${why}`)}`);
     log('warmup', { profile_id: p.id, ok: r.status === 0 });
+  }
+  for (const m of macs) { // a Mac's account, the same way, there (in its /tmp: nothing kept)
+    const head = `  ${pad(m.label, lw + 3)}  `;
+    let after = await macUsage(m);
+    if (running(after)) { console.log(`${head}${c(2, `已在计时，${until(after.u.five_hour.resets_at)}后重置，跳过`)}`); continue; }
+    process.stdout.write(`${head}发送中…`);
+    const r = await macRun(m, `security unlock-keychain -p "$LC_MACKC" >/dev/null 2>&1; unset LC_MACKC; cd /tmp && ${macEnv(m)}~/.local/bin/claude -p hi --model haiku --tools '' --setting-sources '' --strict-mcp-config --no-session-persistence`);
+    after = await macUsage(m);
+    for (let k = 0; r.status === 0 && !running(after) && k < 5; k++) { await new Promise((ok) => setTimeout(ok, 3000)); after = await macUsage(m); }
+    const why = (r.err || r.out).trim().split('\n').pop() || `退出码 ${r.status}`;
+    console.log(`\r${head}${r.status === 0 && running(after) ? c(32, `已预热，${until(after.u.five_hour.resets_at)}后重置`)
+      : r.status === 0 ? c(33, `已发送，但还没查到窗口开始计时（${after.err ?? '稍后用 usage 再看'}）`) : c(31, `失败：${why}`)}`);
+    log('warmup', { profile_id: m.id, ok: r.status === 0 });
   }
   console.log();
 }
@@ -497,7 +597,8 @@ function lastTyped(tail, before = Infinity) {
   return null;
 }
 
-// Start times (Windows FILETIME, as sessions/<pid>.json's procStart) of these pids; null if PowerShell failed.
+// Start times of these pids, as sessions/<pid>.json's procStart has them: Windows' FILETIME (PowerShell), a Mac's ps's
+// lstart in UTC and C's words (as Claude Code writes it there, whatever your language); null if that failed.
 // The same pids within a minute: the last answer (PowerShell takes ~0.2 s, and the web service asks every few seconds).
 // The web service sets procStarts.beside: there it runs beside, never waited on (waiting froze the service, and every
 // terminal with it, once a minute); till it answers, or for a minute after it failed, null: the pid alone.
@@ -506,13 +607,23 @@ function procStarts(pids) {
   if (!pids.length) return new Map();
   const key = [...pids].sort().join(',');
   if (startsSeen.key === key && Date.now() - startsSeen.at < 60000) return startsSeen.map;
-  const args = ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
-    + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'];
-  const took = (out) => (startsSeen = { key, at: Date.now(), map: out == null ? null : new Map(out.trim().split(/\r?\n/).filter(Boolean).map((l) => l.split(' '))) }).map;
-  if (!procStarts.beside) { const r = spawnSync('powershell.exe', args, { encoding: 'utf8', windowsHide: true }); return r.status === 0 ? took(r.stdout) : null; }
-  startsRun ??= require('child_process').execFile('powershell.exe', args, { encoding: 'utf8', windowsHide: true }, (err, out) => { startsRun = null; took(err ? null : out); });
+  const [exe, args, env] = WIN ? ['powershell.exe', ['-NoProfile', '-Command', `Get-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue | `
+    + '% { "$($_.Id) $($_.StartTime.ToFileTimeUtc())" }'], process.env] : ['ps', ['-o', 'pid=,lstart=', '-p', pids.join(',')], { ...process.env, LC_ALL: 'C', TZ: 'UTC' }];
+  const took = (out) => (startsSeen = { key, at: Date.now(), map: out == null ? null
+    : new Map(out.split(/\r?\n/).flatMap((l) => { const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(l); return m ? [[m[1], m[2]]] : []; })) }).map;
+  // a Mac's ps exits 1 when one of them is gone, the others said all the same
+  const failed = (status, err) => (WIN ? status !== 0 : !!err);
+  if (!procStarts.beside) { const r = spawnSync(exe, args, { encoding: 'utf8', windowsHide: true, env }); return failed(r.status, r.error) ? null : took(r.stdout); }
+  startsRun ??= require('child_process').execFile(exe, args, { encoding: 'utf8', windowsHide: true, env }, (err, out) => {
+    startsRun = null; took(failed(err ? 1 : 0, err && typeof err.code !== 'number') ? null : out);
+  });
   return startsSeen.key === key ? startsSeen.map : null;
 }
+// the same start: Windows' FILETIME as written; a Mac's the same second (ps's, and Claude's, a date in UTC with no zone
+// said; one with its zone, as it says). One that can't be read as a date: not told apart, the pid alone
+const utcTime = (s) => { const t = Date.parse(`${s} UTC`); return Number.isFinite(t) ? t : Date.parse(s); };
+const sameStart = (now, was, win = WIN) => win ? now === String(was)
+  : !Number.isFinite(utcTime(was)) || Math.abs(utcTime(now) - utcTime(was)) < 2000;
 
 const readHeads = new Map(); // record file -> { at: its mtime, cwd, title, prompt }
 // The session files (sessions/<pid>.json) of a config dir whose pid still runs: each Claude started on it writes one.
@@ -528,27 +639,32 @@ function sessionFiles(dir) {
   }
   return out;
 }
-// a Claude that didn't exit cleanly leaves its file, and Windows soon gives its pid to another program:
-// running means that pid also started when Claude wrote down (without PowerShell, the pid alone)
-const stillClaude = (js) => { const starts = procStarts(js.map((j) => j.pid)); return js.filter((j) => !starts || !j.procStart || starts.get(String(j.pid)) === String(j.procStart)); };
+// a Claude that didn't exit cleanly leaves its file, and the system soon gives its pid to another program:
+// running means that pid also started when Claude wrote down (without PowerShell or ps, the pid alone)
+const stillClaude = (js) => { const starts = procStarts(js.map((j) => j.pid)); return js.filter((j) => !starts || !j.procStart || sameStart(starts.get(String(j.pid)), j.procStart)); };
 // Whether any Claude runs on an account, for removing it: from its session files, not the conversation list, which
 // leaves out one with nothing said yet (no record), no title, or its folder gone.
 // ponytail: one the web service has just spawned writes its file within a moment; that moment isn't covered
 const runsOn = (dir) => stillClaude(sessionFiles(dir)).length > 0;
 function listSessions(reg) {
   const live = new Map(), found = new Map(), alive = [];
-  for (const [acct, dir] of reg.profiles.map((p, i) => [i, p.configDir])) {
-    alive.push(...sessionFiles(dir));
+  // and the Macs', as the web service copies them here (acct -1: none of this PC's accounts; mac: which one's)
+  const macs = macList(reg), macBy = new Map(macs.map((m) => [m.id, m]));
+  for (const [acct, dir, mac] of [...reg.profiles.map((p, i) => [i, p.configDir]), ...macs.map((m) => [-1, macHome(m), m.id])]) {
+    if (acct >= 0) alive.push(...sessionFiles(dir));
     for (const folder of ls(path.join(dir, 'projects'))) {
       for (const name of ls(path.join(dir, 'projects', folder))) {
         if (!/^[0-9a-f-]{36}\.jsonl$/.test(name)) continue;
         const file = path.join(dir, 'projects', folder, name), id = name.slice(0, -6);
         let at; try { at = fs.statSync(file).mtimeMs; } catch { continue; } // deleted (or moved to the Recycle Bin) since the folder was read
-        if ((found.get(id)?.at ?? -1) < at) found.set(id, { id, acct, file, at });
+        if ((found.get(id)?.at ?? -1) < at) found.set(id, { id, acct, file, at, ...(mac && { mac }) });
       }
     }
   }
   for (const j of stillClaude(alive)) live.set(j.sessionId, j);
+  // a Mac's pid negative: never one of this PC's. shortcut: two Macs' Claudes with one pid would be taken for each other; give an entry its own sign if that bites
+  for (const m of macs) for (const j of macLive(m)) live.set(j.sessionId, { ...j, pid: -j.pid });
+  const macTo = Object.fromEntries(macs.map((m) => [m.id, macFolders(m)])); // a Mac project folder's folder here
   let webPids = new Set(); // the Claudes the web service runs (web-terms.json, written by it)
   try { webPids = new Set(JSON.parse(fs.readFileSync(WEB_TERMS, 'utf8'))); } catch {}
   const tmp = os.tmpdir().toLowerCase(), out = [];
@@ -573,14 +689,283 @@ function listSessions(reg) {
       readHeads.set(s.file, r);
     }
     const { cwd, title, prompt, req } = r;
-    if (!cwd || !title || cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)) continue; // nothing to go back to
+    if (!cwd || !title || (!s.mac && (cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)))) continue; // nothing to go back to (a Mac's folder is there)
     const pid = live.get(s.id)?.pid ?? null, st = live.get(s.id)?.status;
     // busy: answering or running a command (its session file's status), for 换账号继续's 答完再换; wait: on a question for you
-    out.push({ ...s, cwd, title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell', wait: st === 'waiting',
-      who: reg.profiles[s.acct].label.split('@')[0] });
+    // a Mac one: shown in the folder here its project folder is for (macCwd: where it runs there)
+    out.push({ ...s, cwd: (s.mac && macPcOf(cwd, macBy.get(s.mac), macTo[s.mac])) || cwd, ...(s.mac && { macCwd: cwd }), title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell', wait: st === 'waiting',
+      who: s.mac ? macBy.get(s.mac).label : reg.profiles[s.acct].label.split('@')[0] });
   }
   return out.sort((a, b) => b.at - a.at);
 }
+
+// --- Mac mini: Claude Code on a Mac (signed in there, its own account), over ssh: the registry's mac {host, dir,
+// label?}. Its conversations run there, in one folder (dir). The web service keeps a copy of their records and of which
+// of them run (accounts\mac: projects\<folder>\ as a config dir's, live.json), so the list, the record and the notes
+// read them as an account's here. The Mac's password, saved encrypted (DPAPI, this Windows user) in mac-password.dpapi,
+// unlocks its keychain, where its sign-in is, in each ssh connection: an ssh session finds it locked. It goes as LC_MACKC
+// (the Mac's sshd takes LC_*), never on this PC's command line. On the Mac, `security unlock-keychain -p` has it on its
+// own for that moment, where that Mac's other users could see it with ps (none so far: each Mac has the one user).
+// Beside it, macs [{id, host, dir, config, label?}]: more of them, each a Mac and a config dir there (config: its
+// CLAUDE_CONFIG_DIR, written as the Mac's own launcher sets it: Claude keeps its sign-in under a name made from that very
+// string). Each entry is one account, as the Mac mini is: its copy here (accounts\<id>), its watcher, its live and
+// folders; per Mac (host): the password (mac-password-<host>.dpapi beside the Mac mini's) and the CPU and memory.
+const MAC_PW = path.join(ROOT, 'mac-password.dpapi');
+// (an id names a folder under accounts\: none of an account's, a GPT one's or the Mac mini's)
+const MAC_ID = /^[a-z0-9][a-z0-9-]{0,30}$/, MAC_HOST = /^[\w.-]+$/;
+function macList(reg = load()) {
+  return [...(reg.mac ? [{ ...reg.mac, id: 'mac', config: null, label: reg.mac.label || 'Mac mini' }] : []),
+    ...(reg.macs ?? []).filter((m) => MAC_ID.test(m?.id ?? '') && !/^(mac|acct-.*|gpt-.*)$/.test(m.id) && MAC_HOST.test(m.host ?? '') && m.dir)
+      .map((m) => ({ ...m, config: m.config || null, label: m.label || m.id }))];
+}
+const macOf = (id, reg) => macList(reg).find((m) => m.id === id);
+const macHome = (m) => path.join(ACCOUNTS, m.id); // accounts\mac: the Mac mini's, as before
+const macLive = (m) => { try { return JSON.parse(fs.readFileSync(path.join(macHome(m), 'live.json'), 'utf8')); } catch { return []; } };
+// a path there for sh, its ~ as $HOME (a config dir's string has to be the very one its sign-in is filed under)
+const macSh = (p) => p.startsWith('~/') ? `"$HOME"/${sq(p.slice(2))}` : sq(p);
+const macEnv = (m) => m.config ? `CLAUDE_CONFIG_DIR=${macSh(m.config)} ` : '';
+// A folder here has its project folder on the Mac, in its folder: named after it (F:\demo-sim → demo-sim, a drive's root
+// its letter), a name as safe for sh as for a path; folders.json says which folder here each one is for (added to when
+// one is made), so the list shows it there, among that folder's conversations here.
+// ponytail: two folders here with one name (F:\a\x, D:\x) share one there; give one of them another name if that bites
+const macName = (pc) => { const n = (path.win32.basename(pc) || pc.replace(/[:\\/]/g, '')).replace(/[\\/:*?"<>|'`$\s]+/g, '-').replace(/^[-.]+/, ''); return n || 'root'; };
+function macFolders(m, add) {
+  const f = path.join(macHome(m), 'folders.json');
+  let o = {}; try { o = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
+  if (add && Object.entries(add).some(([k, v]) => o[k] !== v)) { o = { ...o, ...add }; fs.mkdirSync(macHome(m), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 1)); }
+  return o;
+}
+// the folder here a Mac one's folder there is for: by its name, when it's right in the Mac's folder (one in a project's
+// subfolder isn't another project's that has the subfolder's name)
+const macPcOf = (cwd, m, to = macFolders(m)) => path.posix.dirname(cwd).endsWith(m.dir.replace(/^~|\/+$/g, '')) ? to[path.posix.basename(cwd)] : undefined;
+const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // a word for sh, as it is
+// Run on the Mac (python3 -, after DIR, CFG and HAVE: the folder, the config dir (None: ~/.claude), the record sizes copied here): one JSON line per change, for
+// that folder and each one in it (a project's: mine/demo-sim), a record named by its project folder (folder/id.jsonl).
+// A record's bytes past what's here, 512 KB a line ({f, at, d}: at 0 and nothing, rewritten); a /rename title ({t, d});
+// one gone ({gone}); the Claudes running in them ({live}) when that changes; a beat every 15 s. Every 5 s, the Mac's CPU and
+// memory in use and Claude Code's part ({sys}: its claude processes; CPU as ps has it, an average of late, for both).
+// ponytail: a folder named like it (mine-old beside mine) is taken as one in it; Claude's own folder names can't tell them apart
+const MAC_WATCH = String.raw`
+import base64, json, os, re, subprocess, time
+cwd = os.path.realpath(os.path.expanduser(DIR))
+base = re.sub(r'[^a-zA-Z0-9]', '-', cwd)
+cfg = os.path.expanduser(CFG or '~/.claude')
+root = os.path.join(cfg, 'projects')
+sess = os.path.join(cfg, 'sessions')
+def out(o): print(json.dumps(o), flush=True)
+def names(d):
+    try: return os.listdir(d)
+    except OSError: return []
+seen, live_was, beat, sys_at = dict(HAVE), None, 0, 0
+def feed(p, key, now): # a record's bytes past what's there; True: more of it left for the next round
+    try: size = os.path.getsize(p)
+    except OSError: return False
+    now.add(key)
+    k = seen.get(key, 0)
+    if size < k: out({'f': key, 'at': 0, 'd': ''}); k = 0
+    if size > k:
+        with open(p, 'rb') as fh: fh.seek(k); d = fh.read(min(size - k, 524288))
+        out({'f': key, 'at': k, 'd': base64.b64encode(d).decode()})
+        k += len(d)
+    seen[key] = k
+    return k < size
+# The Mac's other folders (not ours: whoever else uses Claude Code there): what their replies cost, from when our folder
+# was made, and nothing said in them: of each reply only its id, model, time and token counts go out
+OSEEN, _st = dict(OTHER), os.stat(cwd)
+SINCE = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(getattr(_st, 'st_birthtime', _st.st_ctime)))
+def lean(p, key):
+    try: size = os.path.getsize(p)
+    except OSError: return False
+    k = OSEEN.get(key, 0)
+    if size < k: k = 0
+    if size > k:
+        rows, n = [], 0
+        with open(p, 'rb') as fh:
+            fh.seek(k)
+            for l in fh:
+                if not l.endswith(b'\n'): break # still being written
+                n += len(l)
+                if b'"type":"assistant"' in l and b'"usage":' in l:
+                    try:
+                        j = json.loads(l); m = j['message']
+                        if j['timestamp'] >= SINCE: rows.append(json.dumps({'type': 'assistant', 'timestamp': j['timestamp'], 'requestId': j.get('requestId') or '',
+                            'message': {'id': m['id'], 'model': m.get('model') or '', 'usage': m['usage']}}, separators=(',', ':')))
+                    except Exception: pass
+                if n >= 8 << 20: break
+        if not n: return False
+        out({'o': key, 'at': k, 'to': k + n, 'd': base64.b64encode(('\n'.join(rows) + '\n').encode() if rows else b'').decode()})
+        k += n
+    OSEEN[key] = k
+    return k < size
+def run(*a): return subprocess.run(a, capture_output=True, text=True).stdout
+def sysnow():
+    k, cpu, mine, mem_mine, n = os.cpu_count() or 1, 0.0, 0.0, 0, 0
+    for l in run('ps', '-A', '-o', '%cpu=,rss=,comm=').splitlines():
+        f = l.split(None, 2)
+        if len(f) < 3: continue
+        c = float(f[0].replace(',', '.')); cpu += c
+        if os.path.basename(f[2]) == 'claude': mine += c; mem_mine += int(f[1]) * 1024; n += 1
+    vm = run('vm_stat')
+    def g(name):
+        m = re.search(name + r':\s+(\d+)', vm)
+        return int(m.group(1)) if m else 0
+    page = int(re.search(r'page size of (\d+)', vm).group(1))
+    # as Activity Monitor's Memory Used: app memory, wired, compressed
+    used = ((g('Anonymous pages') or g('Pages active')) - g('Pages purgeable') + g('Pages wired down') + g('Pages occupied by compressor')) * page
+    return {'cpu': round(min(100, cpu / k)), 'cpuClaude': round(min(100, mine / k)), 'mem': used, 'memClaude': mem_mine, 'memAll': int(run('sysctl', '-n', 'hw.memsize')), 'n': n}
+while True:
+    more, now = False, set()
+    for g in [x for x in names(root) if x == base or x.startswith(base + '-')]:
+        for n in names(os.path.join(root, g)):
+            p, key = os.path.join(root, g, n), g + '/' + n
+            if n.endswith('.jsonl'): more = feed(p, key, now) or more
+            elif os.path.isdir(p):
+                for a in names(os.path.join(p, 'subagents')): # its subagents' records: their tokens are counted too
+                    if a.endswith('.jsonl'): more = feed(os.path.join(p, 'subagents', a), key + '/subagents/' + a, now) or more
+                t = os.path.join(p, 'custom-title.json')
+                try: m = os.path.getmtime(t)
+                except OSError: continue
+                now.add(key + '/')
+                if seen.get(key + '/') != m:
+                    with open(t, 'rb') as fh: out({'t': key, 'd': base64.b64encode(fh.read()).decode()})
+                    seen[key + '/'] = m
+    for g in [x for x in names(root) if not (x == base or x.startswith(base + '-'))]:
+        for n in names(os.path.join(root, g)):
+            p, key = os.path.join(root, g, n), g + '/' + n
+            if n.endswith('.jsonl'): more = lean(p, key) or more
+            else:
+                for a in names(os.path.join(p, 'subagents')):
+                    if a.endswith('.jsonl'): more = lean(os.path.join(p, 'subagents', a), key + '/subagents/' + a) or more
+    for n in [x for x in seen if x not in now]:
+        out({'gone': n}); del seen[n]
+    live = []
+    for n in names(sess):
+        try:
+            with open(os.path.join(sess, n)) as fh: j = json.load(fh)
+            c = os.path.realpath(j.get('cwd', ''))
+            if c != cwd and not c.startswith(cwd + '/'): continue
+            os.kill(j['pid'], 0)
+            live.append({k: j.get(k) for k in ('pid', 'sessionId', 'status', 'kind')})
+        except Exception: pass
+    live.sort(key=lambda j: j['pid'])
+    if live != live_was: out({'live': live}); live_was = live
+    beat += 1
+    if beat >= 50: out({'hb': 1}); beat = 0 # ~15 s
+    if time.time() - sys_at >= 5:
+        sys_at = time.time()
+        try: out({'sys': sysnow()})
+        except Exception: pass
+    if not more: time.sleep(0.3) # an answer here within a second of its end (the page waits on it)
+`;
+// A file ConvertFrom-SecureString wrote (DPAPI, this Windows user, as hex) read back by .NET alone, no PowerShell module:
+// a 预热 started by the web service once found ConvertTo-SecureString's module failing to load ("The member AuditToString
+// is already present"), the Mac skipped
+const dpapiRead = (file) => spawnSync('powershell.exe', ['-NoProfile', '-Command', "[void][Reflection.Assembly]::Load('System.Security, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a'); "
+  + `$h = [IO.File]::ReadAllText('${file}').Trim(); [Text.Encoding]::Unicode.GetString([Security.Cryptography.ProtectedData]::Unprotect([byte[]]($h -split '(..)' -ne '' | ForEach-Object { [Convert]::ToByte($_, 16) }), $null, 'CurrentUser'))`],
+{ encoding: 'utf8', windowsHide: true });
+const macPwFile = (m) => m.id === 'mac' ? MAC_PW : path.join(ROOT, `mac-password-${m.host}.dpapi`);
+// a Mac's password, read once it reads (null: not saved, or not read this time: tried again the next); why not
+const macPws = new Map(), macPwWhy = new Map();
+function macPassword(m) {
+  const f = macPwFile(m);
+  if (macPws.has(f) || !fs.existsSync(f)) return macPws.get(f) ?? null;
+  const r = dpapiRead(f), pw = r.stdout?.replace(/\r?\n$/, '') || null;
+  macPwWhy.set(f, (r.error?.message || r.stderr || '').trim().split('\n')[0].trim());
+  if (pw) macPws.set(f, pw);
+  return pw;
+}
+const macNoPw = (m, f = macPwFile(m)) => fs.existsSync(f) ? `没读出 ${m.label} 的密码（${f}${macPwWhy.get(f) ? `：${macPwWhy.get(f)}` : ''}），再试一次` : `还没保存 ${m.label} 的密码（${f}）`;
+// The Mac account's usage, read there (python3 -): its sign-in never leaves the Mac. As fetchUsage's: {u} or {err, temp?}.
+const MAC_USAGE = String.raw`
+import hashlib, json, os, subprocess, sys, time, urllib.request, urllib.error
+subprocess.run(['security', 'unlock-keychain', '-p', os.environ.pop('LC_MACKC', '')], capture_output=True)
+def out(o): print(json.dumps(o)); sys.exit()
+# a config dir's sign-in is filed under its own name: the first 8 of its string's sha256 (as Claude Code names it)
+svc = 'Claude Code-credentials' + ('-' + hashlib.sha256(os.path.expanduser(CFG).encode()).hexdigest()[:8] if CFG else '')
+r = subprocess.run(['security', 'find-generic-password', '-s', svc, '-w'], capture_output=True, text=True)
+try: c = json.loads(r.stdout)['claudeAiOauth']
+except Exception: out({'err': '未找到登录凭据'})
+if c.get('expiresAt') and c['expiresAt'] < time.time() * 1000: out({'err': 'token 已过期：在 Mac 上用一次 Claude 就会刷新'})
+q = urllib.request.Request('https://api.anthropic.com/api/oauth/usage', headers={'Authorization': 'Bearer ' + c['accessToken'], 'anthropic-beta': 'oauth-2025-04-20'})
+try: out({'u': json.load(urllib.request.urlopen(q, timeout=10)), 'sub': c.get('subscriptionType')})
+except urllib.error.HTTPError as e: out({'err': '用量接口返回 HTTP %d' % e.code, 'temp': e.code >= 500 or e.code == 429})
+except Exception as e: out({'err': '网络错误：%s' % e, 'temp': True})
+`;
+// A Claude on the Mac runs in a tmux of ours there (-L cm, apart from any of the Mac's own; no config of the Mac's): a
+// link dropped (this service restarted, the network, this PC asleep) leaves it working, and it's joined again. Run by sh
+// (the Mac's login shell is zsh): the keychain unlocked (a Claude that tmux starts later keeps the login of the one that
+// started it, its link gone or not), into its folder; resume: one running in that tmux joined (one in a terminal there
+// refused), else a new one; its pid and tmux session said in an OSC, then joined. {sess}: that session joined again.
+// Its tmux: Homebrew's, else one built into ~/.local (a Mac without Homebrew: a MacBook's), as $T.
+// shortcut: Homebrew's on Apple silicon only; an Intel Mac's is /usr/local/bin/tmux
+const MAC_TMUX = 'T=/opt/homebrew/bin/tmux; [ -x "$T" ] || T="$HOME"/.local/bin/tmux';
+// config: the config dir there (null: ~/.claude), set in the command tmux runs (its server, one per Mac, keeps the
+// environment of whoever started it)
+function macCmd({ into = '', resume = null, sess = null, name = '', cols = 100, rows = 30, config = null }) {
+  const tm = '"$T" -u -f /dev/null -L cm';
+  if (sess) return `${MAC_TMUX}; exec ${tm} attach -t ${sq(sess)}`;
+  const env = config ? `env CLAUDE_CONFIG_DIR=${macSh(config)} ` : '';
+  const sh = [
+    'security unlock-keychain -p "$LC_MACKC" >/dev/null 2>&1; unset LC_MACKC',
+    `${into} || exit`,
+    MAC_TMUX,
+    `[ -x "$T" ] || { echo 'Mac 上没有 tmux：在 Mac 上运行 brew install tmux'; exit 3; }`,
+    `t() { ${tm} "$@"; }`,
+    'S= P=',
+    ...(resume ? [`for f in $(grep -l ${sq(resume)} ${config ? macSh(config) : '~/.claude'}/sessions/*.json 2>/dev/null); do`,
+      '  p=$(basename "$f" .json); kill -0 "$p" 2>/dev/null || continue',
+      `  S=$(t list-panes -a -F '#{pane_pid} #{session_name}' 2>/dev/null | awk -v p="$p" '$1==p{print $2; exit}')`,
+      '  [ -n "$S" ] && { P=$p; break; }',
+      "  echo '它在 Mac 上的终端里运行，不在网页里：在那边接着用'; exit 3",
+      'done'] : []),
+    'if [ -z "$S" ]; then',
+    `  S=${sq(name)}`,
+    '  t start-server \\; set -g default-terminal xterm-256color \\; set -g status off \\; set -g escape-time 0 \\; set -g set-clipboard on \\;'
+      + ` set -g allow-passthrough on \\; set -g window-size latest \\; new-session -d -s "$S" -x ${cols} -y ${rows} -c "$PWD"`
+      + ` ${sq(`exec ${env}~/.local/bin/claude${resume ? ` --resume ${resume}` : ''}`)} || exit`,
+    `  P=$(t display -p -t "$S" '#{pane_pid}')`,
+    'fi',
+    `printf '\\033]1337;cmpid=%s;%s\\007' "$P" "$S"`,
+    `exec ${tm} attach -t "$S"`].join('\n');
+  return `exec /bin/sh -c "$(echo ${Buffer.from(sh).toString('base64')} | base64 -D)"`;
+}
+// The PC project's own CLAUDE.md, kept after the Mac folder's (from a mark line on: put again at each start, gone when
+// it's gone there): loaded with it, where "read the one there" was only asked, and forgotten. sh, run in the Mac
+// folder; never what stops a start.
+// shortcut: one that packs to over 12 K isn't copied (the whole command has to fit Windows' 32 K line), the note above it still says to read it there
+function macRules(pc) {
+  let md = '';
+  try { md = fs.readFileSync(path.join(pc, 'CLAUDE.md'), 'utf8').replace(/^\uFEFF/, '').trim(); } catch {}
+  const b = md && require('zlib').gzipSync(`<!-- cm-pc-rules: 以下是电脑上 ${pc.replace(/\\/g, '/')}/CLAUDE.md 的内容，每次从网页开这个对话时更新；要改去电脑上改 -->\n\n${md}\n`).toString('base64');
+  // (T: this start's own; two starts in a folder at once sharing one lost the Mac folder's part)
+  return `{ T=CLAUDE.md.cm.$$; [ -f CLAUDE.md ] && awk '/^<!-- cm-pc-rules/{exit}{print}' CLAUDE.md > $T${b && b.length <= 12000 ? ` && echo ${b} | base64 -D | gunzip >> $T` : ''} && mv $T CLAUDE.md || rm -f $T; }`;
+}
+// a command on the Mac, its keychain unlocked first (sh: what runs; input: python3 - reads it), tried again when the
+// link to the server drops (ssh's 255); resolves to {status, out, err}
+function macRun(m, cmd, input) {
+  const pw = macPassword(m);
+  if (!pw) return Promise.resolve({ status: 1, out: '', err: macNoPw(m) });
+  const once = () => new Promise((ok) => {
+    const p = require('child_process').execFile('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'SendEnv=LC_MACKC', m.host, cmd],
+      { env: { ...process.env, LC_MACKC: pw }, encoding: 'utf8', windowsHide: true, timeout: 150000 },
+      (e, out, err) => ok({ status: e ? (typeof e.code === 'number' ? e.code : 1) : 0, out: String(out ?? ''), err: String(err || e?.message || '') }));
+    p.stdin.on('error', () => {}); p.stdin.end(input ?? '');
+  });
+  return (async () => { let r; for (let k = 0; k < 3 && (!r || r.status === 255); k++) r = await once(); return r; })();
+}
+// An upload for a conversation on the Mac: copied there (its folder's .uploads, a week kept as here), its path there what
+// Claude is given: one here it can't open
+async function macPut(file, m) {
+  if (!m) throw new Error('没有这台 Mac');
+  const name = sq(path.basename(file));
+  const r = await macRun(m, `cd ${macSh(m.dir)} && mkdir -p .uploads && { find .uploads -type f -mtime +7 -delete; cat > .uploads/${name}; } && printf %s "$PWD/.uploads/"${name}`, fs.readFileSync(file));
+  if (r.status || !r.out) throw new Error(`没传到 ${m.label} 上：${r.err.trim().split('\n').pop() || r.status}`);
+  return r.out;
+}
+const pyVal = (v) => (v == null ? 'None' : JSON.stringify(v)); // a value for Python (JSON's strings are its own too)
+const macUsage = (m) => macRun(m, 'python3 -', `CFG = ${pyVal(m.config)}\n${MAC_USAGE}`).then((r) => {
+  try { return JSON.parse(r.out.trim().split('\n').pop()); } catch { return { err: `没连上 Mac：${r.err.trim().split('\n').pop()}`, temp: true }; }
+});
 
 // --- GPT: Codex (OpenAI's coding agent, signed in with a ChatGPT plan) as a second kind of conversation. Its accounts are
 // the registry's gpt list, apart from the Claude ones (profiles): nothing written for Claude meets them. Each has its own
@@ -593,7 +978,7 @@ const longPath = (p) => String(p ?? '').replace(/^\\\\\?\\/, ''); // Codex keeps
 // child, which under a pseudo-terminal left Codex a grandchild, running on when its terminal was ended. The launcher
 // itself once that layout changes.
 function codexCmd() {
-  const shim = spawnSync('where', ['codex'], { encoding: 'utf8', windowsHide: true }).stdout?.split(/\r?\n/).find(Boolean)?.trim();
+  const shim = WIN && whereIs('codex'); // GPT: Windows only
   if (!shim) return null;
   const pkg = path.join(path.dirname(shim), 'node_modules', '@openai', 'codex');
   const exe = path.join(pkg, 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe');
@@ -708,8 +1093,8 @@ function removeGpt(n) {
   canRecycle();
   update((r) => { r.gpt = (r.gpt ?? []).filter((x) => x.id !== g.id); });
   log('gpt_removed', { profile_id: g.id });
-  try { unlinkAll(g.home); } catch {}
-  const r = recycle([g.home]);
+  let r = {}; // as remove: never deleted with a link still in it
+  try { unlinkAll(g.home); r = recycle([g.home]); } catch {}
   if (fs.existsSync(g.home)) console.log(`已移除 GPT 账号 ${g.label}，但文件夹没能放进回收站（${(r.stderr || '').trim().split('\n')[0] || '可能有 Codex 开着里面的文件'}），可以之后手动删：${g.home}`);
   else console.log(`已移除 GPT 账号 ${g.label}，文件夹在回收站里。`);
 }
@@ -975,7 +1360,7 @@ async function oaiSend(b) {
   try {
     // ponytail: a chat whose last answer OpenAI no longer keeps (30 days) can't go on; sending its messages again would
     const r = await oaiApi('responses', { model: OAI_MODEL, reasoning: opts, tools: [{ type: 'web_search' }], input: [{ role: 'user', content: oaiInput(text, ups) }],
-      previous_response_id: old?.resp ?? undefined, background: true, store: true });
+      previous_response_id: old?.resp ?? undefined, background: true, store: true, truncation: 'auto' }); // a chat grown past its window: its oldest dropped there, not this message refused
     const c = old ? oaiRead(id) : { id, title: (text.split('\n')[0] || oaiName(ups[0])).slice(0, 40), msgs: [], resp: null }, now = Date.now();
     const dir = path.join(OAI, id), files = ups.map((p) => path.join(dir, path.basename(p)));
     if (ups.length) fs.mkdirSync(dir, { recursive: true });
@@ -1072,6 +1457,7 @@ function resume(id, n) {
     process.chdir(g.cwd);
     return runGpt(gptAccounts(reg)[g.acct], ['resume', id]);
   }
+  if (s.mac) return attach(id); // the Mac's: continued there by the web service, this tab joined to it
   if (s.pid) { console.log(s.web ? '这个对话正在网页服务里运行：用 claude-multi attach 接上它。' : `这个对话正在运行（进程 ${s.pid}），直接切到它的窗口即可。`); process.exit(1); }
   const p = reg.profiles[Number(n) - 1] ?? reg.profiles[s.acct];
   if (!p) { console.log('请指定账号编号：claude-multi resume <对话 id> <账号编号>'); process.exit(1); }
@@ -1154,7 +1540,8 @@ async function switchChat(id, n, now) {
 // attach ID: this terminal joins a conversation running in the web service (one started or continued from
 // the web page): the same screen on both sides, either one types. The size follows the side you type on;
 // the other side scales to it. Closing this tab leaves the conversation running there.
-async function attach(id) {
+// (start: one to start there and join, as /api/open takes it: {mac: true} for one on the Mac)
+async function attach(id, start) {
   const base = `http://127.0.0.1:${WEB_PORT}`;
   // on this computer: unpacked (the service gzips for the phone)
   const headers = { cookie: `cm=${webKey()}`, 'content-type': 'application/json', 'accept-encoding': 'identity' };
@@ -1167,7 +1554,7 @@ async function attach(id) {
   const size = () => ({ cols: process.stdout.columns || 100, rows: process.stdout.rows || 30 });
   let key;
   try {
-    const r = await post('/api/open', { id, gpt: listGpt().some((x) => x.id === id), ...size() });
+    const r = await post('/api/open', start ? { ...start, ...size() } : { id, gpt: listGpt().some((x) => x.id === id), ...size() });
     if (r.kind !== 'pty') throw new Error('它在电脑的终端窗口里运行，直接切过去就行');
     key = r.key;
   } catch (e) { console.log(`接不上这个对话：${e.message}`); process.exit(1); }
@@ -1339,7 +1726,7 @@ async function chatLook(ref) {
   const st = live ? statusOf(live) : null, menu = st === 'waiting' ? (await screenOf(s.id))?.menu : null;
   const ans = history(s.file).items.filter((m) => m.role === 'claude').pop()?.text ?? '（还没有回答）';
   const where = !s.pid ? '没在运行' : { busy: '正在回复', shell: '正在执行命令', waiting: '在等人回答', idle: '空闲' }[st] ?? '在运行';
-  let out = `「${s.title}」 ${s.id}\n账号 ${s.acct + 1} · ${s.cwd} · ${s.pid ? (s.web ? '网页上 · ' : '电脑窗口里 · ') : ''}${where}\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}`;
+  let out = `「${s.title}」 ${s.id}\n${s.mac ? s.who : `账号 ${s.acct + 1}`} · ${s.cwd} ·${s.pid ? (s.web ? '网页上 · ' : '电脑窗口里 · ') : ''}${where}\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}`;
   if (menu) out += `\n\n它在问${menu.tabs ? `（一次好几题：${menu.tabs}）` : ''}：\n${menu.ask}\n`
     + menu.opts.map((o) => `  ${o.n}. ${o.check == null ? '' : o.check ? '[✔] ' : '[ ] '}${o.label}${o.desc ? ' — ' + o.desc : ''}${o.n === menu.cur ? '  ← 光标在这' : ''}`).join('\n')
     + `\n（用户交代过怎么选的，用 claude-multi chat pick ${s.id} <选项号> 回答；没交代就转告用户）`;
@@ -1362,6 +1749,8 @@ async function chatSay(ref, text, before, ask) { // ask: a GPT 聊天 one's mode
   if (!text) throw new Error('要说什么？');
   const s = findChat(ref), t0 = Date.now();
   if (s.oai) return oaiSay(s, text, ask);
+  // its Claude runs there: one started for it here would never be found (waitLive reads this PC's accounts)
+  if (s.mac) throw new Error('Mac 上的对话管家还发不了消息，请用户在网页上打开它');
   if (s.gpt) { // a GPT one: its Codex in the web service (continued there if it isn't), up, and done with its turn first
     const { key } = await webPost('/api/open', { id: s.id, gpt: true, cols: 120, rows: 40 });
     const stuck = codexBlocked(await screenRows(key, { max: 20000, still: 1500 }));
@@ -1387,9 +1776,13 @@ async function chatSay(ref, text, before, ask) { // ask: a GPT 聊天 one's mode
 }
 // a single-choice question: from the option the cursor is on to the one chosen, then Enter (as the page's card does).
 // ask: the question it was picked on; another one up by now (the first answered) isn't answered with it.
+// a tool's permission (Claude Code's "Do you want to proceed?", "…make this edit…?", "…allow this connection?"), not a
+// plan's "Would you like to proceed?": yours to answer, never the 管家's
+const asksPermission = (ask) => /\bDo you want to\b/i.test(ask ?? '');
 async function pickOn(id, n, ask, by = 'butler') {
   const menu = (await screenOf(id))?.menu, o = menu?.opts.find((x) => x.n === Number(n));
   if (!menu) throw new Error('它现在没在问选择题');
+  if (by === 'butler' && asksPermission(menu.ask)) throw new Error('这是工具权限确认，要用户自己在网页上回答');
   if (ask != null && menu.ask !== ask) throw new Error('它问的已经变了，再看一下');
   if (menu.tabs || menu.opts.some((x) => x.check != null)) throw new Error('这是多选题，或者一次问了好几题，请用户在网页上点卡片回答');
   if (!o) throw new Error(`选项号要在 1 到 ${menu.opts.length} 之间`);
@@ -1410,7 +1803,7 @@ async function chatPick(ref, n) {
 }
 async function chatNew(dir, text, n, before, gpt = false) {
   dir = path.resolve(dir ?? '');
-  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`没有这个文件夹：${dir}`);
+  if (!isDir(dir)) throw new Error(`没有这个文件夹：${dir}`);
   if (sameDir(dir, HOME)) throw new Error('主文件夹 Claude 每次都要问是否信任，换一个具体的文件夹');
   if (inLive(dir)) throw new Error(LIVE_NO);
   if (!text) throw new Error('要给它第一句话');
@@ -1517,7 +1910,7 @@ async function reportTo(cmd, [id, ...a]) {
 // Before account p continues conversation s: its newest record (and side folder) moved into p's config dir.
 function copyTo(s, p) {
   const dst = path.join(p.configDir, 'projects', path.basename(path.dirname(s.file)));
-  if (path.resolve(dst).toLowerCase() === path.resolve(path.dirname(s.file)).toLowerCase()) return;
+  if (sameDir(dst, path.dirname(s.file))) return;
   fs.mkdirSync(dst, { recursive: true });
   fs.copyFileSync(s.file, path.join(dst, `${s.id}.jsonl`));
   const side = s.file.slice(0, -6);
@@ -1544,16 +1937,41 @@ function del(id) {
     return console.log(`已归档「${g.title}」，在 Codex 里用 codex unarchive 能找回。`);
   }
   if (s.pid) { console.log('这个对话正在运行，先关掉它的窗口再删。'); process.exit(1); }
+  if (s.mac) { // a Mac's: its record (and its folder, if any) into that Mac's Trash, over ssh (tried again on a drop); the copy here goes too
+    const m = macOf(s.mac, reg), folder = path.basename(path.dirname(s.file));
+    if (!m) { console.log('找不到它所在的 Mac'); process.exit(1); }
+    tokenStats(); // its replies counted first, as below: once its copy here goes, nothing has them (the watcher may drop it first)
+    const cmd = `d=${m.config ? macSh(m.config) : '~/.claude'}/projects/${folder}; t=~/.Trash/claude-${id}; `
+      + `mkdir -p "$t" && mv "$d/${id}.jsonl" "$t/" && { [ ! -d "$d/${id}" ] || mv "$d/${id}" "$t/"; }`;
+    let r;
+    for (let k = 0; k < 3 && r?.status !== 0; k++) r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', m.host, cmd], { encoding: 'utf8', windowsHide: true });
+    if (r.status !== 0) { console.log(`删除失败：${String(r.stderr || r.error?.message || '').trim().split('\n').pop()}`); process.exit(1); }
+    fs.rmSync(s.file, { force: true }); fs.rmSync(s.file.slice(0, -6), { recursive: true, force: true });
+    log('session_deleted', { session_id: id, mac: m.id });
+    return console.log(`已删除「${s.title}」，在 ${m.label} 的废纸篓里能找回。`);
+  }
   tokenStats();
   const paths = reg.profiles.flatMap((p) => ls(path.join(p.configDir, 'projects')).flatMap((folder) =>
     [`${id}.jsonl`, id].map((n) => path.join(p.configDir, 'projects', folder, n)))).filter((f) => fs.existsSync(f));
   const r = recycle(paths);
   if (r.status !== 0 || paths.some((f) => fs.existsSync(f))) { console.log(`删除失败：${(r.stderr || '').trim().split('\n')[0]}`); process.exit(1); }
   log('session_deleted', { session_id: id, files: paths.length });
-  console.log(`已删除「${s.title}」，可以在回收站里找回。`);
+  console.log(`已删除「${s.title}」，可以在${TRASH}里找回。`);
 }
 // Session 0 (ssh, a service) has no Recycle Bin: there it deletes for good without a word, so it's refused (exit 3)
 function recycle(paths) {
+  if (!WIN) { // macOS: moved into the Trash, a name of its own there (as Finder names a second one: name 2, name 3…), never over one
+    const taken = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
+    try {
+      for (const p of paths) {
+        const t = path.join(HOME, '.Trash', path.basename(p));
+        let to = t;
+        for (let n = 2; taken(to); n++) to = `${t} ${n}`;
+        fs.renameSync(p, to);
+      }
+      return { status: 0, stderr: '' };
+    } catch (e) { return { status: 1, stderr: `没放进废纸篓：${e.message}` }; }
+  }
   const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', 'if ([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) { exit 3 }; '
     + 'Add-Type -AssemblyName Microsoft.VisualBasic; foreach ($p in ($env:CM_DEL | ConvertFrom-Json)) { if (Test-Path -PathType Container $p) '
     + '{ [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, "OnlyErrorDialogs", "SendToRecycleBin") } '
@@ -1590,10 +2008,10 @@ function remove(x) {
     if (r.active === p.id) r.active = r.profiles[0]?.id ?? null;
   });
   log('profile_removed', { profile_id: p.id });
-  try { unlinkAll(p.configDir); } catch {}
-  const r = recycle([p.configDir]);
-  if (fs.existsSync(p.configDir)) console.log(`已移除账号 ${p.label}，但文件夹没能放进回收站（${(r.stderr || '').trim().split('\n')[0] || '可能有程序开着里面的文件'}），可以之后手动删：${p.configDir}`);
-  else console.log(`已移除账号 ${p.label}，文件夹在回收站里。`);
+  let r = {}; // a link it couldn't take out: the folder stays (deleted for good past the Recycle Bin, it'd go through the link)
+  try { unlinkAll(p.configDir); r = recycle([p.configDir]); } catch {}
+  if (fs.existsSync(p.configDir)) console.log(`已移除账号 ${p.label}，但文件夹没能放进${TRASH}（${(r.stderr || '').trim().split('\n')[0] || '可能有程序开着里面的文件'}），可以之后手动删：${p.configDir}`);
+  else console.log(`已移除账号 ${p.label}，文件夹在${TRASH}里。`);
 }
 
 // True while a helper the conversation started is still at work, read from its transcript's tail. With
@@ -1612,7 +2030,8 @@ function helpersBusy(tail, since = 0) {
     if (j.isSidechain) continue;
     const at = Date.parse(j.timestamp) || Date.now();
     const parts = Array.isArray(j.message?.content) ? j.message.content : [];
-    let text = typeof j.message?.content === 'string' ? j.message.content : typeof j.content === 'string' ? j.content : '';
+    // (a task's end delivered mid-turn comes as an attachment, its words in .prompt)
+    let text = typeof j.message?.content === 'string' ? j.message.content : typeof j.content === 'string' ? j.content : typeof j.attachment?.prompt === 'string' ? j.attachment.prompt : '';
     for (const p of parts) {
       if (p.type === 'text') text += p.text;
       if (p.type === 'tool_use') {
@@ -1699,7 +2118,9 @@ function notify(kind) {
   if (kind === 'done' && (lastTyped(tail) ?? '').startsWith('[系统通知]')) return; // the service woke it: not your news
   // the conversation's title, which its terminal tab shows: lets the island drop it once you look
   // (the 管家's is 管家, wherever it shows: the island, the page, the phone)
-  const title = sameDir(home || j.cwd || '.', BUTLER) ? '管家' : field(tail, 'customTitle', true) ?? field(tail, 'aiTitle', true);
+  // (/rename's sidecar first, as the list reads it: its line may be out of the tail)
+  let named = null; try { named = JSON.parse(fs.readFileSync(path.join(j.transcript_path.slice(0, -6), 'custom-title.json'), 'utf8')).customTitle; } catch {}
+  const title = sameDir(home || j.cwd || '.', BUTLER) ? '管家' : named || field(tail, 'customTitle', true) || field(tail, 'aiTitle', true);
   // the folder the conversation was opened in: the hook's cwd is wherever Claude last cd'd (a .build inside it, say)
   const dir = home || j.cwd;
   dropNote({ kind, project: dir ? path.basename(dir) : '', msg, title, id: j.session_id ?? null }, Number(process.env.CLAUDE_PID) || null);
@@ -1707,10 +2128,11 @@ function notify(kind) {
 // A note out: to the island's inbox (written to .tmp then renamed: it reads every 300 ms), with the Claude's pid that lets
 // a click find its terminal window; and for the pages and phones, the notes file, which lists the latest ones (trimmed to
 // its last 200 now and then). Then the island, made sure it runs.
+let noteSeq = 0;
 function dropNote(n, pid = null) {
   if (!islandOff()) {
     fs.mkdirSync(INBOX, { recursive: true });
-    const f = path.join(INBOX, `${Date.now()}-${process.pid}`);
+    const f = path.join(INBOX, `${Date.now()}-${process.pid}-${++noteSeq}`); // (two in one millisecond: both kept)
     fs.writeFileSync(`${f}.tmp`, JSON.stringify({ ...n, pid }));
     fs.renameSync(`${f}.tmp`, `${f}.json`);
   }
@@ -1750,12 +2172,25 @@ function island() {
 const WINDOWS = [['five_hour', '5 小时'], ['seven_day', '7 天'], ['seven_day_opus', 'Opus 7 天'], ['seven_day_sonnet', 'Sonnet 7 天']];
 const readyAt = (u) => Math.max(0, ...WINDOWS.map(([k]) => u[k])
   .filter((w) => w && w.utilization >= 100 && w.resets_at).map((w) => +new Date(w.resets_at)));
+// A Mac's usage, read there at most every 5 minutes (a long-running caller, the web service: each read is a new ssh
+// through the server, and one more request from that Mac to Anthropic); macFresh (刷新, 预热) reads it now
+const MAC_USAGE_EVERY = 5 * 60000, macUsageSeen = new Map(); // id: {at, r}
+const macUsageNow = (m, fresh) => {
+  const was = macUsageSeen.get(m.id);
+  if (!fresh && was && Date.now() - was.at < MAC_USAGE_EVERY) return was.r;
+  const r = macUsage(m);
+  macUsageSeen.set(m.id, { at: Date.now(), r });
+  return r;
+};
 // Every account's usage and the pick. json is what the island and the web page read.
-async function usageState(reg = load()) {
+async function usageState(reg = load(), { macFresh = false } = {}) {
   let cache = {};
   try { cache = JSON.parse(fs.readFileSync(USAGE_CACHE, 'utf8')); } catch {}
-  const [got, states] = await Promise.all([Promise.all(reg.profiles.map(fetchUsage)), Promise.all(reg.profiles.map((p) => subState(p, cache)))]);
+  const macs = macList(reg);
+  const [got, states, macGot] = await Promise.all([Promise.all(reg.profiles.map(fetchUsage)), Promise.all(reg.profiles.map((p) => subState(p, cache))),
+    Promise.all(macs.map((m) => macUsageNow(m, macFresh)))]);
   const res = keepLast(reg.profiles, got, cache);
+  const macRes = keepLast(macs, macGot, cache); // the Macs', apart: none of the accounts here, never recommended
   // counted only with an account at its limit (the island's notice is all that needs it): listing costs a PowerShell
   const running = res.some((r) => WINDOWS.some(([k]) => Math.round(r.u?.[k]?.utilization) >= 100)) ? listSessions(reg).filter((s) => s.pid) : [];
   // whole or not at all: the island and the web service both write it, and a half-written one read would lose them all
@@ -1763,15 +2198,21 @@ async function usageState(reg = load()) {
   const ok = res.map((r, i) => ({ ...r, i })).filter((r) => r.u);
   const open = ok.filter((r) => runway(r.u) > 0);
   const rec = open.length ? pickOpen(open) : [...ok].sort((a, b) => readyAt(a.u) - readyAt(b.u))[0];
+  // API accounts only (a Mac's, 申请接入's): no quota to read, the first one not refused is the one to use
+  const api = reg.profiles.length && reg.profiles.every((p) => p.api) ? res.findIndex((r) => r.api && !r.err) : -1;
   // One column per window. Model windows get a column only once some account used them.
   const cols = WINDOWS.filter(([k]) => !k.startsWith('seven_day_') || ok.some((r) => r.u[k]?.utilization));
-  const json = { rec: rec?.i ?? null, open: open.length > 0,
+  const json = { rec: api >= 0 ? api : rec?.i ?? null, open: open.length > 0 || api >= 0,
     ready: !open.length && rec ? until(readyAt(rec.u)) : null,
-    accounts: reg.profiles.map((p, i) => ({ label: p.label, dir: p.configDir, err: res[i].err ?? null,
+    accounts: reg.profiles.map((p, i) => ({ label: p.label, dir: p.configDir, err: res[i].err ?? null, api: !!res[i].api,
       runway: res[i].u ? Math.round(runway(res[i].u) * 10) / 10 : null,
       windows: cols.filter(([k]) => res[i].u?.[k]).map(([k]) => ({ k, pct: Math.round(res[i].u[k].utilization),
         reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })), sub: subscription(p, states[i]),
       running: running.filter((s) => s.acct === i).length })), // conversations running on it: the island's notice at its limit
+    macs: macs.map((m, i) => { const mac = macRes[i], sub = macGot[i].sub; return { id: m.id, label: m.label, dir: m.dir, icon: m.icon ?? null, err: mac.err ?? null,
+      plan: sub ? `Claude ${sub[0].toUpperCase()}${sub.slice(1)}` : null, runway: mac.u ? Math.round(runway(mac.u) * 10) / 10 : null,
+      windows: WINDOWS.filter(([k]) => mac.u?.[k] && (!k.startsWith('seven_day_') || mac.u[k].utilization)).map(([k]) => ({ k, pct: Math.round(mac.u[k].utilization),
+        reset: mac.u[k].resets_at ? until(mac.u[k].resets_at) : '' })) }; }),
     projects: recentProjects(reg) };
   return { res, ok, open, rec, cols, json };
 }
@@ -1835,7 +2276,7 @@ async function usage(args) {
   reg.profiles.forEach((p, i) => {
     const mark = p.id === reg.active ? '*' : ' ';
     const tag = rec?.i === i ? '  ' + c('1;32', open.length ? '← 推荐' : '← 最早恢复') : '';
-    const cells = res[i].err ? c(33, res[i].err) : cols.map(([k]) => cell(res[i].u[k])).join('   ');
+    const cells = res[i].err ? c(33, res[i].err) : res[i].api ? c(2, 'API：没有额度窗口，按用量计费') : cols.map(([k]) => cell(res[i].u[k])).join('   ');
     console.log(`  ${i + 1}. ${mark} ${c(1, pad(p.label, lw))}  ${c(2, pad(p.subscriptionType ?? '', pw))}   ${cells}${tag}`);
   });
   console.log();
@@ -1876,6 +2317,52 @@ const BUTLER = path.join(__dirname, 'butler'), BUTLER_MODELS = ['sonnet', 'opus'
 // file. Where one stands is worked out from those facts (stageOf), never from words the 管家 wrote.
 const TICKETS = path.join(ROOT, 'tickets.json');
 function readTickets(f = TICKETS) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return []; } }
+// A folder here, as 新对话 and 浏览 take one: not a network one (\\host\share, //host/share: only looking there makes
+// Windows connect to that computer and offer it this login's hash), and there
+const netPath = (d) => /^[\\/]{2}/.test(String(d ?? ''));
+const isDir = (d) => !netPath(d) && fs.existsSync(d) && fs.statSync(d).isDirectory();
+// 新对话's 浏览: the folders in p by name, dot ones last (no links, nor Windows' $Recycle.Bin and the like), its files'
+// names (shown dimmed, to know the folder by), and the one above ('' at a drive's top); no p: the places (the home
+// folder, its 桌面 文档 下载, the drives). Read without blocking the service: a slow or gone drive holds this answer only.
+async function dirsIn(p) {
+  const there = (d) => fs.promises.access(d).then(() => d, () => null);
+  if (!p) {
+    const drives = process.platform !== 'win32' ? ['/'] : [...'CDEFGHIJKLMNOPQRSTUVWXYZ'].map((l) => `${l}:\\`);
+    const dirs = await Promise.all([HOME, ...['Desktop', 'Documents', 'Downloads'].map((n) => path.join(HOME, n)), ...drives].map(there));
+    return { path: '', up: null, dirs: dirs.filter(Boolean), files: [] };
+  }
+  if (netPath(p)) throw new Error('网络上的文件夹（\\ 开头）不能浏览');
+  const at = path.resolve(p), up = path.dirname(at);
+  let es; try { es = await fs.promises.readdir(at, { withFileTypes: true }); } catch { throw new Error(`打不开 ${at}`); }
+  const names = (f) => es.filter(f).map((e) => e.name).sort((a, b) => (a[0] === '.') - (b[0] === '.') || a.localeCompare(b, 'zh'));
+  const dirs = names((e) => e.isDirectory() && !e.name.startsWith('$') && e.name !== 'System Volume Information');
+  // shortcut: a folder's first 500 folders and 500 files only; past that, typed
+  return { path: at, up: up === at ? '' : up, dirs: dirs.slice(0, 500).map((n) => path.join(at, n)), files: names((e) => e.isFile()).slice(0, 500) };
+}
+// 项目: your own groups of conversations, from any folder, account or Mac (the page's 项目 view), [{id, name, at, ids}].
+// Only the web service writes the file. A conversation not in the list stays in its project (a look can miss one).
+const PROJECTS = path.join(ROOT, 'projects.json');
+function readProjects(f = PROJECTS) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return []; } }
+// one change: new {name}, rename {id, name}, drop {id}, add / out {id, conv: [conversation ids]}
+function projectOp(all, b, now = Date.now()) {
+  const p = b.op === 'new' ? null : all.find((x) => x.id === Number(b.id));
+  if (b.op !== 'new' && !p) throw new Error('没有这个项目');
+  if (b.op === 'new' || b.op === 'rename') {
+    const name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!name) throw new Error('项目要有名字');
+    if (all.some((x) => x !== p && x.name === name)) throw new Error(`已经有叫「${name}」的项目了`);
+    if (p) { p.name = name; return p; }
+    const n = { id: Math.max(0, ...all.map((x) => x.id)) + 1, name, at: now, ids: [] };
+    all.push(n);
+    return n;
+  }
+  if (b.op === 'drop') { all.splice(all.indexOf(p), 1); return { id: p.id }; } // its conversations stay where they are
+  const ids = [].concat(b.conv ?? []).map(String);
+  if (!ids.length || ids.some((i) => !/^[\w-]{1,80}$/.test(i))) throw new Error('缺少对话 id');
+  if (b.op === 'add') { p.ids = [...new Set([...p.ids, ...ids])]; return p; }
+  if (b.op === 'out') { p.ids = p.ids.filter((i) => !ids.includes(i)); return p; }
+  throw new Error('不认识的操作');
+}
 const REPORT_WORDS = ['做完', '卡住', '失败', '不用做']; // what a worker reports (claude-multi report N <word> …); ask is apart
 // one change, as the service makes it: new, give (to a conversation), report (a worker's word or question), end. What
 // you asked for is never changed: no op touches it.
@@ -2054,7 +2541,7 @@ const WEB_KEY = path.join(ROOT, 'web-key');
 function webKey(fresh = false) { // made on first use; in the user's own folder, as each account's login is
   if (!fresh) try { const k = fs.readFileSync(WEB_KEY, 'utf8').trim(); if (k.length >= 32) return k; } catch {}
   const k = require('crypto').randomBytes(32).toString('base64url');
-  fs.writeFileSync(WEB_KEY, k);
+  fs.writeFileSync(`${WEB_KEY}.tmp`, k); fs.renameSync(`${WEB_KEY}.tmp`, WEB_KEY); // whole: a reader meanwhile never sees it empty (and makes its own)
   return k;
 }
 // true when given (from the link or the cookie) is the key; in constant time
@@ -2257,6 +2744,209 @@ function saveUpload(data, ext, dir = UPLOADS, name = null) {
   fs.writeFileSync(file, data);
   return file;
 }
+// A file sent in a conversation, opened from the page (/api/file?n=its saved name here): its name as sent, and how the
+// browser gets it. A PDF, a picture or plain text is shown (text and pictures sandboxed); anything else is downloaded:
+// never shown as one of the page's own kind (HTML, SVG), which would run as this page with its key. null: not one of ours.
+// Where it is: the uploads, or a GPT 聊天's own folder (its files go there once sent; the saved name stays unique)
+const UPLOAD_NAME = /^(\d{8}T\d{6}-[0-9a-f]{6})-([^\\/]+)$/;
+const TEXT_EXT = new Set(['txt', 'md', 'csv', 'tsv', 'log', 'json', 'yaml', 'yml', 'ini', 'toml', 'tex', 'bib', 'py', 'js', 'ts', 'm', 'c', 'h', 'cpp', 'hpp', 'java', 'rs', 'go', 'sh', 'ps1']);
+function fileServed(n, up = UPLOADS, oai = OAI) {
+  const m = UPLOAD_NAME.exec(n ?? '');
+  if (!m) return null;
+  const name = m[2], ext = path.extname(name).slice(1).toLowerCase();
+  const type = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[ext]
+    ?? (TEXT_EXT.has(ext) ? 'text/plain; charset=utf-8' : null);
+  let chats = []; try { chats = fs.readdirSync(oai); } catch {}
+  const file = [path.join(up, n), ...chats.map((d) => path.join(oai, d, n))].find((p) => fs.existsSync(p)) ?? path.join(up, n);
+  return { name, file, headers: { 'content-type': type ?? 'application/octet-stream', 'x-content-type-options': 'nosniff',
+    'content-disposition': `${type ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`, 'cache-control': 'private, max-age=86400',
+    ...(type && ext !== 'pdf' && { 'content-security-policy': 'sandbox' }) } }; // (a sandboxed PDF gets no viewer)
+}
+// 预览 (a path in a reply, opened from the page): how the browser gets a file of this PC. A PDF, a picture, a video or a
+// sound as itself; code, notes and the like as text (a web page or an SVG too: as one of the page's own kind it would run
+// with its key); an Office one as the PDF Office makes of it here (peekPdf); anything else downloaded
+const PEEK_MEDIA = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif',
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac' };
+const PEEK_TEXT = new Set([...TEXT_EXT, '', 'html', 'htm', 'svg', 'xml', 'css', 'scss', 'vue', 'jsx', 'tsx', 'mjs', 'cjs', 'bat', 'cmd', 'cfg', 'conf', 'lua', 'rb', 'php', 'kt',
+  'swift', 'cs', 'r', 'sql', 'gitignore', 'env', 'ipynb', 'srt', 'vtt', 'out', 'err', 'diff', 'patch', 'lock']);
+// 右键 a path on the page (a computer's): 在电脑上打开 with its own program (a program or a script, which that would run,
+// shown in Explorer instead), 打开方式 (Windows' own chooser), 在资源管理器中显示; a folder opened in Explorer. [what's
+// started, its command line as Windows takes it (a path can't hold a ")]
+const RUNS = /\.(exe|com|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|ws|msi|msp|msc|lnk|scr|pif|hta|cpl|reg|inf|scf|jar|url|py|pyw|sh|appref-ms|application|gadget)$/i;
+// what a Mac's open would run (or install): besides RUNS's, and a file it may run (chmod +x)
+const MAC_RUNS = /\.(command|tool|zsh|bash|csh|pl|rb|pkg|mpkg|dmg|workflow|action|scpt|scptd|applescript|terminal|webloc|inetloc|prefpane|kext|osax)$/i;
+const shellCmd = (f, how, dir) => dir ? ['explorer.exe', `"${f}"`] : how === 'with' ? ['rundll32.exe', `shell32.dll,OpenAs_RunDLL ${f}`] // (its path bare, as Windows' own "Open with" has it)
+  : how === 'open' && !RUNS.test(f) ? ['explorer.exe', `"${f}"`] : ['explorer.exe', `/select,"${f}"`];
+// …then brought to the front: Windows keeps a window a background process opens (the service is one) behind, flashing in
+// the taskbar. FRONT_PS finds it (an Explorer window at CM_DIR; Windows' "Open with" chooser; else one titled with the
+// file's name, its own program's) and brings it up: the foreground's input borrowed, else an Alt press, else Alt+Tab's own
+// switch; what it did, said (set, alt, switch, no; none: no such window came)
+const FRONT_PS = `$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -TypeDefinition @'
+using System; using System.Text; using System.Runtime.InteropServices;
+public static class Fg {
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool on);
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int n);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] static extern void SwitchToThisWindow(IntPtr h, bool alt);
+  [DllImport("user32.dll")] static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+  public static IntPtr Find(string part, int pid) {
+    IntPtr hit = IntPtr.Zero;
+    EnumWindows((h, l) => { if (!IsWindowVisible(h)) return true; uint p; GetWindowThreadProcessId(h, out p);
+      var s = new StringBuilder(512); GetWindowText(h, s, 512);
+      if (pid > 0 ? p == (uint)pid : s.Length > 0 && s.ToString().IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0) { hit = h; return false; } return true; }, IntPtr.Zero);
+    return hit;
+  }
+  public static string Front(IntPtr h) {
+    if (IsIconic(h)) ShowWindow(h, 9);
+    uint p, me = GetCurrentThreadId(), fg = GetWindowThreadProcessId(GetForegroundWindow(), out p);
+    if (fg != me) AttachThreadInput(me, fg, true);
+    SetForegroundWindow(h); BringWindowToTop(h);
+    if (fg != me) AttachThreadInput(me, fg, false);
+    if (GetForegroundWindow() == h) return "set";
+    keybd_event(0x12, 0, 0, UIntPtr.Zero); SetForegroundWindow(h); keybd_event(0x12, 0, 2, UIntPtr.Zero);
+    if (GetForegroundWindow() == h) return "alt";
+    SwitchToThisWindow(h, true);
+    return GetForegroundWindow() == h ? "switch" : "no";
+  }
+}
+'@
+$p = $env:CM_PATH; $dir = $env:CM_DIR; $how = $env:CM_HOW
+$name = [IO.Path]::GetFileName($p); $stem = [IO.Path]::GetFileNameWithoutExtension($p)
+$sh = New-Object -ComObject Shell.Application
+$end = (Get-Date).AddSeconds($(if ($dir) { 8 } else { 20 })); $h = [IntPtr]::Zero
+while ((Get-Date) -lt $end -and $h -eq [IntPtr]::Zero) {
+  Start-Sleep -Milliseconds 200
+  if ($dir) { foreach ($w in $sh.Windows()) { try { if ($w.Document.Folder.Self.Path -eq $dir) { $h = [IntPtr][long]$w.HWND } } catch {} } }
+  elseif ($how -eq 'with') { foreach ($o in Get-Process OpenWith | Sort-Object StartTime -Descending) { $h = [Fg]::Find('', $o.Id); if ($h -ne [IntPtr]::Zero) { break } } }
+  else { $h = [Fg]::Find($name, 0); if ($h -eq [IntPtr]::Zero -and $stem.Length -ge 3) { $h = [Fg]::Find($stem, 0) } }
+}
+if ($h -eq [IntPtr]::Zero) { 'none' } else { [Fg]::Front($h) }
+`;
+const frontOf = (f, how, dir) => ({ CM_PATH: f, CM_HOW: how, CM_DIR: dir ? f : how === 'with' || (how === 'open' && !RUNS.test(f)) ? '' : path.dirname(f) });
+const OFFICE_KIND = { ppt: 'ppt', pptx: 'ppt', doc: 'doc', docx: 'doc', rtf: 'doc', xls: 'xls', xlsx: 'xls' };
+function peekHead(name, office = false) {
+  const ext = path.extname(name).slice(1).toLowerCase(), type = office ? 'application/pdf' : PEEK_MEDIA[ext] ?? (PEEK_TEXT.has(ext) ? 'text/plain; charset=utf-8' : null);
+  return { 'content-type': type ?? 'application/octet-stream', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store',
+    'content-disposition': `${type ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(office ? name + '.pdf' : name)}`,
+    ...(type && type !== 'application/pdf' && { 'content-security-policy': 'sandbox' }) };
+}
+// An Office file as a PDF, made by the Office here, unseen (no window), kept a week in peek\ by the file's path, time and
+// size (changed: made again). Those asked for together (a folder's, as it's listed) made in one go, Office started once
+// for them; one opened goes first (first). PowerPoint is one for the whole PC: a deck of yours open stays, and it's quit
+// only if it wasn't running before. Word and Excel are instances of their own, quit once ours are closed
+const PEEK_DIR = path.join(ROOT, 'peek');
+const OFFICE_APP = { ppt: 'PowerPoint', doc: 'Word', xls: 'Excel' };
+const OFFICE_PS = { // each job ({k, in, out}) said done (ok k) or not (fail k why), as it goes
+  ppt: `$was = [bool](Get-Process POWERPNT -ErrorAction SilentlyContinue); $app = New-Object -ComObject PowerPoint.Application
+try { foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { try { $p = $app.Presentations.Open($j.in, -1, 0, 0); try { $p.SaveAs($j.out, 32) } finally { $p.Close() }; "ok $($j.k)" } catch { "fail $($j.k) $($_.Exception.Message)" } } }
+finally { if (-not $was -and $app.Presentations.Count -eq 0) { $app.Quit() } }`,
+  doc: `$app = New-Object -ComObject Word.Application; $app.Visible = $false; $app.DisplayAlerts = 0
+try { foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { try { $d = $app.Documents.Open($j.in, $false, $true, $false); try { $d.ExportAsFixedFormat($j.out, 17) } finally { $d.Close(0) }; "ok $($j.k)" } catch { "fail $($j.k) $($_.Exception.Message)" } } }
+finally { if ($app.Documents.Count -eq 0) { $app.Quit() } }`,
+  xls: `$app = New-Object -ComObject Excel.Application; $app.Visible = $false; $app.DisplayAlerts = $false
+try { foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { try { $b = $app.Workbooks.Open($j.in, 0, $true); try { $b.ExportAsFixedFormat(0, $j.out) } finally { $b.Close($false) }; "ok $($j.k)" } catch { "fail $($j.k) $($_.Exception.Message)" } } }
+finally { if ($app.Workbooks.Count -eq 0) { $app.Quit() } }`,
+};
+const peekMade = new Map(), peekWait = []; // key -> its PDF on the way (a failure kept 10 min: not tried again at every look); jobs not begun
+let peekBusy = false;
+function peekPdf(file, { dir = PEEK_DIR, ps = OFFICE_PS, first = false } = {}) {
+  const kind = OFFICE_KIND[path.extname(file).slice(1).toLowerCase()], st = fs.statSync(file), at = path.resolve(file);
+  const key = require('crypto').createHash('sha1').update(`${at.toLowerCase()}|${st.mtimeMs}|${st.size}`).digest('hex').slice(0, 24), pdf = path.join(dir, key + '.pdf');
+  if (fs.existsSync(pdf)) return Promise.resolve(pdf);
+  const i = peekWait.findIndex((j) => j.key === key);
+  if (first && i > 0) peekWait.unshift(...peekWait.splice(i, 1));
+  if (peekMade.has(key)) return peekMade.get(key);
+  const made = new Promise((ok, no) => { const job = { key, kind, at, pdf, dir, ps, ok, no }; if (first) peekWait.unshift(job); else peekWait.push(job); });
+  peekMade.set(key, made);
+  made.then(() => peekMade.delete(key), () => setTimeout(() => peekMade.delete(key), 600000).unref());
+  setTimeout(peekTurn, 30); // those asked for at once, together
+  return made;
+}
+function peekTurn() {
+  if (peekBusy || !peekWait.length) return;
+  peekBusy = true;
+  const { kind, ps, dir } = peekWait[0], batch = peekWait.filter((j) => j.kind === kind && j.ps === ps).slice(0, 20);
+  for (const j of batch) peekWait.splice(peekWait.indexOf(j), 1);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(dir)) try { if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 7 * 864e5) fs.rmSync(path.join(dir, f)); } catch {} // a week old
+  const jobs = batch.map((j) => ({ k: j.key, in: j.at, out: path.join(j.dir, `${j.key}.${process.pid}.tmp.pdf`) }));
+  const settle = (k, done, why) => {
+    const j = batch.find((x) => x.key === k), tmp = jobs.find((x) => x.k === k)?.out;
+    if (!j || j.settled) return;
+    j.settled = true;
+    if (done && fs.existsSync(tmp)) { fs.renameSync(tmp, j.pdf); return j.ok(j.pdf); }
+    fs.rmSync(tmp, { force: true });
+    j.no(new Error(`${OFFICE_APP[kind]} 没能把它转成 PDF：${why || '没有做完'}`));
+  };
+  const p = require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; ${ps[kind]}`],
+    { env: { ...process.env, CM_JOBS: JSON.stringify(jobs) }, windowsHide: true });
+  let out = '', err = '';
+  const stop = setTimeout(() => p.kill(), 60000 + 30000 * batch.length); // one left hanging (a dialog of Office's): given up
+  p.stdout.on('data', (d) => {
+    out += d;
+    for (let i; (i = out.indexOf('\n')) >= 0; out = out.slice(i + 1)) { const m = /^(ok|fail) (\w+) ?(.*)$/.exec(out.slice(0, i).trim()); if (m) settle(m[2], m[1] === 'ok', m[3]); }
+  });
+  p.stderr.on('data', (d) => { err += d; });
+  p.on('error', (e) => { err ||= e.message; });
+  p.on('close', () => { clearTimeout(stop); for (const j of batch) settle(j.key, false, err.trim().split('\n')[0]); peekBusy = false; peekTurn(); });
+}
+// `/` in the page's box: the commands and skills Claude Code itself lists for a folder and an account, asked as the Agent
+// SDK asks (its initialize request: no model call; hooks and MCP servers off), its process let go of cleanly (killed, its
+// sessions\<pid>.json stayed). Not the internal ones (_…), nor those it says are gone or renamed.
+const slashKeep = (c) => !/^_/.test(c.name) && !/^\(removed\)|^Renamed to /.test(c.description ?? '');
+const slashOf = (cmds) => cmds.filter(slashKeep).map((c) => ({ name: c.name, desc: c.description ?? '', hint: c.argumentHint ?? '', also: c.aliases ?? [], builtin: !!c.builtin }));
+// `/` in a Mac's conversation: what Claude Code lists there (its skills, commands, plugins), asked the same way over ssh, on
+// the account its conversations there use (macEnv), in its folder there; its input ended after the ask (it answers, then
+// goes), its keychain unlocked as for anything run there, no session kept (its pid's file gone after)
+const SLASH_INIT = JSON.stringify({ type: 'control_request', request_id: 'cm', request: { subtype: 'initialize' } });
+const macSlashCmd = (m, cwd) => `security unlock-keychain -p "$LC_MACKC" >/dev/null 2>&1; unset LC_MACKC; { cd ${sq(cwd)} || cd ${macSh(m.dir)}; } 2>/dev/null; `
+  + `printf '%s\\n' ${sq(SLASH_INIT)} | ${macEnv(m)}~/.local/bin/claude -p --input-format stream-json --output-format stream-json --verbose --strict-mcp-config --no-session-persistence --settings '{"disableAllHooks":true}' & p=$!; `
+  + `wait $p; find ${m.config ? macSh(m.config) : '"$HOME/.claude"'}/sessions -name "$p.*" -delete 2>/dev/null; true`;
+// its answer among what it printed: the list, or why not (its error, else the ssh's last words)
+const slashParse = (r) => {
+  let j = null;
+  for (const l of String(r.out ?? '').split('\n')) if (l.includes('"control_response"')) try { j = JSON.parse(l); } catch {}
+  if (j?.response?.subtype !== 'success') throw new Error(j?.response?.error || String(r.err ?? '').trim().split('\n').pop() || `退出码 ${r.status}`);
+  return slashOf(j.response.response?.commands ?? []);
+};
+const macSlash = (m, cwd, timeout = 30000) => Promise.race([macRun(m, macSlashCmd(m, cwd)), new Promise((ok) => setTimeout(() => ok({ status: -1, out: '', err: '30 秒没回' }), timeout).unref())]).then(slashParse);
+function slashList(exe, configDir, cwd, timeout = 20000) {
+  return new Promise((ok, no) => {
+    const p = require('child_process').spawn(exe, ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--strict-mcp-config', '--settings', '{"disableAllHooks":true}'],
+      { cwd, env: childEnv(configDir), windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    let buf = '', done = false;
+    const stop = setTimeout(() => p.kill(), timeout);
+    const settle = (e, list) => { if (!done) { done = true; e ? no(e) : ok(list); } };
+    p.stdout.on('data', (d) => {
+      buf += d;
+      for (let i; !done && (i = buf.indexOf('\n')) >= 0; buf = buf.slice(i + 1)) {
+        let j; try { j = JSON.parse(buf.slice(0, i)); } catch { continue; }
+        if (j.type !== 'control_response') continue;
+        if (j.response?.subtype !== 'success') settle(new Error(j.response?.error || '没拿到命令列表'));
+        else settle(null, slashOf(j.response.response?.commands ?? []));
+        p.stdin.end(); setTimeout(() => p.kill(), 5000).unref(); // it goes on its own at the end of its input
+      }
+    });
+    p.on('error', settle);
+    p.on('exit', () => {
+      clearTimeout(stop);
+      settle(new Error('Claude Code 没给命令列表就退出了'));
+      try { for (const f of fs.readdirSync(path.join(configDir, 'sessions'))) if (f.startsWith(`${p.pid}.`)) fs.rmSync(path.join(configDir, 'sessions', f), { force: true }); } catch {}
+    });
+    p.stdin.on('error', () => {});
+    p.stdin.write(JSON.stringify({ type: 'control_request', request_id: 'cm', request: { subtype: 'initialize' } }) + '\n');
+  });
+}
 
 // The start of a window's history: the reader keeps only what scrolls by from where it began (the screen then),
 // and the window's own history can't be read. So that it starts at a question of yours, the record fills in
@@ -2265,10 +2955,13 @@ function saveUpload(data, ext, dir = UPLOADS, name = null) {
 function lead(items, lines, more = false) { // more: the record goes back further than items
   const key = (t) => String(t).split('\n')[0].replace(/[\s*`#>]/g, '').slice(0, 16);
   let cut = -1, skip = 0;
+  // each message's key at its last place in the record, made once (each row against every message took ~1 s on a long
+  // screen and record, every terminal stopped meanwhile)
+  const at = new Map();
+  items.forEach((it, i) => { if (it.role !== 'tool' && it.role !== 'img') at.set(key(it.text), i); });
   for (let r = 0; r < lines.length && cut < 0; r++) {
     const m = /^[❯●]\s+(.*)/.exec(lines[r].replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')), k = m && key(m[1]);
-    if (!k || k.length < 4) continue;
-    for (let i = items.length - 1; i >= 0 && cut < 0; i--) if (items[i].role !== 'tool' && items[i].role !== 'img' && key(items[i].text) === k) { cut = i; skip = r; }
+    if (k && k.length >= 4 && at.has(k)) { cut = at.get(k); skip = r; }
   }
   if (cut < 0) { cut = items.length; skip = lines.length; } // not found: from your latest question, no kept lines (the screen stays)
   let start = cut; // the screen starts at a question: nothing before it
@@ -2293,7 +2986,7 @@ function lead(items, lines, more = false) { // more: the record goes back furthe
 // for) and the subscriptions. What's pushed is encrypted for the phone alone (aes128gcm, RFC 8291).
 const PUSH = path.join(ROOT, 'push.json');
 const pushStore = () => { try { return JSON.parse(fs.readFileSync(PUSH, 'utf8')); } catch { return null; } };
-const savePush = (s) => fs.writeFileSync(PUSH, JSON.stringify(s));
+const savePush = (s) => { fs.writeFileSync(`${PUSH}.tmp`, JSON.stringify(s)); fs.renameSync(`${PUSH}.tmp`, PUSH); }; // whole: one cut short would read as none, and a new key drop every phone's subscription
 function pushKeys() { // made on first use
   const s = pushStore();
   if (s) return s;
@@ -2434,10 +3127,30 @@ const replayPty = (t) => [...(t.modes ?? [])].map(([n, v]) => `\x1b[?${n}${v}`).
 
 async function web() {
   procStarts.beside = true; // its process checks never hold up the terminals
+  // A private extension, when profiles.json names one (ext: a CommonJS file's absolute path, trusted as this code is):
+  // its routes join the page's behind the same key, its page part (/ext.js) runs before the page's script. One that
+  // won't load is logged and left out: the conversations here go on without it.
+  const ext = (() => {
+    try {
+      const f = load().ext;
+      if (!f) return null;
+      if (!path.isAbsolute(f)) throw Error('ext 要写绝对路径');
+      return require(f)({ load, root: ROOT });
+    } catch (e) { log('ext_error', { err: e.message }); return null; }
+  })();
+  let joining = false; // 申请接入: one round of asking at a time (the minute's, or 设置 opened)
+  const joinRound = async () => { // a new account: 额度 read again on the page's next look, not up to a minute later
+    if (joining) return;
+    joining = true;
+    try { if (await checkJoins()) usageAt = 0; } finally { joining = false; }
+  };
+  setInterval(() => { if (readJoins().some((j) => j.state === 'pending')) joinRound().catch(() => {}); }, 60000);
   const http = require('http'), pty = require('@lydell/node-pty');
-  const claudeExe = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true }).stdout.split(/\r?\n/)[0].trim() || CLAUDE;
+  const claudeExe = whereIs('claude') || CLAUDE;
   const codex = codexCmd(); // GPT conversations: none started without it
+  const sshExe = whereIs('ssh') || 'ssh'; // the Mac's
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
+  const slashCache = new Map(); // `${configDir}|${folder}` -> { at, list }: / in a conversation's box
   // the quota as the page last got it, kept on disk: after a restart the page shows it at once (read again behind it)
   let usageCache = (() => { try { return JSON.parse(fs.readFileSync(WEB_USAGE, 'utf8')); } catch { return null; } })();
   let usageAt = 0, usageNow = null, sessCache = null, sessAt = 0;
@@ -2498,7 +3211,8 @@ async function web() {
   let ptys = 0;
   // only till its Claude has written its session file (then it's listed with its pid): after a /clear or /resume there,
   // it runs another conversation, and this one, tapped, would open that
-  const resuming = (id) => [...terms.values()].find((t) => t.resume === id && !t.gone && !(t.pid && fs.existsSync(path.join(t.dir, 'sessions', `${t.pid}.json`))));
+  const resuming = (id) => [...terms.values()].find((t) => t.resume === id && !t.gone
+    && !(t.pid && (t.mac ? macLive({ id: t.mac }).some((j) => -j.pid === t.pid) : fs.existsSync(path.join(t.dir, 'sessions', `${t.pid}.json`)))));
   // `claude-multi <cmd> <id> …` for a conversation, apart from this process: what it printed, or that as the error
   const command = (what, id, ...more) => {
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error('没有这个对话');
@@ -2565,8 +3279,138 @@ async function web() {
     log('web_session', { profile_id: g.id, cwd, args: resume ? `resume ${resume}` : '' });
     return t;
   }
+  // A conversation on the Mac (resume: its id), started, continued or joined here: ssh in a pseudo-terminal, its Claude
+  // in a tmux there (macCmd). Its pid and tmux session come first, as an OSC that's taken out: the pid this one has is
+  // that one's, negative, as the list has it. What a last try that never got there said is shown.
+  // ⏺, the Mac's reply mark, as ● (a Windows one's): this PC's fonts draw it as a blue emoji.
+  // o: {resume, cwd} continues one in its folder there; {pc} starts one for a folder here, in a project folder of its own
+  // there named after it (made the first time, with a CLAUDE.md saying where it is here); {} starts one in the Mac's folder
+  // id: which Mac (the registry's entry)
+  function startMac(id, o, cols = 100, rows = 30) {
+    const m = macOf(id, load());
+    if (!m) throw new Error('没有这台 Mac');
+    const pw = macPassword(m);
+    if (!pw) throw new Error(macNoPw(m));
+    const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`, resume = o.resume ?? null;
+    let into = `cd ${m.dir}`;
+    if (o.resume) { const pc = o.cwd && macPcOf(o.cwd, m); into = `cd ${sq(o.cwd)}${pc ? ` && ${macRules(pc)}` : ''}`; }
+    else if (o.pc) {
+      const name = macName(o.pc), at = o.pc.replace(/\\/g, '/');
+      const md = `# 项目：${name}\n\n这个项目在用户 Windows 电脑上的 \`${at}\`，不在这台 Mac 上；这个文件夹只是它在 Mac 上启动的地方（怎么连那台电脑，见上一层的 CLAUDE.md）。\n\n`
+        + `- 先 \`ssh pc\` 看看那边有没有 \`${at}/CLAUDE.md\`，有就读一遍，照它的规矩来。\n- 读、改、编译、运行、用 git，都在那边的 \`${at}\` 里做。\n`;
+      into += ` && mkdir -p ${sq(name)} && cd ${sq(name)} && { [ -f CLAUDE.md ] || echo ${Buffer.from(md).toString('base64')} | base64 -D > CLAUDE.md; } && ${macRules(o.pc)}`;
+      macFolders(m, { [name]: o.pc });
+    }
+    const cmd = macCmd({ into, resume, name: `cm-${key}`, cols, rows, config: m.config });
+    const t = { kind: 'pty', key, mac: m.id, macPid: 0, macSess: null, back: 0, get pid() { return -this.macPid; }, clients: new Set(), buf: '', w: cols, h: rows, cwd: o.pc ?? o.cwd ?? m.dir, resume };
+    let tries = 0, pre = '';
+    const go = () => {
+      const proc = t.proc = pty.spawn(sshExe, ['-tt', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'SendEnv=LC_MACKC', m.host,
+        t.macSess ? macCmd({ sess: t.macSess }) : cmd], { name: 'xterm-256color', cols: t.w, rows: t.h, env: { ...process.env, LC_MACKC: pw, TERM: 'xterm-256color' } });
+      proc.onData((d) => {
+        if (!t.macPid) {
+          const k = /\x1b\]1337;cmpid=(\d+);([\w-]+)\x07/.exec(pre += d);
+          if (!k) return;
+          t.macPid = +k[1]; t.macSess = k[2]; d = pre.slice(k.index + k[0].length); pre = ''; saveTerms();
+        }
+        t.back = 0; // joined (again): a next drop tried again afresh
+        d = d.replace(/⏺/g, '●');
+        keepOut(t, d); send(t, 'data', d);
+      });
+      // ssh's 255: the link. Before it got there, tried again (3 times in all); once there, its Claude works on in its tmux,
+      // joined again every 5 s for 10 minutes. Anything else (Claude ended, so its tmux; a refusal said): it's gone.
+      proc.onExit(({ exitCode }) => {
+        if (exitCode === 255 && (t.macPid ? ++t.back <= 120 : ++tries < 3)) { pre = ''; return setTimeout(go, t.macPid ? 5000 : 1500); }
+        if (!t.macPid && pre) { keepOut(t, pre); send(t, 'data', pre); } // why it never got there
+        t.gone = true; saveTerms(); saveRun(); send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000);
+      });
+    };
+    go();
+    terms.set(key, t);
+    log('web_session', { profile_id: m.id, cwd: t.cwd, args: resume ? `--resume ${resume}` : '' });
+    return t;
+  }
+  // The copy here of the Mac's records and of which of its conversations run (MAC_WATCH there, one ssh connection
+  // kept up: again 2 s after a drop, waiting longer, to a minute, while each try fails at once). One of yours there that
+  // stops answering, or asks, is a note, as a hook's here.
+  // One per Mac entry (w: its watcher's state, by id: proc, wait, other: its other folders' records, how far each was
+  // read there, others.json); macSys: each Mac's newest {sys}, and when it came, by host.
+  // shortcut: an entry added to the registry is watched from the next start of this service
+  const macWs = new Map(), macSys = new Map();
+  const macWatch = () => { for (const m of macList(load())) macWatchOne(m.id); };
+  function macWatchOne(id) {
+    const m = macOf(id, load()), w = macWs.get(id) ?? { proc: null, wait: 2000, other: {} };
+    macWs.set(id, w);
+    if (!m || w.proc) return;
+    const home = macHome(m), have = {}, since = Date.now();
+    for (const d of ls(path.join(home, 'projects'))) for (const n of ls(path.join(home, 'projects', d))) {
+      if (n.endsWith('.jsonl')) try { have[`${d}/${n}`] = fs.statSync(path.join(home, 'projects', d, n)).size; } catch {}
+      else for (const a of ls(path.join(home, 'projects', d, n, 'subagents'))) if (a.endsWith('.jsonl')) try { have[`${d}/${n}/subagents/${a}`] = fs.statSync(path.join(home, 'projects', d, n, 'subagents', a)).size; } catch {}
+    }
+    const proc = w.proc = require('child_process').spawn(sshExe, ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15',
+      '-o', 'ServerAliveCountMax=3', m.host, 'python3', '-u', '-'], { windowsHide: true });
+    proc.stdin.on('error', () => {});
+    try { w.other = JSON.parse(fs.readFileSync(path.join(home, 'others.json'), 'utf8')); } catch { w.other = {}; }
+    proc.stdin.end(`DIR = ${JSON.stringify(m.dir)}\nCFG = ${pyVal(m.config)}\nHAVE = ${JSON.stringify(have)}\nOTHER = ${JSON.stringify(w.other)}\n${MAC_WATCH}`);
+    let line = '';
+    proc.stdout.setEncoding('utf8');
+    proc.stdout.on('data', (d) => {
+      line += d;
+      for (let k; (k = line.indexOf('\n')) >= 0; line = line.slice(k + 1)) {
+        let o; try { o = JSON.parse(line.slice(0, k)); } catch { continue; }
+        try { macCopy(m, w, o, proc); } catch (e) { log('mac_copy_fail', { mac: id, err: e.message }); }
+      }
+    });
+    proc.on('exit', () => {
+      w.proc = null;
+      w.wait = Date.now() - since > 60000 ? 2000 : Math.min(60000, w.wait * 2);
+      setTimeout(() => macWatchOne(id), w.wait);
+    });
+  }
+  // (a name the Mac sends is a project folder and one name in it, or a record in that one's subagents, nothing else:
+  // never a way out of its copy here, accounts\<id>)
+  const macPath = (home, k, top = 'projects') => { if (!/^[\w.-]+\/[\w.-]+(\/subagents\/[\w.-]+)?\/?$/.test(k) || k.includes('..')) throw new Error(`不认识的名字：${k}`); return path.join(home, top, ...k.split('/').filter(Boolean)); };
+  function macCopy(m, w, o, proc) {
+    const home = macHome(m);
+    if (o.f) {
+      const f = macPath(home, o.f), size = fs.existsSync(f) ? fs.statSync(f).size : 0;
+      if (o.at > size) return proc.kill(); // a gap (this copy cut short meanwhile): the next connection sends from what's here
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      if (o.at < size) fs.truncateSync(f, o.at);
+      fs.appendFileSync(f, Buffer.from(o.d, 'base64'));
+    } else if (o.o) { // a record of another folder there, its replies' usage only: kept apart (others\), counted as its own row
+      const f = macPath(home, o.o, 'others');
+      if (o.at && o.at !== (w.other[o.o] ?? 0)) return proc.kill(); // a piece missed (a write failed): sent again from here's
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      if (!o.at) fs.rmSync(f, { force: true }); // from its start (the first of it, or rewritten there)
+      fs.appendFileSync(f, Buffer.from(o.d, 'base64'));
+      w.other[o.o] = o.to; fs.writeFileSync(path.join(home, 'others.json'), JSON.stringify(w.other));
+    } else if (o.t) {
+      fs.mkdirSync(macPath(home, o.t), { recursive: true });
+      fs.writeFileSync(path.join(macPath(home, o.t), 'custom-title.json'), Buffer.from(o.d, 'base64'));
+    } else if (o.gone) {
+      fs.rmSync(o.gone.endsWith('/') ? path.join(macPath(home, o.gone), 'custom-title.json') : macPath(home, o.gone), { force: true });
+    } else if (o.sys) {
+      macSys.set(m.host, { ...o.sys, at: Date.now() });
+    } else if (o.live) {
+      const was = new Map(macLive(m).map((j) => [j.sessionId, j.status])), going = (st) => st === 'busy' || st === 'shell';
+      fs.mkdirSync(home, { recursive: true });
+      fs.writeFileSync(path.join(home, 'live.json.tmp'), JSON.stringify(o.live));
+      fs.renameSync(path.join(home, 'live.json.tmp'), path.join(home, 'live.json'));
+      sessCache = null;
+      for (const j of o.live) {
+        if (j.kind && j.kind !== 'interactive') continue; // a claude -p's is for whoever ran it
+        const before = was.get(j.sessionId), kind = going(before) && !going(j.status) && j.status !== 'waiting' ? 'done'
+          : j.status === 'waiting' && before && before !== 'waiting' ? 'ask' : null;
+        if (!kind) continue;
+        const s = sessions().find((x) => x.id === j.sessionId);
+        dropNote({ kind, project: path.basename(s?.cwd ?? m.dir), msg: kind === 'done' ? '任务完成，等你下一步指示' : '需要你确认一下', title: s?.title ?? null, id: j.sessionId });
+      }
+    }
+  }
   // a conversation open in a terminal window here: its screen through the console bridge, while anyone watches
   function mirror(pid, dir) {
+    if (!WIN) throw new Error('这个对话正在别处的终端里运行，网页接不上它：在那个终端里接着用，或者先关掉它');
     const key = `w${pid}`;
     if (terms.has(key) && !terms.get(key).gone) return terms.get(key);
     const proc = require('child_process').spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
@@ -2654,7 +3498,7 @@ async function web() {
         for (const d of ls(path.join(t.dir, 'projects'))) if (fs.existsSync(path.join(t.dir, 'projects', d, `${id}.jsonl`))) t.file = path.join(t.dir, 'projects', d, `${id}.jsonl`);
       }
     } catch {} // caught mid-write: as it was
-    else if (t?.kind === 'pc' && t.pid) { const s = sessions().find((x) => x.pid === t.pid); if (s) t.file = s.file; }
+    else if ((t?.kind === 'pc' || t?.mac) && t.pid) { const s = sessions().find((x) => x.pid === t.pid); if (s) t.file = s.file; } // a window's, a Mac's: by the list
     // (a path gone since: a 换账号继续 moved the record to the other account; found again by its id)
     return { t, file: t?.file === undefined || (t.file && !fs.existsSync(t.file)) ? sessions().find((x) => x.id === q.get('id'))?.file : t.file };
   }
@@ -2762,7 +3606,7 @@ async function web() {
   const UNREAD = { cpu: null, mem: null, n: null, prev: null };
   let share = { ...UNREAD, at: 0 }, sharing = false;
   const machines = () => {
-    if (!sharing && Date.now() - share.at >= 3000) {
+    if (WIN && !sharing && Date.now() - share.at >= 3000) { // macOS: no Claude part (CLAUDE_PS is PowerShell)
       sharing = true; const at = Date.now();
       require('child_process').execFile('powershell.exe', ['-NoProfile', '-Command', CLAUDE_PS], { windowsHide: true, timeout: 15000 }, (e, out) => {
         sharing = false;
@@ -2770,11 +3614,15 @@ async function web() {
       });
     }
     const pc = pcNow(), within = (x, all) => (x == null || all == null ? x : Math.min(x, all)); // its CPU over its own 2 s, Claude's over 3
-    return [{ id: 'here', name: os.hostname(), cpu: pc.cpu, mem: pc.mem, memAll: pc.memAll, n: share.n, cpuClaude: within(share.cpu, pc.cpu), memClaude: within(share.mem, pc.mem) }];
+    // each Mac once (by host: its accounts share it), named as its first entry; id mac:<host>, which its cards show
+    const seen = new Set(), mac = macList(load()).filter((m) => !seen.has(m.host) && seen.add(m.host))
+      .map((m) => { const x = macSys.get(m.host); return { id: `mac:${m.host}`, name: m.label, ...(x && Date.now() - x.at < 30000 ? x : { err: '读不到：还没连上 Mac' }) }; });
+    return [{ id: 'here', name: os.hostname(), cpu: pc.cpu, mem: pc.mem, memAll: pc.memAll, n: share.n, cpuClaude: within(share.cpu, pc.cpu), memClaude: within(share.mem, pc.mem) }, ...mac];
   };
   // its tickets, as the 操作台 shows them: the open ones, what waits on you first, then the last 5 ended. Only this service
   // writes them (written whole, then swapped in: a crash mid-write leaves the old file)
   const editTickets = (fn) => { const all = readTickets(), r = fn(all); fs.writeFileSync(`${TICKETS}.tmp`, JSON.stringify(all, null, 1)); fs.renameSync(`${TICKETS}.tmp`, TICKETS); return r; };
+  const editProjects = (fn) => { const all = readProjects(), r = fn(all); fs.writeFileSync(`${PROJECTS}.tmp`, JSON.stringify(all, null, 1)); fs.renameSync(`${PROJECTS}.tmp`, PROJECTS); return r; };
   const ticketsNow = (list = [...sessions(), ...gptSessions()]) => { // a ticket's conversation: Claude's or GPT's
     const all = readTickets().map((t) => { const s = list.find((x) => x.id === t.conv); return { ...t, ev: undefined, stage: stageOf(t, s), convTitle: s?.title ?? null }; });
     const open = all.filter((t) => !t.end).sort((a, b) => STAGE_ORDER.indexOf(a.stage[1]) - STAGE_ORDER.indexOf(b.stage[1]) || a.id - b.id);
@@ -2794,9 +3642,11 @@ async function web() {
   const butlerSet = (k) => { for (const n of ['settings.local.json', 'settings.json']) try { const m = JSON.parse(fs.readFileSync(path.join(BUTLER, '.claude', n), 'utf8'))[k]; if (m) return m; } catch {} return null; };
   const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
   const api = {
+    ...ext?.api,
     // the questions other conversations wait on, as their screens show them (管家 mode has them as cards): each read again
     // 3 s after the last read at most, one read for every page asking
-    'GET /api/asks': async () => Promise.all(sessions().filter((s) => s.wait && s.pid && !(BUTLER && sameDir(s.cwd, BUTLER))).map(async (s) => {
+    // (a Mac's only when it runs in this service: one in a terminal on the Mac can't be read, and asking ssh'd there each time)
+    'GET /api/asks': async () => Promise.all(sessions().filter((s) => s.wait && s.pid && !(BUTLER && sameDir(s.cwd, BUTLER)) && (!s.mac || where(s))).map(async (s) => {
       let a = asks.get(s.id);
       if (!a || Date.now() - a.at > 3000) asks.set(s.id, a = { at: Date.now(), menu: screenOf(s.id).then((r) => r?.menu ?? null, () => null) });
       return { id: s.id, title: s.title, acct: s.acct + 1, menu: await a.menu };
@@ -2825,7 +3675,8 @@ async function web() {
     // 3 s at most, then shows the last numbers; the page's next look (10 s) has the new ones.
     'GET /api/state': async (q) => {
       for (const id of (q.get('view') ?? '').split(',').filter(Boolean)) viewing.set(id, Date.now()); // shown in a page in front
-      if (!usageCache || q.has('fresh') || Date.now() - usageAt > 60000) usageNow ??= usageState().then((r) => {
+      // (a page in the background, bg: there for its tab's unread count only, it doesn't keep the quota read)
+      if (!usageCache || (!q.has('bg') && (q.has('fresh') || Date.now() - usageAt > 60000))) usageNow ??= usageState(undefined, { macFresh: q.has('fresh') || !usageAt }).then((r) => {
         usageCache = r.json; usageAt = Date.now();
         fs.writeFile(WEB_USAGE, JSON.stringify(r.json), () => {});
       }, () => {}).finally(() => { usageNow = null; });
@@ -2840,8 +3691,40 @@ async function web() {
       for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
       list.sort((a, b) => b.at - a.at);
-      return { usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
-        tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow() };
+      // the Macs (the Mac mini, more): 新对话 offers them
+      const reg = load(), macs = macList(reg).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
+      return { user: reg.user ?? null, usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+        tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects(), win: WIN };
+    },
+    'POST /api/project': (q, b) => editProjects((all) => projectOp(all, b)),
+    'GET /api/dirs': (q) => dirsIn(q.get('path') ?? ''),
+    // `/` in a conversation's box ({id}, or {dir, acct} for one not begun): what Claude Code lists there (slashList), by
+    // account and folder, kept 10 min. A Mac's ({mac} one not begun): Claude Code's own commands only, as listed here (its
+    // skills are the Mac's, and nothing is run there to ask)
+    'GET /api/commands': async (q) => {
+      const s = q.get('id') ? sessions().find((x) => x.id === q.get('id')) : null, reg = load(), mac = s ? s.mac : q.get('mac');
+      const got = (k, make) => { let c = slashCache.get(k); if (!c || Date.now() - c.at > 600000) { c = { at: Date.now(), list: make() }; slashCache.set(k, c); c.list.catch(() => slashCache.delete(k)); } return c.list; };
+      const pc = (p, cwd) => got(`${p.configDir}|${path.resolve(cwd).toLowerCase()}`, () => slashList(claudeExe, p.configDir, cwd));
+      if (s?.gpt) return { commands: [] };
+      if (mac) { // the Mac's own list; that Mac not answering: Claude Code's own commands, as listed here, and why
+        const m = macOf(mac, reg), at = s?.macCwd ?? m?.dir ?? '';
+        try { // (one without its own config dir, the Mac mini: its default account, the owner's to keep to: not run there)
+          if (!m) throw new Error('没有这台 Mac');
+          if (!m.config) throw new Error(`${m.label} 用的是那台 Mac 默认的账号，不在上面跑 Claude Code`);
+          return { commands: await got(`mac|${m.id}|${at}`, () => macSlash(m, at)) }; } catch (e) {
+          const list = reg.profiles[0] ? await pc(reg.profiles[0], ROOT).catch(() => []) : [];
+          return { commands: list.filter((x) => x.builtin), note: `没读到 Mac 上的命令和技能（${e.message}），这里只列内置命令；技能可以直接打完整的名字` };
+        }
+      }
+      const p = reg.profiles[s ? s.acct : (Number(q.get('acct')) || 0) - 1], cwd = s ? s.cwd : q.get('dir') ?? '';
+      if (!p || !isDir(cwd)) return { commands: [] };
+      return { commands: await pc(p, cwd) };
+    },
+    // your name, for the page's avatar (its first character; none: the gear), kept in the registry
+    'POST /api/me': (q, b) => {
+      const name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 20);
+      update((r) => { if (name) r.user = name; else delete r.user; });
+      return { user: name || null };
     },
     // the tickets (claude-multi ticket), and a change to one: from the 管家 (new, give, end) or its worker (report)
     'GET /api/tickets': () => ticketsNow(),
@@ -2871,6 +3754,9 @@ async function web() {
       return { on: false };
     },
     'GET /api/island': () => ({ on: !islandOff() }),
+    // 设置's 申请接入: the applications still out (an approved one is an account by then); opening it asks them once
+    'GET /api/join': async () => { await joinRound().catch(() => {}); return joinsShown(); },
+    'POST /api/join': (q, b) => joinApply(b),
     'POST /api/island': (q, b) => {
       if (b.on) { try { fs.unlinkSync(ISLAND_OFF); } catch {} island(); return { on: true }; }
       fs.writeFileSync(ISLAND_OFF, '');
@@ -2923,10 +3809,12 @@ async function web() {
       const id = b.all ? '*' : /^[\w-]{1,80}$/.test(b.id ?? '') ? b.id : null;
       if (!id) throw new Error('缺少对话 id');
       markRead(id);
-      fs.mkdirSync(INBOX, { recursive: true });
-      const f = path.join(INBOX, `${Date.now()}-read`);
-      fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'read', id }));
-      fs.renameSync(`${f}.tmp`, `${f}.json`);
+      if (!islandOff()) { // (off: nothing would ever take it out)
+        fs.mkdirSync(INBOX, { recursive: true });
+        const f = path.join(INBOX, `${Date.now()}-read`);
+        fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'read', id }));
+        fs.renameSync(`${f}.tmp`, `${f}.json`);
+      }
       return {};
     },
     'POST /api/warmup': () => new Promise((ok) => { // not spawnSync: the terminals keep streaming meanwhile
@@ -2936,11 +3824,31 @@ async function web() {
     // 重命名 and 删除 from the page's list: the commands themselves, their checks and their words (a running one is
     // refused), run apart as warmup is: a deletion's PowerShell would hold up every terminal's stream meanwhile. One just
     // continued here isn't listed as running yet: refused here first. The list read afresh after.
+    // 右键 a path of this PC on the page (shellCmd): opened on this PC's screen, where the service runs (your session)
+    'POST /api/shell': (q, b) => {
+      const p = String(b.path ?? ''), how = String(b.how ?? '');
+      if (WIN ? !/^[A-Za-z]:[\\/]/.test(p) || netPath(p) : !path.isAbsolute(p)) throw new Error(`只能打开这台电脑上的文件（像 ${WIN ? 'D:\\…' : '/Users/…'} 这样的完整路径）`);
+      const f = path.resolve(p);
+      let st; try { st = fs.statSync(f); } catch { throw new Error(`没有这个文件：${p}`); }
+      const dir = st.isDirectory();
+      if (!WIN) { // a Mac's Finder: opened, else shown in its folder (-R). A program, script or app (one it can run) only shown, never run
+        const runs = dir ? /\.app$/i.test(f) : RUNS.test(f) || MAC_RUNS.test(f) || !!(st.mode & 0o111);
+        require('child_process').spawn('open', how === 'open' && !runs ? [f] : ['-R', f], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+        return { said: how === 'open' && runs ? `${path.basename(f)} 是程序或脚本，没有运行它，在访达里选中了它` : '' };
+      }
+      const [exe, line] = shellCmd(f, how, dir);
+      require('child_process').spawn(exe, [line], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).on('error', () => {}).unref();
+      const env = frontOf(f, how, dir); // (its window to the front: logged, to see what Windows let it do)
+      require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(FRONT_PS, 'utf16le').toString('base64')],
+        { env: { ...process.env, ...env }, windowsHide: true, encoding: 'utf8', timeout: 30000 }, (e, out) => log('shell_front', { how, dir, front: String(out || e?.message || '').trim().slice(-80) }));
+      return { said: !dir && how === 'open' && RUNS.test(f) ? `${path.basename(f)} 是程序或脚本，没有运行它，在资源管理器里选中了它` : '' };
+    },
     'POST /api/rename': (q, b) => {
       const id = String(b.id ?? ''), name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
       if (!name) throw new Error('名字不能是空的');
       if (b.oai) { const c = oaiRead(id); c.title = name; oaiSave(c); return { said: `已改名：${name}` }; }
       if (b.gpt) throw new Error('GPT 对话暂时不能在这里改名');
+      if (sessions().find((x) => x.id === id)?.mac) throw new Error('Mac 上的对话暂时不能在这里改名'); // its record there, not here
       return command('rename', id, name);
     },
     'POST /api/delete': async (q, b) => {
@@ -2962,7 +3870,7 @@ async function web() {
     // its Claude by that, not by its folder (two started in one folder at once got each other's)
     'POST /api/open': async (q, b) => {
       const opened = async (t) => {
-        for (let k = 0; k < 50 && !t.pid && !t.gone; k++) await sleep(100);
+        for (let k = 0; k < (t.mac ? 450 : 50) && !t.pid && !t.gone; k++) await sleep(100); // a Mac's: ssh first, tried again on a drop
         if (t.gone || !t.pid) throw new Error('终端尚未就绪或已结束，未取得 PID；请先确认启动状态再重试');
         return { key: t.key, kind: 'pty', pid: t.pid };
       };
@@ -2970,7 +3878,7 @@ async function web() {
       if (b.dir != null) b.dir = String(b.dir).trim().replace(/^"(.*)"$/, '$1'); // a typed path, maybe as Explorer's 复制为路径 quotes it
       if (b.gpt) { // a GPT one: {id} its Codex here, or continued here on its own account (a GPT one changes none); {dir, acct}
         if (!b.id) {
-          if (!b.dir || !fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
+          if (!isDir(b.dir)) throw new Error('文件夹不存在');
           return { key: startGpt(Number(b.acct) || 1, b.dir, null, cols, rows).key, kind: 'pty' };
         }
         const t = gptLive().find((x) => x.gpt.id === b.id);
@@ -2982,10 +3890,22 @@ async function web() {
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         return { key: startGpt(s.acct + 1, s.cwd, s.id, cols, rows).key, kind: 'pty' };
       }
+      if (b.mac && !b.id) { // {mac: its id (true: the Mac mini), dir?}: one started on that Mac, for that folder here (its project folder there), or in the Mac's folder
+        if (b.dir && !isDir(b.dir)) throw new Error('文件夹不存在');
+        return opened(startMac(b.mac === true ? 'mac' : String(b.mac), b.dir ? { pc: path.resolve(b.dir) } : {}, cols, rows));
+      }
       if (b.id) {
         sessCache = null;
         const s = sessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
+        // the Mac's: ours if it runs here; else joined in its tmux there (this service restarted meanwhile) or continued
+        // (one in a terminal on the Mac is refused there: it can't be shown)
+        if (s.mac) {
+          const t = s.pid && where(s), r = resuming(s.id);
+          if (t || r) return t ? { key: t.key, kind: t.kind } : opened(r);
+          if (b.live && !s.pid) throw new Error('这个对话已经不在运行了');
+          return opened(startMac(s.mac, { resume: s.id, cwd: s.macCwd }, cols, rows));
+        }
         if (s.pid) { const t = where(s) ?? mirror(s.pid, reg.profiles[s.acct].configDir); t.file = s.file; return { key: t.key, kind: t.kind }; }
         const r = resuming(s.id);
         if (r) return opened(r);
@@ -2999,7 +3919,7 @@ async function web() {
       if (b.dir && sameDir(b.dir, BUTLER) && !butlerOn()) throw new Error(BUTLER_SHUT);
       const p = reg.profiles[b.acct - 1];
       if (!p) throw new Error('没有这个账号');
-      if (!b.dir || !fs.existsSync(b.dir) || !fs.statSync(b.dir).isDirectory()) throw new Error('文件夹不存在');
+      if (!isDir(b.dir)) throw new Error('文件夹不存在');
       // the 管家 is one: two screens starting it at once (it isn't listed before its first message) get the same
       const one = sameDir(b.dir, BUTLER) && [...terms.values()].find((t) => t.kind === 'pty' && !t.gone && sameDir(t.cwd, BUTLER));
       if (one) return opened(one);
@@ -3015,6 +3935,7 @@ async function web() {
       sessCache = null;
       const reg = load(), s = sessions().find((x) => x.id === b.id), p = reg.profiles[b.acct - 1];
       if (!s) throw new Error('找不到这个对话');
+      if (s.mac) throw new Error('Mac 上的对话用的是 Mac 自己的账号，换不了');
       if (!p) throw new Error('没有这个账号');
       const args = ['--resume', s.id];
       if (!s.pid && resuming(s.id)) throw new Error('这个对话还在启动，等它起来再换'); // a second Claude on the record, or the page told it switched
@@ -3099,10 +4020,11 @@ async function web() {
       if (!keyMatch(keyCookie(req.headers.cookie), webKey())) return out(403, '要用链接打开：在电脑上运行 claude-multi web-link。', text);
       if (req.method === 'GET' && url.pathname === '/') return out(200, fs.readFileSync(path.join(ROOT, 'web.html'), 'utf8'), 'text/html; charset=utf-8');
       if (req.method === 'GET' && url.pathname === '/screen.js') return out(200, fs.readFileSync(path.join(ROOT, 'screen.js'), 'utf8'), 'text/javascript; charset=utf-8');
-      // the terminal's files, and KaTeX's (the math in messages, its fonts too), from our node_modules: from the CDN
-      // abroad they took 7-8 s, and the page waits for them. Kept a year: the page asks with the version, ?6.0.0, so a
-      // new one is a new address.
-      const lib = /^\/lib\/((?:@xterm\/[\w-]+\/(?:lib|css)|katex\/dist(?:\/fonts)?)\/[\w.-]+\.(js|css|woff2))$/.exec(url.pathname);
+      if (req.method === 'GET' && url.pathname === '/ext.js') return out(200, ext?.page?.() ?? '', 'text/javascript; charset=utf-8'); // none: empty
+      // the terminal's files, KaTeX's (the math in messages, its fonts too) and highlight.js's (code's colors in 预览), from
+      // our node_modules: from the CDN abroad they took 7-8 s, and the page waits for them. Kept a year: the page asks with
+      // the version, ?6.0.0, so a new one is a new address.
+      const lib = /^\/lib\/((?:@xterm\/[\w-]+\/(?:lib|css)|katex\/dist(?:\/fonts)?|@highlightjs\/cdn-assets(?:\/languages)?)\/[\w.-]+\.(js|css|woff2))$/.exec(url.pathname);
       if (req.method === 'GET' && lib) {
         const type = { css: 'text/css', js: 'text/javascript', woff2: 'font/woff2' }[lib[2]];
         return reply(200, { 'content-type': type, 'cache-control': 'max-age=31536000, immutable' }, fs.readFileSync(path.join(ROOT, 'node_modules', lib[1])));
@@ -3149,6 +4071,46 @@ async function web() {
         res.writeHead(200, { 'content-type': OAI_TYPES[path.extname(p).slice(1).toLowerCase()], 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
         return res.end(fs.readFileSync(p));
       }
+      // 预览: a file or folder of this PC named in a reply (?path as Claude wrote it): a folder's folders and files; a file as
+      // peekHead says, a part of it when asked (Range: a video's seek), text its first 2 MB; an Office one as its PDF
+      // (?warm: only made, for when it's opened, a folder's Office ones too; a file's type said, for the page to know one
+      // it can't show)
+      if (req.method === 'GET' && (url.pathname === '/api/peek' || url.pathname.startsWith('/api/peek/'))) { // (/api/peek/<name>: its name for the PDF viewer's title)
+        const p = url.searchParams.get('path') ?? '';
+        if (WIN ? !/^[A-Za-z]:[\\/]/.test(p) : !path.isAbsolute(p)) return out(400, `只能预览这台电脑上的文件（像 ${WIN ? 'D:\\…' : '/Users/…'} 这样的完整路径）`, text);
+        let st; try { st = await fs.promises.stat(p); } catch { return out(404, `没有这个文件：${p}`, text); }
+        // an Office one as its PDF: made by Office on Windows; a Mac's as the file itself
+        const raw = url.searchParams.has('raw'), office = WIN && !raw && !!OFFICE_KIND[path.extname(p).slice(1).toLowerCase()], warm = url.searchParams.has('warm'); // raw: the file itself, downloaded
+        if (st.isDirectory()) { // listed: its Office files' PDFs made meanwhile (20 at most), for when one's opened
+          const ls = await dirsIn(p);
+          if (warm) for (const f of ls.files.filter((n) => OFFICE_KIND[path.extname(n).slice(1).toLowerCase()]).slice(0, 20)) peekPdf(path.join(ls.path, f)).catch(() => {});
+          return out(200, warm ? {} : ls);
+        }
+        if (warm) { if (office) peekPdf(p).catch(() => {}); return out(200, { type: peekHead(p, office)['content-type'] }); } // what it'll be
+        let file = p;
+        if (office) try { file = await peekPdf(p, { first: true }); } catch (e) { return out(500, e.message, text); }
+        const head = raw ? { ...peekHead(path.basename(p)), 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(p))}` }
+          : peekHead(path.basename(p), office), size = office ? fs.statSync(file).size : st.size, plain = head['content-type'].startsWith('text/');
+        const range = !plain && size && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+        let start = 0, end = (plain ? Math.min(size, 2 << 20) : size) - 1;
+        if (range && (range[1] || range[2])) {
+          start = range[1] ? +range[1] : Math.max(0, size - +range[2]);
+          end = range[1] && range[2] ? Math.min(+range[2], size - 1) : size - 1;
+          if (start > end) { res.writeHead(416, { 'content-range': `bytes */${size}` }); return res.end(); }
+          res.writeHead(206, { ...head, 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 });
+        } else res.writeHead(200, { ...head, 'accept-ranges': plain ? 'none' : 'bytes', 'content-length': Math.max(0, end - start + 1) });
+        if (end < start) return res.end();
+        const r = fs.createReadStream(file, { start, end });
+        r.on('error', () => res.destroy()); req.on('close', () => r.destroy());
+        return r.pipe(res);
+      }
+      // a file sent in a conversation (附件：… in a message of yours), for the page's card of it to open
+      if (req.method === 'GET' && url.pathname === '/api/file') {
+        const f = fileServed(url.searchParams.get('n'));
+        if (!f || !fs.existsSync(f.file)) return out(404, '这个附件已经不在了：发过的文件只留 7 天', text);
+        res.writeHead(200, f.headers);
+        return res.end(fs.readFileSync(f.file));
+      }
       // only from our own page: from the same origin, as JSON or a picture's own type (another site's page can't send
       // either cross-origin without asking first, and nothing here answers that)
       if (req.method === 'POST' && req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return out(403, { err: '来源不对' });
@@ -3161,7 +4123,9 @@ async function web() {
         if (!ext && !name) return out(415, { err: '只能发图片或文件' });
         const parts = []; let size = 0;
         for await (const ch of req) { if ((size += ch.length) > 20 << 20) return out(413, { err: `${name ? '文件' : '图片'}太大了（最大 20 MB）` }); parts.push(ch); }
-        return out(200, { path: saveUpload(Buffer.concat(parts), ext, UPLOADS, name) });
+        const saved = saveUpload(Buffer.concat(parts), ext, UPLOADS, name);
+        const xm = req.headers['x-mac']; // x-mac: for a conversation on a Mac, its id ('1': the Mac mini, as the page said it before)
+        return out(200, { path: xm ? await macPut(saved, macOf(xm === '1' ? 'mac' : xm, load())) : saved });
       }
       const fn = api[`${req.method} ${url.pathname}`];
       if (!fn) return out(404, { err: '没有这个地址' });
@@ -3229,8 +4193,9 @@ async function web() {
   async function wakeUp() {
     const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
     for (const id of ranBefore) {
-      const s = all.find((x) => x.id === id), p = s && !s.pid && s !== me && reg.profiles[s.acct];
-      if (p) try { startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
+      // a Mac's still running in its tmux there is joined again (startMac finds it)
+      const s = all.find((x) => x.id === id), p = s && s !== me && (s.mac || (!s.pid && reg.profiles[s.acct]));
+      if (p) try { if (s.mac) startMac(s.mac, { resume: s.id, cwd: s.macCwd }); else startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
     }
     const open = readTickets().some((x) => !x.end), p = butlerOn() && me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
     if (!p) return;
@@ -3244,7 +4209,7 @@ async function web() {
       return log('butler_woken', { session_id: me.id, reminders: lost.length });
     }
   }
-  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); setTimeout(() => wakeUp().catch((e) => log('wake_fail', { err: e.message })), 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
+  server.listen(WEB_PORT, '127.0.0.1', () => { saveTerms(); tunnel(); macWatch(); setTimeout(() => wakeUp().catch((e) => log('wake_fail', { err: e.message })), 3000); console.log(`网页：${WEB_URL}/  （第一次用 claude-multi web-link 给的链接打开）`); });
   // the way in from outside, kept up: dialed again 5 s after a drop, waiting longer (up to a minute) while each try
   // fails at once (the server or the network down). A connection the network swallowed (a proxy's TUN switched on or
   // off moves it to another interface) is found dead within 15 s, by either side. On the server its end is a socket
@@ -3280,17 +4245,22 @@ async function web() {
 // tokens-cache.json keeps each file's replies and how far it was read: a run reads only what was appended.
 function tokenRoots(reg = load()) {
   return [...reg.profiles, ...(reg.removed ?? []).map((p) => ({ ...p, label: `${p.label}（已移除）` }))]
-    .map((p) => ({ id: p.id, label: p.label, dir: path.join(p.configDir, 'projects') }));
+    .map((p) => ({ id: p.id, label: p.label, dir: path.join(p.configDir, 'projects') }))
+    // each Mac's records, as copied here; and what its other folders cost (others\: their replies' usage only), an amount
+    // beside its own (those last: tokenStats takes them out of the rows)
+    .concat(macList(reg).map((m) => ({ id: m.id, label: m.label, dir: path.join(macHome(m), 'projects'), mac: m.id, icon: m.icon ?? null })),
+      macList(reg).map((m) => ({ id: `${m.id}-other`, of: m.id, label: '', dir: path.join(macHome(m), 'others'), other: true })));
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
-// input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5).
+// input (5 min) or 2x (1 h), fast mode doubles it all. The longest matching name wins (opus-5 vs opus-5-5); a gateway's
+// name for it (本地代理's claude/claude-opus-5-5) by what follows its provider/.
 // ponytail: copied by hand from Anthropic's price list (2026-06; Fable 5.2 from Claude Code 2.1.321's notes); a model not
 // listed is priced as Opus 5.5, so add a row when a new one shows up
 const PRICES = { 'claude-fable-5-2': [8, 40, 0.2], 'claude-fable-5-1': [10, 50, 0.25], 'claude-fable-5': [10, 50, 1], 'claude-opus-5-5': [4, 20, 0.2],
   'claude-opus-5': [5, 25, 0.5], 'claude-opus-4': [5, 25, 0.5], 'claude-sonnet-5': [2, 10, 0.2], 'claude-sonnet-4': [3, 15, 0.3],
   'claude-haiku-4': [1, 5, 0.1], '<synthetic>': [0, 0, 0] };
 function replyCost([, , i, o, w5, w1, r, model, fast]) {
-  const k = Object.keys(PRICES).filter((p) => (model ?? '').startsWith(p)).sort((a, b) => b.length - a.length)[0];
+  const name = (model ?? '').replace(/^[\w.-]+\//, ''), k = Object.keys(PRICES).filter((p) => name.startsWith(p)).sort((a, b) => b.length - a.length)[0];
   const [pi, po, pr] = PRICES[k ?? 'claude-opus-5-5'];
   return ((i + w5 * 1.25 + w1 * 2) * pi + o * po + r * pr) / 1e6 * (fast ? 2 : 1);
 }
@@ -3300,15 +4270,15 @@ const tokensBeside = () => new Promise((ok, no) => require('child_process').exec
   ['-e', `const m = require(${JSON.stringify(__filename)}); process.stdout.write(JSON.stringify({ ...m.tokenStats(), butler: m.butlerCost() }))`],
   { windowsHide: true, maxBuffer: 256 << 20 }, (e, out) => { try { if (e) throw e; ok(JSON.parse(out)); } catch (x) { no(x); } }));
 function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-cache.json'), logFile = LOG) {
-  let cache = { v: 3, files: {} }, dirty = false; // dirty: something read further, or dropped: the cache is written
+  let cache = { v: 4, files: {} }, dirty = false; // dirty: something read further, or dropped: the cache is written
   try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch (e) {
     if (e.code !== 'ENOENT') try { fs.copyFileSync(cacheFile, `${cacheFile}.bad`); } catch {} // unreadable: keep it for a hand rescue
   }
-  // replies now carry their time (who made one goes by it): the records read again; deleted ones keep theirs, without
-  if (cache.v !== 3) dirty = true, cache = { v: 3, files: Object.fromEntries(Object.entries(cache.files ?? {}).filter(([f]) => !fs.existsSync(f))) };
+  // replies now carry their time (who made one goes by it), then the advisor's calls (v4): the records read again;
+  // deleted ones keep theirs, without
+  if (cache.v !== 4) dirty = true, cache = { v: 4, files: Object.fromEntries(Object.entries(cache.files ?? {}).filter(([f]) => !fs.existsSync(f))) };
   const num = (s, k) => +(s.match(new RegExp(`"${k}":(\\d+)`))?.[1] ?? 0);
-  const two = (n) => String(n).padStart(2, '0');
-  const day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; };
+  const day = (t) => ymd(new Date(t));
   const sum = (x) => x[2] + x[3] + x[4] + x[5] + x[6];
   const walk = (d, out = []) => {
     let es = [];
@@ -3363,8 +4333,16 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
             const u = l.slice(l.indexOf('"usage":')), w = num(u, 'cache_creation_input_tokens'), w1 = Math.min(w, num(u, 'ephemeral_1h_input_tokens'));
             const x = [`${id}:${l.match(/"requestId":"([^"]+)"/)?.[1] ?? ''}`, day(ts), num(u, 'input_tokens'), num(u, 'output_tokens'),
               w - w1, w1, num(u, 'cache_read_input_tokens'), l.match(/"model":"([^"]+)"/)?.[1] ?? '', +/"speed":"fast"/.test(u), Date.parse(ts)];
-            const i = at.get(x[0]);
-            if (i === undefined) { at.set(x[0], c.recs.length); c.recs.push(x); } else if (sum(x) > sum(c.recs[i])) c.recs[i] = x;
+            // the advisor's calls (Fable, at its price) ride in the reply's usage.iterations, apart from its own tokens
+            const its = u.includes('"advisor_message"') ? (() => { try { return JSON.parse(l).message.usage.iterations ?? []; } catch { return []; } })() : [];
+            const xs = [x, ...its.filter((t) => t.type !== 'message' && t.model).map((t, k) => [`${x[0]}:${k}`, x[1], t.input_tokens ?? 0, t.output_tokens ?? 0,
+              t.cache_creation?.ephemeral_5m_input_tokens ?? 0, t.cache_creation?.ephemeral_1h_input_tokens ?? 0, t.cache_read_input_tokens ?? 0, t.model, 0, x[9]])];
+            // kept as fresh strings: a match is a slice holding its whole 32 MB piece alive (V8), and a first read of
+            // every record (no cache yet, or a new version) ran out of memory with them
+            for (const y of xs.map((z) => JSON.parse(JSON.stringify(z)))) {
+              const i = at.get(y[0]);
+              if (i === undefined) { at.set(y[0], c.recs.length); c.recs.push(y); } else if (sum(y) > sum(c.recs[i])) c.recs[i] = y;
+            }
           }
           c.size += end;
         }
@@ -3388,18 +4366,25 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // nothing new since the last run: not written again (13 MB each time, for nothing)
   if (dirty || Object.keys(next).length !== Object.keys(cache.files).length) {
     const tmp = `${cacheFile}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ v: 3, files: next }));
+    fs.writeFileSync(tmp, JSON.stringify({ v: 4, files: next }));
     try { fs.renameSync(tmp, cacheFile); } catch { fs.rmSync(tmp, { force: true }); } // held open by another run: it saves
   }
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 });
   const add = (t, x, usd) => { t.i += x[2]; t.o += x[3]; t.cw += x[4] + x[5]; t.cr += x[6]; t.usd += usd; t.n++; };
-  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0 }));
+  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0, ...(r.mac && { mac: r.mac, icon: r.icon ?? null }) }));
+  const plus = {}; // what each Mac's other folders cost (by its id): in no total and no day, one amount beside that Mac's (plus)
   for (const { x, ri } of best.values()) {
-    const usd = replyCost(x), t = (days[x[1]] ??= { d: x[1], ...zero(), by: roots.map(zero) });
+    const usd = replyCost(x);
+    if (roots[ri].other) { plus[roots[ri].of] = (plus[roots[ri].of] ?? 0) + usd; continue; }
+    const t = (days[x[1]] ??= { d: x[1], ...zero(), by: roots.map(zero) });
     add(t, x, usd); add(t.by[ri], x, usd);
     accounts[ri].total += sum(x); accounts[ri].usd += usd;
   }
+  roots.forEach((r, i) => { if (r.of) { const m = accounts[roots.findIndex((q) => q.id === r.of)]; if (m) m.plus = plus[r.of] ?? 0; } });
+  // (the other folders' roots come last: the rows left keep their places in each day's by)
+  const firstOther = roots.findIndex((r) => r.other);
+  if (firstOther >= 0) accounts.length = firstOther;
   return { days: Object.values(days).sort((a, b) => (a.d < b.d ? -1 : 1)), accounts, total: accounts.reduce((s, a) => s + a.total, 0),
     usd: accounts.reduce((s, a) => s + a.usd, 0), today: day(Date.now()) };
 }
@@ -3408,7 +4393,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
 // [系统通知], a background task of its own; and the watchdog's Haiku questions (logged with their cost). Today, the
 // last 7 days, in all. ponytail: its records read whole each time (cached 30 s with the token counts); keep sizes if slow
 function butlerCost(roots = tokenRoots(), logFile = LOG, now = Date.now()) {
-  const two = (n) => String(n).padStart(2, '0'), day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; };
+  const day = (t) => ymd(new Date(t));
   const seen = new Map(), folder = projectFolder(BUTLER); // a reply (its id, its request) → [usd, kind, day], a copy (another account's) once
   for (const r of roots) {
     let files = []; try { files = fs.readdirSync(path.join(r.dir, folder)).filter((n) => n.endsWith('.jsonl')); } catch {}
@@ -3473,7 +4458,88 @@ function saveLine(input, dir = LINES) {
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 
-module.exports = { procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+// claude-multi setup: what install.sh / install.ps1 run once the code is in ~/.claude-multi (run again: an update). Your
+// ~/.claude/settings.json gets the notes and the status line (added to what's there; the file as it was kept beside it),
+// the web service starts at login and now (a Mac's restarted, on the new code), and its page opens.
+const LOGIN_LABEL = 'com.claude-multi.web'; // the Mac's launch agent
+// the notes (Stop, Notification) and the status line, ours added once; a status line of your own kept (theirs)
+function withHooks(s, script) {
+  const cmd = (a) => `node "${script}" ${a}`;
+  const has = (list, a) => (list ?? []).some((e) => (e.hooks ?? []).some((h) => String(h.command ?? '').includes(`claude-multi.js" ${a}`)));
+  const hooks = { ...s.hooks };
+  if (!has(hooks.Stop, 'notify done')) hooks.Stop = [...(hooks.Stop ?? []), { hooks: [{ type: 'command', command: cmd('notify done') }] }];
+  if (!has(hooks.Notification, 'notify ask')) hooks.Notification = [...(hooks.Notification ?? []), { matcher: 'permission_prompt', hooks: [{ type: 'command', command: cmd('notify ask') }] }];
+  const theirs = !!s.statusLine && !String(s.statusLine.command ?? '').includes('claude-multi.js');
+  return { s: { ...s, hooks, ...(!theirs && { statusLine: { type: 'command', command: cmd('statusline') } }) }, theirs };
+}
+async function setup() {
+  // only the copy in ~/.claude-multi: your settings never point at another checkout
+  if (path.relative(fs.realpathSync(ROOT), __filename) !== 'claude-multi.js') { console.log(`setup 只用 ${ROOT} 里的代码运行`); process.exit(1); }
+  const f = path.join(SHARED, 'settings.json'), bak = `${f}.before-claude-multi`;
+  let s = {};
+  try { s = JSON.parse(fs.readFileSync(f, 'utf8').trim() || '{}'); } catch (e) { if (e.code !== 'ENOENT') { console.log(`${f} 读不出来（${e.message}），改好再运行一次`); process.exit(1); } }
+  const w = withHooks(s, __filename.replace(/\\/g, '/'));
+  if (JSON.stringify(w.s) !== JSON.stringify(s)) {
+    fs.mkdirSync(SHARED, { recursive: true });
+    if (fs.existsSync(f) && !fs.existsSync(bak)) fs.copyFileSync(f, bak);
+    fs.writeFileSync(f, JSON.stringify(w.s, null, 2) + '\n');
+    console.log(`通知和状态栏加进了 ${f}`);
+  }
+  if (w.theirs) console.log('状态栏还是你自己的那个，网页底部就看不到模型和上下文用量');
+  const cp = require('child_process'), up = async () => { try { await fetch(`http://127.0.0.1:${WEB_PORT}/`, { signal: AbortSignal.timeout(1500) }); return true; } catch { return false; } };
+  const was = await up();
+  // started on its own, as island.ps1 starts it on Windows (a hidden console of its own for what it runs)
+  const start = () => WIN
+    ? spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Start-Process $env:CM_NODE -ArgumentList (\'"\' + $env:CM_JS + \'" web\') -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE'],
+      { env: { ...process.env, CM_NODE: process.execPath, CM_JS: __filename }, windowsHide: true })
+    : cp.spawn(process.execPath, [__filename, 'web'], { cwd: HOME, detached: true, stdio: 'ignore' }).unref();
+  if (process.platform === 'darwin') {
+    // a launch agent: started at login and now, again if it crashes. HOME, PATH and LANG as here: launchd's PATH has no claude
+    const plist = path.join(HOME, 'Library', 'LaunchAgents', `${LOGIN_LABEL}.plist`), dom = `gui/${process.getuid()}`, log = path.join(ROOT, 'web.log');
+    const x = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;'), str = (v) => `<string>${x(v)}</string>`;
+    fs.mkdirSync(path.dirname(plist), { recursive: true });
+    fs.writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key>${str(LOGIN_LABEL)}
+  <key>ProgramArguments</key><array>${str(process.execPath)}${str(__filename)}${str('web')}</array>
+  <key>WorkingDirectory</key>${str(HOME)}
+  <key>EnvironmentVariables</key><dict>${Object.entries({ HOME, PATH: process.env.PATH, LANG: process.env.LANG }).filter(([, v]) => v).map(([k, v]) => `<key>${k}</key>${str(v)}`).join('')}</dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>StandardOutPath</key>${str(log)}<key>StandardErrorPath</key>${str(log)}
+</dict></plist>
+`);
+    // the one running ended first (an update: its conversations are taken up again once it's back), then loaded again
+    spawnSync('launchctl', ['bootout', `${dom}/${LOGIN_LABEL}`]);
+    for (let i = 0; i < 50 && spawnSync('launchctl', ['print', `${dom}/${LOGIN_LABEL}`]).status === 0; i++) await sleep(100);
+    const r = spawnSync('launchctl', ['bootstrap', dom, plist], { encoding: 'utf8' });
+    if (r.status !== 0) { console.log(`没设成开机启动（${(r.stderr || '').trim()}），这次先直接启动`); start(); }
+  } else if (WIN) {
+    // at login: a shortcut in Startup, as the island's own (island.ps1 starts the web service, and the island unless it's off)
+    const lnk = path.join(process.env.APPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Claude Island.lnk');
+    if (!fs.existsSync(lnk)) {
+      fs.mkdirSync(path.dirname(lnk), { recursive: true });
+      spawnSync('powershell.exe', ['-NoProfile', '-Command', '$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:CM_LNK); '
+        + '$s.TargetPath = (Get-Command powershell.exe).Source; $s.Arguments = $env:CM_ARGS; $s.WindowStyle = 7; $s.Save()'],
+      { env: { ...process.env, CM_LNK: lnk, CM_ARGS: `-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "${ISLAND}"` }, windowsHide: true });
+      if (!fs.existsSync(lnk)) console.log('没设成开机启动：「启动」文件夹里的快捷方式没建出来');
+    }
+    // the claude-multi command: beside npm's own, when that folder is on the PATH
+    const bin = path.join(process.env.APPDATA ?? '', 'npm'), shim = path.join(bin, 'claude-multi.cmd');
+    if ((process.env.PATH ?? '').toLowerCase().split(';').includes(bin.toLowerCase()) && !fs.existsSync(shim)) fs.writeFileSync(shim, `@node "${__filename}" %*\r\n`);
+    if (was) console.log('网页服务已经开着，重启它才用上新代码');
+    else { start(); island(); }
+  } else if (!was) start();
+  for (let i = 0; i < 40 && !(await up()); i++) await sleep(500);
+  if (!(await up())) { console.log(`网页服务没起来${process.platform === 'darwin' ? `，看 ${path.join(ROOT, 'web.log')}` : ''}`); process.exit(1); }
+  const link = `http://127.0.0.1:${WEB_PORT}/?key=${webKey()}`;
+  console.log(`装好了。网页：${link}`);
+  // over ssh nobody sits at this screen: the link only
+  if (!process.env.SSH_CONNECTION) cp.spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+}
+
+module.exports = { sameStart, withHooks, usageState,joinApply, checkJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -3498,6 +4564,7 @@ if (require.main === module) {
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'remove') remove(process.argv[3]);
   else if (cmd === 'web') web();
+  else if (cmd === 'setup') setup();
   else if (cmd === 'web-link') console.log(`${WEB_URL}/?key=${webKey(process.argv[3] === 'new')}`); // new: the old key's browsers are out
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));
   else if (cmd === 'wt-bind') wtBind();
@@ -3514,6 +4581,8 @@ if (require.main === module) {
     else for (const s of all) console.log(`${s.pid ? '●' : ' '} ${new Date(s.at).toLocaleString('zh-CN', { hour12: false })}  ${pad(s.who, 16)} ${s.id}  ${path.basename(s.cwd)} · ${s.title}`);
   }
   else if (cmd === 'start') { // start N [claude args]: no menu, used by the island; start Gn: Codex on GPT account n
+    // start <a Mac's id> (mac: the Mac mini): one on that Mac for this folder (start mac -: in the Mac's own folder), in the web service, this tab joined to it
+    if (macOf(process.argv[3], load())) return attach(null, { mac: process.argv[3], ...(process.argv[4] !== '-' && { dir: process.cwd() }) });
     const g = gptByName(process.argv[3]);
     if (/^g/i.test(process.argv[3] ?? '')) { if (!g) { console.log('没有这个 GPT 账号：用 claude-multi list 看编号（G1、G2…）'); process.exit(1); } return runGpt(g, process.argv.slice(4)); }
     const p = load().profiles[Number(process.argv[3]) - 1];

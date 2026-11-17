@@ -59,6 +59,8 @@ assert.equal(helpersBusy([...spawn, idle, use('t2', 'SendMessage', { to: 'writer
 const bg = [use('b1', 'Bash', { run_in_background: true }), res('b1', 'Command running in background with ID: q1.')];
 assert.equal(helpersBusy(bg.join('\n')), true);
 assert.equal(helpersBusy([...bg, says('<task-notification>\n<tool-use-id>b1</tool-use-id>\n<status>completed</status>')].join('\n')), false);
+// its end delivered mid-turn, as Claude Code records it now: an attachment, its words in .prompt
+assert.equal(helpersBusy([...bg, JSON.stringify({ type: 'attachment', timestamp: ts, attachment: { type: 'queued_command', prompt: '<task-notification>\n<tool-use-id>b1</tool-use-id>\n<status>completed</status>' } })].join('\n')), false);
 assert.equal(helpersBusy([use('a1', 'Agent', { description: 'x' }), res('a1', 'the subagent finished: here is its report')].join('\n')), false); // foreground agent
 // stopped by Claude itself: no task-notification ever comes, its TaskStop result says so (as a ticket's worker did,
 // stopping its preview server: no "done" note, and the ticket never saw its turn end)
@@ -133,6 +135,16 @@ const old = require('path').join(tmp, 'old.json');
 fs.writeFileSync(old, JSON.stringify({ v: 2, files: { [require('path').join(tmp, 'a', 'p', 'gone.jsonl')]: { size: 9, recs: [['msg_9:r', '2026-09-29', 1, 0, 0, 1, 0, 'claude-opus-5-5', 0]] } } }));
 t = tokenStats(roots, old);
 assert.equal(t.total, 2); near(t.usd, (1 + 1 * 2) * 4 / 1e6);
+// the advisor's calls ride in a reply's usage.iterations: counted too, at its model's price (Fable 5.1), once though repeated
+{
+  const C = require('path').join(tmp, 'adv', 'p'); fs.mkdirSync(C, { recursive: true });
+  const u = { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 2, iterations: [
+    { type: 'message', input_tokens: 1, output_tokens: 2 }, { type: 'advisor_message', model: 'claude-fable-5-1', input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 0 }] };
+  const line = JSON.stringify({ message: { model: 'claude-opus-5-5', id: 'msg_a', usage: u }, requestId: 'req_a', type: 'assistant', timestamp: atH(14) }) + '\n';
+  fs.writeFileSync(require('path').join(C, 's.jsonl'), line + line);
+  const ta = tokenStats([{ label: 'adv', dir: require('path').join(tmp, 'adv') }], require('path').join(tmp, 'adv.json'));
+  assert.equal(ta.total, 113); near(ta.usd, (1 * 4 + 2 * 20) / 1e6 + (100 * 10 + 10 * 50) / 1e6);
+}
 // switched to b and back to a: a's file is the older one and holds every reply, yet b's stay b's (by the switch log)
 {
   const sid = '0cca25c9-be24-456d-a34c-fa807b945adb', log = require('path').join(tmp, 'events.jsonl');
@@ -262,6 +274,12 @@ if (SESSION0) {
   const pic = [{ role: 'user', text: '先看第一张' }, { role: 'img', text: '1234.0' }, { role: 'user', text: '[Image #1] 这是什么' }, { role: 'claude', text: '那是一只橘猫' }];
   assert.deepEqual(plain(lead(pic, ['● 那是一只橘猫'])), [EARLIER, '❯ [图片]', '❯ [Image #1] 这是什么', MARK]); // its picture with it
   assert.equal(lead(pic, ['● 1234.0']).skip, 1);                               // not found: the place isn't text
+  // a long screen of tool rows over a long record: the same answer (the last message with that key), at once
+  const big = Array.from({ length: 3000 }, (_, i) => ({ role: i % 3 ? 'tool' : i % 2 ? 'user' : 'claude', text: `消息编号 ${i % 500}` }));
+  const rows = [...Array.from({ length: 1000 }, (_, i) => `● Bash(step ${i})`), '● 消息编号 4'], t0 = Date.now(), b = lead(big, rows);
+  assert.deepEqual([b.skip, Date.now() - t0 < 100], [1000, true]);
+  // the last 消息编号 4 that isn't a tool's is #2004 (Claude's): from its question, #2001
+  assert.deepEqual(plain(b), [EARLIER, '❯ 消息编号 1', '● 消息编号 2', '● 消息编号 3', MARK]);
   console.log('lead ok');
 }
 
@@ -280,6 +298,11 @@ if (SESSION0) {
   const fresh = { five_hour: { utilization: 10, resets_at: null } };
   keepLast([{ id: 'b' }], [{ u: fresh }], cache, now);
   assert.deepEqual(cache.b, { at: now, u: fresh }); // a good read is kept for next time
+  // an API account (本地代理): no quota asked for (no sign-in to ask with), no error either; nothing kept for it
+  require('./claude-multi').fetchUsage({ id: 'local', configDir: 'C:/nowhere', api: { baseURL: 'http://127.0.0.1:3425' } }).then((r) => {
+    assert.deepEqual(r, { api: true }); assert.deepEqual(keepLast([{ id: 'local' }], [r], cache, now), [{ api: true }]); assert.ok(!cache.local);
+    console.log('quota of an API account ok');
+  }, (e) => { console.error(e); process.exitCode = 1; });
   console.log('quota ok');
 }
 // Notes (projects\<folder>\memory) shared by every account: a real one merged into ~/.claude's and made a junction to
@@ -448,7 +471,17 @@ if (SESSION0) {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
   const part = (re) => src.match(re)[0];
   const md = new Function('katex', `${part(/^const esc = .*$/m)}\n${part(/^const svg = .*$/m)}\n${part(/^const I = [\s\S]*?\};$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}
-    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
+    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^const PEEKABLE = .*$/m)}\n${part(/^const peekLink = [\s\S]*?\};$/m)}\n${part(/^const BLOCKS = .*$/m)}\n${part(/^const block = [\s\S]*?'<hr>';$/m)}\n${part(/^const PV_LANG = .*$/m)}\n${part(/^const hl = [\s\S]*?^};$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
+  // a list's items, a rule and a quote: blocks, each line's end taken with it; a - inside a line, or in code, stays
+  const h = md('看\n- 一\n  - 二\n---\n> 引\n正文 - 不是\n```\n- 代码\n```');
+  assert.ok(h.startsWith('看\n<span class="li" style="margin-left:0em">一</span><span class="li" style="margin-left:1em">二</span><hr><span class="bq">引</span>正文 - 不是\n'), h);
+  assert.ok(h.includes('<pre>- 代码</pre>'), h);
+  // a path of this PC in code: a 预览 link, as Codex shows one: its kind's mark and its name, the whole path on hover
+  // (Chinese and spaces in it; a folder by its ending / or no .ext); other code, or a Mac's path: code
+  const pk = md('`D:\\论文 04\\图7.pptx` `D:/a/` `npm i` `/Users/me/x`');
+  const lk = /^<a class="peek" data-peek="D:\\论文 04\\图7\.pptx" title="D:\\论文 04\\图7\.pptx">(<svg.*?<\/svg>)图7\.pptx<\/a> <a class="peek" data-peek="D:\/a\/" title="D:\/a\/">(<svg.*?<\/svg>)a<\/a> <code>npm i<\/code> <code>\/Users\/me\/x<\/code>$/.exec(pk);
+  assert.ok(lk && lk[1] !== lk[2], pk); // a file's mark, a folder's
+  assert.equal(md('`C:/x/runs/<id>` `D:\\a "b"`'), '<code>C:/x/runs/&lt;id&gt;</code> <code>D:\\a &quot;b&quot;</code>'); // a stand-in (runs/<id>), a ": no path
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
@@ -793,6 +826,17 @@ if (SESSION0) {
   assert.equal(parseScreen(['1. 签字', '2. 压缩', '3. 上传', rule, '❯ 4. 保存回执截图', rule]).menu, null);
   const h = parseScreen([rule, ' ☐ 优先级', '', '今天想先做哪件事？', '', '❯ 1. 写论文', '  2. 跑实验', '', 'Enter to select']).menu;
   assert.deepEqual([h.head, h.ask], ['优先级', '今天想先做哪件事？']); // one question's header, apart from it
+  // the menu's rule on one row with what the screen kept of the line before (a turn's status and cost): the question is
+  // only what's under it (/model's took the end of the answer above too)
+  const sm = parseScreen(['- /statechart 在本机跑不起来。', '· 本轮约 $0.27，约占 5', '✻ Sautéed for 40s · done 6:37 AM   小时额度 0.8% ' + rule,
+    ' Select model', ' Switch between Claude models.', '', ' ❯ 1. Default (recommended)', '   2. Opus 5.5', '', ' Enter to confirm']).menu;
+  assert.deepEqual([sm.ask, sm.opts.map((o) => o.label).join('|')], ['Select model\nSwitch between Claude models.', 'Default (recommended)|Opus 5.5']);
+  // a numbered message of yours still on the screen over a permission menu: the menu's options, not your lines
+  const p = parseScreen(['❯ 1. 修登录', '  2. 更新文档', '', '● Bash(npm test)', rule, ' Do you want to proceed?', ' ❯ 1. Yes', '   2. Yes, and don\'t ask again', '   3. No', '', ' Esc to cancel']).menu;
+  assert.deepEqual([p.cur, p.ask, p.opts.map((o) => o.label).join('|')], [1, 'Do you want to proceed?', 'Yes|Yes, and don\'t ask again|No']);
+  // the 管家 never answers a tool's permission; a plan's approval it may
+  const { asksPermission } = require('./claude-multi');
+  assert.deepEqual([p.ask, 'Do you want to make this edit to a.js?', 'Do you want to allow this connection?', 'Would you like to proceed?', '今天想先做哪件事？'].map(asksPermission), [true, true, true, false, false]);
   console.log('screen ok');
 }
 
@@ -1114,6 +1158,7 @@ if (SESSION0) {
   assert.deepEqual([usd(7012.4), usd(154.66), usd(0), usd(0.42), about(154.66), about(0.42), about(0)], ['$7,012', '$155', '$0', '不到 $1', '约 $155', '不到 $1', '约 $0']);
   const shut = new Function(`${part(/^const shut = .*$/m)}\nreturn shut;`)();
   assert.deepEqual([shut({ accounts: [] }), shut({ accounts: [{}], rec: null }), shut({ accounts: [{}], rec: 0, ready: '2小时' })], ['还没有 Claude 账号', '额度暂时读不到', '都到上限了，2小时后恢复']);
+  assert.deepEqual([shut({ accounts: [{ api: true }], rec: null }), shut({ accounts: [{}, { api: true }], rec: null })], ['接入已失效', '额度暂时读不到']); // API ones only: none takes the key
   console.log('review page ok');
 })();
 
@@ -1136,7 +1181,7 @@ if (SESSION0) {
   assert.equal((await opened({ key: 'B', pid: 22 })).pid, 22);
   let pid = null, binding = null, written = null, looked = 0;
   const chatNew = vm.runInNewContext(fn(js, 'chatNew') + ';chatNew;', {
-    path, fs: { existsSync: () => true, statSync: () => ({ isDirectory: () => true }) }, HOME: 'home',
+    path, isDir: () => true, HOME: 'home',
     sameDir: (a, b) => a === b, inLive: () => false, load: () => ({ profiles: [{ configDir: 'acct' }] }), shareTrust() {},
     webPost: async () => ({ key: 'B', pid }), untilReady: async () => {}, blog() {}, console: { log() {} },
     waitLive: async (match) => { looked++; return [{ pid: 11, sessionId: 'A' }, { pid: 22, sessionId: 'B' }].find(match); },
@@ -1204,11 +1249,11 @@ if (SESSION0) {
       let session = { id: c.id }, conversationGen = 0, key = 'terminal', kind = 'pc', ptySize = null, mine = null, q = Promise.resolve();
       let atts = [], sending = false, stops = 0, lastSent = null, sent = [], liveHtml = '', typing = null, typeOpt = new Map();
       let menuNow = false, typeNow = false, typeTick = false, busyNow = false, view = 'hist', question = false;
-      let histNow = false, histEnd = null, histOldest = null, histGen = 0, nextId = 'A', unseen = false;
+      let histNow = false, histEnd = null, histOldest = null, histGen = 0, nextId = 'A', unseen = false, gotAt = 0, waitAns = 0, waitT = 0;
       const line = { value: '', style: {}, scrollHeight: 0 }, go = { dataset: {} }, messages = [], writes = [];
       const hist = { innerHTML: '', scrollHeight: 1000, scrollTop: 0, clientHeight: 100 };
       const localStorage = { setItem: (k,v) => store.set(k,v), getItem: k => store.get(k) ?? null, removeItem: k => store.delete(k) };
-      const noop = () => {}, fitLine = noop, goMode = noop, drawAtts = noop, redraw = noop, markRows = noop, save = noop;
+      const noop = () => {}, fitLine = noop, goMode = noop, drawAtts = noop, redraw = noop, markRows = noop, save = noop, slashDraw = noop, peekWarm = noop;
       const claim = async () => {}, toast = t => messages.push(t), shownText = t => t, addItems = noop, topNote = noop, loadOlder = noop;
       const histGet = async () => ({ id: nextId, start: 0, end: 0, items: [] });
       let post = async (url, b) => { writes.push(b.data); };
@@ -1292,6 +1337,8 @@ if (SESSION0) {
   const replyCost = vm.runInNewContext(part(js, 'const PRICES', '\nfunction tokenStats') + ';replyCost;');
   assert.equal(replyCost(['k', 'd', 1e6, 1e6, 0, 0, 1e6, 'claude-fable-5-2', false]), 48.2);
   assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5-20260101', false]), 0.2); assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5', false]), 1);
+  // 本地代理's names (a gateway's provider/ before the model's): its own price, not Opus 5.5's for any it doesn't know
+  assert.equal(replyCost(['k', 'd', 1e6, 0, 0, 0, 0, 'claude/claude-sonnet-5-5', false]), 2); assert.equal(replyCost(['k', 'd', 1e6, 0, 0, 0, 0, 'claude/claude-fable-5-1', false]), 10);
   // the web service's last guard: a throw before it listens ends it; listening, it's logged (the same once in 10 min) and it goes on
   const guardLog = [], exits = [];
   const guard = (listening) => vm.runInNewContext(part(js, '  const fell = new Map();', '\n  process.on(') + '\nkeepOn;', {
@@ -1302,6 +1349,174 @@ if (SESSION0) {
   keepOn(new Error('another')); keepOn('a rejection that is no Error'); assert.equal(guardLog.length, 3); assert.deepEqual(exits, [1]);
   console.log('review follow-up ok (binding, desktop history, async writes, quick input, session drafts and queued sends)');
 })().catch((e) => { console.error(e); process.exitCode = 1; });
+
+// The Mac mini's conversations, from the copy the web service keeps (accounts\mac): listed though their folder is the
+// Mac's, as running (busy) by live.json, the Mac's pid negative (never one of this PC's), under its label. And the
+// watcher that runs on the Mac is valid Python.
+{
+  const fs = require('fs'), path = require('path');
+  const { listSessions, MAC_WATCH, macName } = require('./claude-multi');
+  const id = '0f1e2d3c-4b5a-4968-8776-655443322110', dir = path.join(TEST_HOME, '.claude-multi', 'accounts', 'mac');
+  fs.mkdirSync(path.join(dir, 'projects', '-Users-me-Desktop-mine'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'projects', '-Users-me-Desktop-mine', `${id}.jsonl`),
+    JSON.stringify({ type: 'user', cwd: '/Users/me/Desktop/mine', message: { role: 'user', content: 'hi' } }) + '\n'
+    + JSON.stringify({ type: 'ai-title', aiTitle: '在 Mac 上改文件' }) + '\n');
+  fs.writeFileSync(path.join(dir, 'live.json'), JSON.stringify([{ pid: 4321, sessionId: id, status: 'busy', kind: 'interactive' }]));
+  const reg = { profiles: [], mac: { host: 'mini', dir: '~/Desktop/mine' } };
+  const s = listSessions(reg).find((x) => x.id === id);
+  assert.ok(s, 'the Mac one listed');
+  assert.deepEqual([s.mac, s.acct, s.pid, s.busy, s.who, s.title], ['mac', -1, -4321, true, 'Mac mini', '在 Mac 上改文件']);
+  assert.equal(listSessions({ profiles: [] }).some((x) => x.id === id), false); // no Mac set up: not listed
+  // one in a project's folder there (mine/demo-sim): shown in the folder here it's for (folders.json), running where it runs
+  const id2 = '1f1e2d3c-4b5a-4968-8776-655443322110', sub = path.join(dir, 'projects', '-Users-me-Desktop-mine-demo-sim');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(sub, `${id2}.jsonl`), JSON.stringify({ type: 'user', cwd: '/Users/me/Desktop/mine/demo-sim', message: { role: 'user', content: '改一下' } }) + String.fromCharCode(10)
+    + JSON.stringify({ type: 'ai-title', aiTitle: '改 demo-sim' }) + String.fromCharCode(10));
+  fs.writeFileSync(path.join(dir, 'folders.json'), JSON.stringify({ 'demo-sim': String.raw`F:\demo-sim` }));
+  const s2 = listSessions(reg).find((x) => x.id === id2);
+  assert.deepEqual([s2.mac, s2.cwd, s2.macCwd], ['mac',String.raw`F:\demo-sim`, '/Users/me/Desktop/mine/demo-sim']);
+  assert.equal(listSessions(reg).find((x) => x.id === id).cwd, '/Users/me/Desktop/mine'); // the Mac's own folder: as it is
+  // one in a subfolder of a project there that has another project's name: not that project's
+  const id3 = '2f1e2d3c-4b5a-4968-8776-655443322110', sub3 = path.join(dir, 'projects', '-Users-me-Desktop-mine-x-demo-sim');
+  fs.mkdirSync(sub3, { recursive: true });
+  fs.writeFileSync(path.join(sub3, `${id3}.jsonl`), JSON.stringify({ type: 'user', cwd: '/Users/me/Desktop/mine/x/demo-sim', message: { role: 'user', content: '改一下' } }) + String.fromCharCode(10)
+    + JSON.stringify({ type: 'ai-title', aiTitle: '改 x 里的' }) + String.fromCharCode(10));
+  assert.equal(listSessions(reg).find((x) => x.id === id3).cwd, '/Users/me/Desktop/mine/x/demo-sim');
+  // a folder here's name there: its last part, a drive's root its letter, nothing sh or a path would take otherwise
+  assert.deepEqual([String.raw`F:\demo-sim`, 'F:/', String.raw`D:\a\my proj's`, String.raw`D:\-x`, String.raw`D:\论文 返修`].map(macName),
+    ['demo-sim', 'F', 'my-proj-s', 'x', '论文-返修']);
+  fs.writeFileSync(path.join(dir, 'live.json'), '[]');
+  assert.equal(listSessions(reg).find((x) => x.id === id).pid, null); // ended there
+  const py = require('child_process').spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "watch", "exec")'],
+    { input: `DIR = "~"\nCFG = None\nHAVE = {}\n${MAC_WATCH}`, encoding: 'utf8' });
+  if (py.error) console.log('(no python here: the Mac watcher not compiled)'); else assert.equal(py.status, 0, py.stderr);
+  // and run (this PC's python, in a home of its own; async: the timing tests run meanwhile): a record of ours, one of its
+  // subagents', each sent as it is; and one of another folder there, of which only each reply's id, model, time and usage
+  // go out, nothing said
+  if (!py.error) {
+    const H = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cm-mw-')), mine = path.join(H, 'Desktop', 'mine'), P = path.join(H, '.claude', 'projects');
+    fs.mkdirSync(mine, { recursive: true });
+    const base = fs.realpathSync.native(mine).replace(/[^a-zA-Z0-9]/g, '-'), nl = String.fromCharCode(10);
+    const rec = JSON.stringify({ type: 'user', message: { content: '我的话' } }) + nl, usage = { input_tokens: 1, output_tokens: 2 };
+    fs.mkdirSync(path.join(P, base, 'c1', 'subagents'), { recursive: true }); fs.mkdirSync(path.join(P, '-other'), { recursive: true });
+    fs.writeFileSync(path.join(P, base, 'c1.jsonl'), rec);
+    fs.writeFileSync(path.join(P, base, 'c1', 'subagents', 'agent-a.jsonl'), rec);
+    const other = path.join(P, '-other', 'c2.jsonl');
+    fs.writeFileSync(other, JSON.stringify({ type: 'user', message: { content: '别人的话' } }) + nl + JSON.stringify({ type: 'assistant', timestamp: '2099-01-01T00:00:00.000Z',
+      requestId: 'req_1', message: { id: 'msg_1', model: 'claude-opus-5-5', content: [{ type: 'text', text: '别人的回答' }], usage } }) + nl);
+    const w = require('child_process').spawn('python', ['-u', '-'], { env: { ...process.env, USERPROFILE: H, HOME: H } });
+    let out = '', err = '';
+    const stop = setTimeout(() => w.kill(), 5000); // it runs till killed: once the other folder's line is out, or by then
+    w.stdout.on('data', (d) => { out += d; if (/"o": "-other\/c2\.jsonl".*\n/.test(out)) w.kill(); });
+    w.stderr.on('data', (d) => { err += d; });
+    w.stdin.end(`DIR = ${JSON.stringify(mine)}${nl}CFG = None${nl}HAVE = {}${nl}OTHER = {}${nl}${MAC_WATCH}`);
+    w.on('exit', () => {
+      clearTimeout(stop);
+      const got = out.split(nl).filter(Boolean).map((l) => JSON.parse(l)), sent = (k) => Buffer.from(got.find((o) => o.f === k)?.d ?? '', 'base64').toString();
+      assert.equal(sent(`${base}/c1.jsonl`), rec, err);
+      assert.equal(sent(`${base}/c1/subagents/agent-a.jsonl`), rec);
+      const o = got.find((x) => x.o === '-other/c2.jsonl'), d = Buffer.from(o.d, 'base64').toString();
+      assert.deepEqual([o.at, o.to], [0, fs.statSync(other).size]);
+      assert.deepEqual(JSON.parse(d), { type: 'assistant', timestamp: '2099-01-01T00:00:00.000Z', requestId: 'req_1', message: { id: 'msg_1', model: 'claude-opus-5-5', usage } });
+      fs.rmSync(H, { recursive: true, force: true });
+      console.log('mac watcher run ok');
+    });
+  }
+  // the names taken from the Mac: a record, a conversation's folder, a record of its subagents; nothing leading out
+  {
+    const src = /const macPath = .*/.exec(fs.readFileSync(path.join(__dirname, 'claude-multi.js'), 'utf8'))[0];
+    const macPath = new Function('path', `${src} return macPath;`)(path.posix).bind(null, '/m');
+    assert.equal(macPath('p/a.jsonl'), '/m/projects/p/a.jsonl');
+    assert.equal(macPath('p/id/'), '/m/projects/p/id');
+    assert.equal(macPath('p/id/subagents/agent-1.jsonl'), '/m/projects/p/id/subagents/agent-1.jsonl');
+    assert.equal(macPath('p/a.jsonl', 'others'), '/m/others/p/a.jsonl');
+    for (const bad of ['../x', 'p/../x', 'p/id/other/a.jsonl', 'p/id/subagents/../../../x', 'p/id/subagents/a/b', '/p/a']) assert.throws(() => macPath(bad), /不认识的名字/, bad);
+  }
+  // a Claude there in our tmux: new, continued (one running there joined first), or its session joined again
+  const { macCmd } = require('./claude-multi');
+  const script = (c) => Buffer.from(/echo (\S+) \| base64 -D/.exec(c)[1], 'base64').toString();
+  const fresh = script(macCmd({ into: 'cd ~/Desktop/mine', name: 'cm-p1', cols: 80, rows: 24 }));
+  assert.match(fresh, /new-session -d -s "\$S" -x 80 -y 24 -c "\$PWD" 'exec ~\/.local\/bin\/claude' \|\| exit/);
+  assert.ok(!fresh.includes('grep -l') && fresh.includes("S='cm-p1'") && fresh.indexOf('unset LC_MACKC') < fresh.indexOf('start-server'));
+  const again = script(macCmd({ into: 'cd x', resume: id, name: 'cm-p2' }));
+  assert.ok(again.includes(`grep -l '${id}' ~/.claude/sessions/*.json`) && again.includes(`'exec ~/.local/bin/claude --resume ${id}'`));
+  assert.equal(macCmd({ sess: 'cm-p1' }), `T=/opt/homebrew/bin/tmux; [ -x "$T" ] || T="$HOME"/.local/bin/tmux; exec "$T" -u -f /dev/null -L cm attach -t 'cm-p1'`);
+  // its tmux: Homebrew's, else ~/.local's (built there on a Mac without Homebrew); none: said so
+  {
+    const r = require('child_process').spawnSync('sh', ['-c', `${/^T=.*$/m.exec(fresh)[0]}; echo "$T"`], { env: { ...process.env, HOME: '/no-such-home' }, encoding: 'utf8' });
+    if (!r.error) assert.equal(r.stdout.trim(), '/no-such-home/.local/bin/tmux'); // (no Homebrew here)
+  }
+  const sh = require('child_process').spawnSync('sh', ['-n'], { input: again, encoding: 'utf8' });
+  if (sh.error) console.log('(no sh here: the Mac script not parsed)'); else assert.equal(sh.status, 0, sh.stderr);
+  // the PC project's CLAUDE.md after the Mac folder's: packed into the start's sh; none there, or too big: only the old one taken out
+  {
+    const { macRules } = require('./claude-multi'), pc = path.join(TEST_HOME, 'pc-proj');
+    fs.mkdirSync(pc, { recursive: true });
+    assert.ok(!macRules(pc).includes('gunzip') && macRules(pc).includes("awk '/^<!-- cm-pc-rules/{exit}{print}'"));
+    fs.writeFileSync(path.join(pc, 'CLAUDE.md'), '\uFEFF# 规矩\n\n- 先跑测试\n');
+    const put = /^{ T=CLAUDE\.md\.cm\.\$\$; .* && echo (\S+) \| base64 -D \| gunzip >> \$T && mv \$T CLAUDE.md \|\| rm -f \$T; }$/.exec(macRules(pc));
+    const text = require('zlib').gunzipSync(Buffer.from(put[1], 'base64')).toString();
+    assert.match(text, /^<!-- cm-pc-rules: [^\n]*pc-proj\/CLAUDE.md[^\n]* -->\n\n# 规矩\n\n- 先跑测试\n$/);
+    fs.writeFileSync(path.join(pc, 'CLAUDE.md'), require('crypto').randomBytes(20000).toString('hex'));
+    assert.ok(!macRules(pc).includes('gunzip'));
+    const sh2 = require('child_process').spawnSync('sh', ['-n'], { input: macRules(pc), encoding: 'utf8' });
+    if (!sh2.error) assert.equal(sh2.status, 0, sh2.stderr);
+  }
+  // a reply of the Mac's other folders as the watcher sends it (its usage only): counted like a record's, as an amount beside the Mac's
+  {
+    const { tokenStats } = require('./claude-multi'), od = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cm-oth-'));
+    fs.mkdirSync(path.join(od, 'others', 'p'), { recursive: true });
+    fs.writeFileSync(path.join(od, 'others', 'p', 's.jsonl'), '{"type":"assistant","timestamp":"2026-11-09T11:18:30.593Z","requestId":"req_1","message":{"id":"msg_1","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":3,"output_tokens":4}}}\n');
+    const ts = tokenStats([{ id: 'mac', label: 'M', dir: path.join(od, 'projects'), mac: true }, { id: 'mac-other', of: 'mac', label: '', dir: path.join(od, 'others'), other: true }], path.join(od, 'c.json'), path.join(od, 'no.log'));
+    assert.deepEqual([ts.total, ts.usd, ts.days.length, ts.accounts.length, ts.accounts[0].mac, ts.accounts[0].plus > 0], [0, 0, 0, 1, true, true]); // in no total: beside the Mac's
+    fs.rmSync(od, { recursive: true, force: true });
+  }
+  // the Mac's password file (ConvertFrom-SecureString: DPAPI, this Windows user) read back by .NET alone; a broken one says
+  // why. In a node of its own: its PowerShells, run here, held up the timed waits going on meanwhile
+  require('child_process').execFile(process.execPath, ['-e', `
+    const { dpapiRead } = require(${JSON.stringify(require.resolve('./claude-multi'))}), fs = require('fs'), f = ${JSON.stringify(path.join(TEST_HOME, 'pw.dpapi'))};
+    fs.writeFileSync(f, require('child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', "ConvertTo-SecureString 'pw Test-1' -AsPlainText -Force | ConvertFrom-SecureString"], { encoding: 'utf8' }).stdout.trim());
+    const good = dpapiRead(f).stdout; fs.writeFileSync(f, 'abcd'); const bad = dpapiRead(f);
+    console.log(JSON.stringify([good, bad.stdout, bad.stderr]));`], { encoding: 'utf8' }, (e, out) => {
+    assert.ifError(e);
+    const [good, badOut, badErr] = JSON.parse(out);
+    assert.equal(good.replace(/\r?\n$/, ''), 'pw Test-1');
+    assert.ok(!badOut.trim() && /Unprotect/.test(badErr), badErr);
+    console.log('mac password read ok');
+  });
+  console.log('mac mini ok');
+}
+// More Macs (the registry's macs, beside the Mac mini): each an account there, its own config dir. Listed from its own
+// copy (accounts\<id>) under its label, mac its id; started with that config dir, its sign-in looked up under the name
+// Claude Code files it by; an id that would name another folder here, or no host, left out.
+{
+  const fs = require('fs'), path = require('path');
+  const { listSessions, macList, macCmd, MAC_USAGE } = require('./claude-multi');
+  const la = { id: 'la-a1', host: 'mymac', dir: '~/work', config: '~/claude/a1', label: 'Mac a1', icon: 'rainbow' };
+  const reg = { profiles: [], mac: { host: 'mini', dir: '~/Desktop/mine' },
+    macs: [la, { id: 'mac', host: 'x', dir: '~' }, { id: 'acct-1', host: 'x', dir: '~' }, { id: '../x', host: 'x', dir: '~' }, { id: 'nohost', dir: '~' }, { id: 'h', host: 'a b', dir: '~' }] };
+  assert.deepEqual(macList(reg).map((m) => [m.id, m.config, m.label]), [['mac', null, 'Mac mini'], ['la-a1', la.config, 'Mac a1']]);
+  const id = '3f1e2d3c-4b5a-4968-8776-655443322110', dir = path.join(TEST_HOME, '.claude-multi', 'accounts', 'la-a1', 'projects', '-Users-me-work');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.jsonl`), JSON.stringify({ type: 'user', cwd: '/Users/me/work', message: { role: 'user', content: 'hi' } }) + '\n'
+    + JSON.stringify({ type: 'ai-title', aiTitle: '在 Mac 上' }) + '\n');
+  fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'accounts', 'la-a1', 'live.json'), JSON.stringify([{ pid: 77, sessionId: id, status: 'idle', kind: 'interactive' }]));
+  const s = listSessions(reg).find((x) => x.id === id);
+  assert.deepEqual([s.mac, s.acct, s.pid, s.who, s.cwd], ['la-a1', -1, -77, 'Mac a1', '/Users/me/work']);
+  // started with its config dir, as its launcher sets it ($HOME's, the string its sign-in is filed under); continued: its sessions there
+  const script = (c) => Buffer.from(/echo (\S+) \| base64 -D/.exec(c)[1], 'base64').toString();
+  const fresh = script(macCmd({ into: 'cd x', name: 'cm-p3', config: la.config }));
+  assert.ok(fresh.includes(`'exec env CLAUDE_CONFIG_DIR="$HOME"/'\\''claude/a1'\\'' ~/.local/bin/claude'`), fresh);
+  const again = script(macCmd({ into: 'cd x', resume: id, name: 'cm-p4', config: la.config }));
+  assert.ok(again.includes(`grep -l '${id}' "$HOME"/'claude/a1'/sessions/*.json`), again);
+  const sh = require('child_process').spawnSync('sh', ['-n'], { input: again, encoding: 'utf8' });
+  if (!sh.error) assert.equal(sh.status, 0, sh.stderr);
+  // the keychain name: sha256 of its config dir, first 8 hex, as Claude Code 2.1.323 names a sign-in (checked on a real Mac) (Claude Code-credentials-85b28ada)
+  const svc = /^svc = .*$/m.exec(MAC_USAGE)[0];
+  const py = require('child_process').spawnSync('python', ['-c', `import hashlib, os\nCFG = '/Users/me/claude/a1'\n${svc}\nprint(svc)`], { encoding: 'utf8' });
+  if (!py.error) assert.equal(py.stdout.trim(), 'Claude Code-credentials-85b28ada', py.stderr);
+  console.log('more macs ok');
+}
 
 // the web service's process check runs beside, never waited on (waiting on PowerShell froze every terminal once a
 // minute): at once the pid alone (null), a moment later the start times
@@ -1335,6 +1550,248 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.ok(!t.buf.includes('\x1b[?1003h') && t.buf.length === 262144 && r.endsWith(t.buf));
   assert.deepEqual(head.match(/\x1b\[\?\d+[hl]/g).sort(), ['\x1b[?1003h', '\x1b[?1006h', '\x1b[?1049h', '\x1b[?2004h']); // enabled at the cut; the retained output turns paste off
   console.log('replay modes ok');
+}
+// A file sent in a conversation, opened from the page: a PDF shown (no sandbox: it'd get no viewer), text and pictures
+// shown sandboxed, the page's own kinds (HTML, SVG) and anything else downloaded; its name as sent; only a saved upload's name
+{
+  const { fileServed } = require('./claude-multi');
+  const h = (n) => fileServed(n)?.headers;
+  assert.deepEqual([h('20261113T081500-a1b2c3-全文-中文-v16.pdf')['content-type'], h('20261113T081500-a1b2c3-全文-中文-v16.pdf')['content-security-policy']], ['application/pdf', undefined]);
+  assert.equal(h('20261113T081500-a1b2c3-全文-中文-v16.pdf')['content-disposition'], `inline; filename*=UTF-8''${encodeURIComponent('全文-中文-v16.pdf')}`);
+  assert.deepEqual([h('20261113T081500-a1b2c3-a.txt')['content-type'], h('20261113T081500-a1b2c3-a.txt')['content-security-policy']], ['text/plain; charset=utf-8', 'sandbox']);
+  for (const bad of ['x.html', 'x.svg', 'x.htm', 'x.docx', 'x']) {
+    const x = h(`20261113T081500-a1b2c3-${bad}`);
+    assert.deepEqual([x['content-type'], x['content-disposition'].split(';')[0]], ['application/octet-stream', 'attachment'], bad);
+  }
+  for (const bad of ['../x.pdf', 'x.pdf', '20261113T081500-a1b2c3-../x.pdf', String.raw`20261113T081500-a1b2c3-a\b.pdf`, '20261113T081500-zzzzzz-a.pdf', '']) assert.equal(fileServed(bad), null, bad);
+  const at = fileServed('20261113T081500-a1b2c3-a.pdf').file;
+  assert.ok(at.endsWith(require('path').join('uploads', '20261113T081500-a1b2c3-a.pdf')), at);
+  // one sent in a GPT 聊天: moved into that chat's folder, found there by its saved name
+  const fs = require('fs'), path = require('path'), os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-files-'));
+  const up = path.join(tmp, 'uploads'), oai = path.join(tmp, 'oai'), n = '20261113T060145-8c06a5-全文-v16.pdf';
+  fs.mkdirSync(up); fs.mkdirSync(path.join(oai, 'oai-1'), { recursive: true }); fs.writeFileSync(path.join(oai, 'oai-1.json'), '{}'); fs.writeFileSync(path.join(oai, 'oai-1', n), 'x');
+  assert.equal(fileServed(n, up, oai).file, path.join(oai, 'oai-1', n));
+  assert.equal(fileServed('20261113T060145-8c06a5-gone.pdf', up, oai).file, path.join(up, '20261113T060145-8c06a5-gone.pdf')); // nowhere: the uploads (not there: 不在了)
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log('files opened ok');
+}
+// 预览: a file of this PC by its path: a PDF, a picture or a video as itself (a PDF unsandboxed: its viewer), text sandboxed
+// (a web page or an SVG too: never as one), an Office one as its PDF, the rest downloaded. An Office one made a PDF once (by
+// path, time and size; two asks at once: one making), none half-made left, a failure said. `/`'s list: no internal,
+// removed or renamed ones
+{
+  const { peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, shellCmd, frontOf, FRONT_PS } = require('./claude-multi');
+  // `/` in a Mac's conversation: asked on that Mac, in its folder (its own folder if that's gone), on the account its
+  // conversations use; the answer found among what it printed, or why not
+  const mc = macSlashCmd({ id: 'm', dir: '~/work', config: '~/.claude-cm' }, "/Users/x/it's");
+  assert.ok(mc.includes(`cd '/Users/x/it'\\''s' || cd "$HOME"/'work'`), mc);
+  assert.ok(mc.includes(`printf '%s\\n' '{"type":"control_request","request_id":"cm","request":{"subtype":"initialize"}}' | CLAUDE_CONFIG_DIR="$HOME"/'.claude-cm' ~/.local/bin/claude -p --input-format stream-json`), mc);
+  assert.ok(mc.includes(`find "$HOME"/'.claude-cm'/sessions -name "$p.*" -delete`) && mc.includes('--no-session-persistence') && mc.startsWith('security unlock-keychain'), mc);
+  assert.ok(macSlashCmd({ id: 'm', dir: '~/w' }, '/w').includes(`find "$HOME/.claude"/sessions`));
+  const ans = (cmds) => JSON.stringify({ type: 'control_response', response: { subtype: 'success', response: { commands: cmds } } });
+  assert.deepEqual(slashParse({ out: `{"type":"system"}\n${ans([{ name: 'maintain-formal-verification-skill', description: 'x' }, { name: '_hidden' }])}\n` }),
+    [{ name: 'maintain-formal-verification-skill', desc: 'x', hint: '', also: [], builtin: false }]);
+  assert.throws(() => slashParse({ status: 255, out: '', err: 'ssh: connect to host x port 22: Connection refused\n' }), /Connection refused/);
+  assert.throws(() => slashParse({ status: -1, out: '', err: '30 秒没回' }), /30 秒没回/);
+  // …and the window it opens brought to the front: an Explorer window at the folder (a file shown in its own, a script
+  // never opened: shown); Windows' chooser; a file's own program's (no folder: found by its name)
+  assert.equal(frontOf('D:\\a b', 'open', true).CM_DIR, 'D:\\a b');
+  assert.equal(frontOf('D:\\a\\x.md', 'reveal', false).CM_DIR, 'D:\\a');
+  assert.equal(frontOf('D:\\a\\run.bat', 'open', false).CM_DIR, 'D:\\a');
+  assert.equal(frontOf('D:\\a\\x.md', 'open', false).CM_DIR, '');
+  assert.deepEqual(frontOf('D:\\x.md', 'with', false), { CM_PATH: 'D:\\x.md', CM_HOW: 'with', CM_DIR: '' });
+  assert.equal(frontOf('D:\\x.md', 'reveal', false).CM_DIR, 'D:\\'); // a drive's own file: Explorer at the drive
+  if (process.platform === 'win32') (async () => { // the script as PowerShell reads it (its C# too): no window asked for, none found
+    // at once (apart, not spawnSync: that would hold up the timed tests running beside it)
+    const ps = FRONT_PS.replace('AddSeconds($(if ($dir) { 8 } else { 20 }))', 'AddSeconds(1)');
+    const r = await new Promise((ok) => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')],
+      { env: { ...process.env, CM_PATH: 'Z:\\cmv-no-such\\x.cmvnone', CM_HOW: 'open', CM_DIR: '' }, encoding: 'utf8', windowsHide: true }, (e, out, err) => ok({ out, err })));
+    assert.equal(r.out.trim(), 'none', r.err);
+    console.log('front ok');
+  })();
+  // 右键's opening on this PC: a file with its own program, Windows' chooser (its path bare), Explorer at it; a program or a
+  // script never opened (it'd run): Explorer at it instead; a folder in Explorer; anything else asked: Explorer at it
+  assert.deepEqual(shellCmd('D:\\论文 04\\图7.pptx', 'open', false), ['explorer.exe', '"D:\\论文 04\\图7.pptx"']);
+  assert.deepEqual(shellCmd('D:\\论文 04\\图7.pptx', 'with', false), ['rundll32.exe', 'shell32.dll,OpenAs_RunDLL D:\\论文 04\\图7.pptx']);
+  assert.deepEqual(shellCmd('D:\\a\\x.md', 'reveal', false), ['explorer.exe', '/select,"D:\\a\\x.md"']);
+  for (const f of ['D:\\a\\run.BAT', 'D:\\a\\setup.exe', 'D:\\a\\x.ps1', 'D:\\a\\t.js', 'D:\\a\\go.py', 'D:\\a\\l.lnk']) assert.deepEqual(shellCmd(f, 'open', false), ['explorer.exe', `/select,"${f}"`], f);
+  assert.deepEqual(shellCmd('D:\\a b', 'open', true), ['explorer.exe', '"D:\\a b"']);
+  assert.deepEqual(shellCmd('D:\\a\\x.md', 'rm', false), ['explorer.exe', '/select,"D:\\a\\x.md"']);
+  const t = (n, o) => { const h = peekHead(n, o); return [h['content-type'], h['content-disposition'].split(';')[0], h['content-security-policy'] ?? '']; };
+  assert.deepEqual(t('图7.pptx', true), ['application/pdf', 'inline', '']);
+  assert.ok(peekHead('图7.pptx', true)['content-disposition'].endsWith(encodeURIComponent('图7.pptx.pdf')));
+  assert.deepEqual(t('a.pdf'), ['application/pdf', 'inline', '']);
+  assert.deepEqual(t('a.PNG'), ['image/png', 'inline', 'sandbox']);
+  assert.deepEqual(t('a.mp4'), ['video/mp4', 'inline', 'sandbox']);
+  for (const n of ['a.html', 'a.svg', 'a.py', 'Makefile', '.gitignore']) assert.deepEqual(t(n), ['text/plain; charset=utf-8', 'inline', 'sandbox'], n);
+  assert.deepEqual(t('a.exe'), ['application/octet-stream', 'attachment', '']);
+  assert.deepEqual([{ name: 'clear', description: 'x' }, { name: '__remote-workflow', description: 'x' }, { name: 'agents', description: '(removed) Ask Claude' },
+    { name: 'extra-usage', description: 'Renamed to /usage-credits' }, { name: 'ponytail:ponytail' }].filter(slashKeep).map((c) => c.name), ['clear', 'ponytail:ponytail']);
+  if (process.platform === 'win32') {
+    const fs = require('fs'), path = require('path'), os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-peek-')), dir = path.join(tmp, 'peek');
+    const deck = path.join(tmp, '图 7.pptx'), deck2 = path.join(tmp, '图8.pptx'), bad = path.join(tmp, 'b.docx'), sheet = path.join(tmp, 'c.xlsx');
+    for (const f of [deck, deck2, bad, sheet]) fs.writeFileSync(f, f);
+    process.env.CM_RUNS = path.join(tmp, 'runs');
+    const each = (body) => `foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { ${body} }`;
+    const ps = { ppt: 'Add-Content -LiteralPath $env:CM_RUNS -Value run; ' + each('Set-Content -LiteralPath $j.out -Value $j.in -Encoding UTF8; "ok $($j.k)"'),
+      doc: each('"fail $($j.k) no Word here"'), xls: "throw 'no Excel here'" }, o = { dir, ps };
+    Promise.all([peekPdf(deck, o), peekPdf(deck, o), peekPdf(deck2, o)]).then(async ([a, b, c2]) => {
+      assert.equal(a, b); assert.notEqual(a, c2);
+      assert.equal(fs.readFileSync(a, 'utf8').trim(), path.resolve(deck)); // its path through, a Chinese name and a space in it
+      assert.equal(fs.readFileSync(c2, 'utf8').trim(), path.resolve(deck2));
+      assert.equal(await peekPdf(deck, o), a); // kept: not made again
+      assert.equal(fs.readFileSync(process.env.CM_RUNS, 'utf8').trim().split(/\s+/).length, 1); // two asked for at once: Office started once
+      await assert.rejects(peekPdf(bad, o), /Word 没能把它转成 PDF：no Word here/);
+      await assert.rejects(peekPdf(sheet, o), /Excel 没能把它转成 PDF：no Excel here/);
+      assert.deepEqual(fs.readdirSync(dir).sort(), [path.basename(a), path.basename(c2)].sort()); // none half-made
+      delete process.env.CM_RUNS; fs.rmSync(tmp, { recursive: true, force: true });
+      console.log('peek ok');
+    });
+  } else console.log('peek ok (no Office here: no PDFs made)');
+}
+// 项目: made, renamed (names unique), conversations added from anywhere (each once) and taken out; dropped, its
+// conversations untouched; nonsense refused
+{
+  const { projectOp } = require('./claude-multi');
+  const all = [], op = (b) => projectOp(all, b, 1);
+  assert.equal(op({ op: 'new', name: '  声速场   论文 ' }).id, 1);
+  assert.equal(op({ op: 'new', name: '工具' }).id, 2);
+  assert.throws(() => op({ op: 'new', name: '工具' }), /已经有/);
+  assert.throws(() => op({ op: 'new', name: ' ' }), /名字/);
+  assert.deepEqual(op({ op: 'add', id: 1, conv: ['a-1', 'b-2', 'a-1'] }).ids, ['a-1', 'b-2']);
+  assert.deepEqual(op({ op: 'add', id: '1', conv: 'c-3' }).ids, ['a-1', 'b-2', 'c-3']);
+  assert.deepEqual(op({ op: 'out', id: 1, conv: ['b-2'] }).ids, ['a-1', 'c-3']);
+  assert.equal(op({ op: 'rename', id: 1, name: '声速场' }).name, '声速场');
+  assert.throws(() => op({ op: 'rename', id: 1, name: '工具' }), /已经有/);
+  assert.throws(() => op({ op: 'add', id: 1, conv: ['../x'] }), /对话 id/);
+  assert.throws(() => op({ op: 'add', id: 9, conv: ['a-1'] }), /没有这个项目/);
+  op({ op: 'drop', id: 2 });
+  assert.equal(op({ op: 'new', name: '再一个' }).id, 2);
+  assert.deepEqual(all.map((p) => [p.id, p.name, p.ids.join()]), [[1, '声速场', 'a-1,c-3'], [2, '再一个', '']]);
+  console.log('projects ok');
+}
+// 新对话's 浏览: a folder's folders (no files; dot ones last; $Recycle.Bin and the like not) and the one above; a drive's
+// top: '' above; none asked: the home folder first; one not there: said so
+(async () => {
+  const { dirsIn } = require('./claude-multi'), path = require('path'), os = require('os'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-dirs-'));
+  for (const d of ['b', '.hid', 'a', '$Recycle.Bin']) fs.mkdirSync(path.join(tmp, d));
+  fs.writeFileSync(path.join(tmp, 'f.txt'), '');
+  const r = await dirsIn(tmp);
+  assert.deepEqual([r.path, r.up, r.dirs, r.files], [tmp, path.dirname(tmp), ['a', 'b', '.hid'].map((n) => path.join(tmp, n)), ['f.txt']]);
+  assert.equal((await dirsIn(path.parse(tmp).root)).up, '');
+  fs.mkdirSync(path.join(os.homedir(), 'Desktop'), { recursive: true }); // the test's home: a 桌面, no 文档
+  const top = await dirsIn('');
+  assert.deepEqual(top.dirs.slice(0, 2), [os.homedir(), path.join(os.homedir(), 'Desktop')]);
+  assert.ok(!top.dirs.includes(path.join(os.homedir(), 'Documents')) && top.dirs.length > 2, 'the drives after');
+  await assert.rejects(dirsIn(path.join(tmp, 'gone')), /打不开/);
+  // a network folder: not looked at (\\?\ + a folder here is there, so only the guard says no)
+  const { isDir } = require('./claude-multi');
+  assert.deepEqual([isDir(tmp), isDir('\\\\?\\' + tmp), isDir('//?/' + tmp), isDir(undefined), isDir('')], [true, false, false, false, false]);
+  await assert.rejects(dirsIn('\\\\?\\' + tmp), /网络/);
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log('folders to pick ok');
+})();
+// A Mac's usage read at most every 5 minutes (each read an ssh there and a request from it to Anthropic): read again
+// within that, the first read's; 刷新 (fresh) reads now. (A Mac with no password saved here: no ssh at all.)
+{
+  const { macUsageNow } = require('./claude-multi'), m = { id: 'cache-test', host: 'no-such-mac', label: 'T' };
+  const a = macUsageNow(m), b = macUsageNow(m), c = macUsageNow(m, true);
+  assert.ok(a === b && c !== a, 'cached within 5 minutes, fresh reads again');
+  c.then((r) => { assert.match(r.err, /密码/); console.log('mac usage every 5 min ok'); });
+}
+// 申请接入, against a stand-in apply service: applied, asked while it waits, approved: an API account with the key (your
+// shared settings, less their own key), the record dropped and the service told; the same approval again: no second
+// account; the key taken back: 额度 says so; rejected: said so
+(async () => {
+  const { joinApply, checkJoins, readJoins, fetchUsage } = require('./claude-multi'), http = require('http'), path = require('path');
+  const reg = () => JSON.parse(fs.readFileSync(path.join(TEST_HOME, '.claude-multi', 'profiles.json'), 'utf8'));
+  fs.mkdirSync(path.join(TEST_HOME, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(TEST_HOME, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: 'x', env: { KEEP: '1', ANTHROPIC_API_KEY: 'mine' }, hooks: { Stop: [] } }));
+  let st = 'pending', models = 200, done = 0;
+  const srv = http.createServer((req, res) => {
+    let s = '';
+    req.on('data', (d) => (s += d)).on('end', () => {
+      const send = (code, j) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
+      const b = s ? JSON.parse(s) : {};
+      if (req.url === '/m/v1/models') return send(req.headers.authorization === 'Bearer sk-cm-test' ? models : 401, {});
+      if (req.url === '/m/apply') return send(200, { ticket: 'T-' + b.name });
+      if (b.ticket !== 'T-me' && b.ticket !== 'T-no') return send(404, { err: '没有这个申请' });
+      if (req.url === '/m/apply/done') { done++; return send(200, { ok: true }); }
+      send(200, { state: b.ticket === 'T-no' ? 'rejected' : st, ...(st === 'approved' && { key: 'sk-cm-test' }) });
+    });
+  }).listen(0, '127.0.0.1');
+  await new Promise((r) => srv.once('listening', r));
+  const url = `http://127.0.0.1:${srv.address().port}/m`, mine = () => reg().profiles.filter((p) => p.api?.baseURL === url);
+  await assert.rejects(joinApply({ url: 'ftp://x', name: 'me' }), /https/);
+  const shown = await joinApply({ url: url + '/', name: 'me', note: 'n' });
+  assert.deepEqual(shown.map((j) => [j.url, j.state, 'ticket' in j]), [[url, 'pending', false]]);
+  await checkJoins();
+  assert.equal(mine().length, 0);
+  st = 'approved'; const rec = readJoins()[0];
+  await checkJoins();
+  const [p] = mine(), s = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8'));
+  assert.deepEqual([p.api.join, p.subscriptionType, readJoins().length], [rec.id, 'API', 0]);
+  assert.deepEqual([s.env.ANTHROPIC_BASE_URL, s.env.ANTHROPIC_AUTH_TOKEN, s.env.KEEP, s.env.ANTHROPIC_API_KEY, s.apiKeyHelper, !!s.hooks], [url, 'sk-cm-test', '1', undefined, undefined, true]);
+  assert.ok(!fs.lstatSync(path.join(p.configDir, 'settings.json')).isSymbolicLink(), 'its own, not the shared one');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(p.configDir, '.claude.json'), 'utf8')).hasCompletedOnboarding, true); // no first-run screens
+  fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'join.json'), JSON.stringify([rec])); // asked again: the same one
+  await checkJoins();
+  assert.deepEqual([mine().length, readJoins().length], [1, 0]);
+  await new Promise((r) => setTimeout(r, 200)); assert.equal(done, 2); // told the service each time
+  assert.deepEqual(await fetchUsage(p), { api: true });
+  models = 401;
+  assert.match((await fetchUsage(p)).err, /接入已失效/);
+  await joinApply({ url, name: 'no' }); // a new one at the same address replaces the last
+  await checkJoins();
+  assert.deepEqual(readJoins().map((j) => [j.name, j.state]), [['no', 'rejected']]);
+  // applied there again and approved (a new application, a new key): the same account takes it, no second one
+  fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'join.json'), JSON.stringify([{ ...rec, id: 'again1', state: 'pending' }]));
+  assert.equal(await checkJoins(), 1);
+  assert.deepEqual([mine().length, mine()[0].id, mine()[0].api.join], [1, p.id, 'again1']);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8')).env.KEEP, '1');
+  srv.close();
+  console.log('申请接入 ok');
+})();
+// API accounts only (a Mac's, 申请接入's): the first one not refused is recommended, nothing to read; a subscription beside
+// one: as before (its quota unread is said so, the API one not taken in its place)
+(async () => {
+  const { usageState } = require('./claude-multi'), path = require('path');
+  const api = (id) => ({ id, configDir: path.join(TEST_HOME, id), api: { baseURL: 'http://127.0.0.1:9' } });
+  const a = (await usageState({ profiles: [api('x1'), api('x2')] })).json;
+  assert.deepEqual([a.rec, a.open], [0, true]);
+  const b = (await usageState({ profiles: [{ id: 'sub1', configDir: path.join(TEST_HOME, 'sub1') }, api('x3')] })).json;
+  assert.deepEqual([b.rec, b.open], [null, false]);
+  console.log('API accounts only: the first recommended ok');
+})();
+// setup's settings: our notes and status line added to yours, once (run again: nothing new); your own status line kept
+{
+  const { withHooks } = require('./claude-multi'), js = 'C:/Users/me/.claude-multi/claude-multi.js';
+  const mine = { model: 'opus', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } };
+  const a = withHooks(mine, js);
+  assert.deepEqual(a.s.hooks.Stop.map((e) => e.hooks[0].command), ['say done', `node "${js}" notify done`]);
+  assert.deepEqual([a.s.hooks.Notification[0].matcher, a.s.hooks.Notification[0].hooks[0].command, a.s.statusLine.command, a.s.model, a.theirs],
+    ['permission_prompt', `node "${js}" notify ask`, `node "${js}" statusline`, 'opus', false]);
+  assert.equal(JSON.stringify(withHooks(a.s, js).s), JSON.stringify(a.s)); // again: the same
+  const b = withHooks({ statusLine: { type: 'command', command: 'my-line' } }, js);
+  assert.deepEqual([b.s.statusLine.command, b.theirs], ['my-line', true]);
+  assert.equal(withHooks({ statusLine: { type: 'command', command: 'node "/old/claude-multi.js" statusline' } }, js).s.statusLine.command, `node "${js}" statusline`); // ours, moved
+  console.log('setup settings ok');
+}
+// a Mac's running check: the pid's start (ps, in UTC) as Claude wrote it down, to the second; another program on a pid
+// reused, or gone: not Claude; a start that can't be read: the pid alone
+{
+  const { sameStart } = require('./claude-multi');
+  const was = 'Tue Nov 17 03:26:30 2026';
+  assert.deepEqual([sameStart('Tue Nov 17 03:26:30 2026', was, false), sameStart('Tue Nov 17 03:26:31 2026', was, false),
+    sameStart('Tue Nov 17 04:26:30 2026', was, false), sameStart(undefined, was, false), sameStart('Tue Nov 17 03:26:30 2026', 'garbage', false),
+    sameStart('Thu Jan  1 00:00:00 1970', '1970-01-01T00:00:00.000Z', false), sameStart('Tue Nov 17 03:26:30 2026', '1970-01-01T00:00:00.000Z', false),
+    sameStart('133', 133, true), sameStart('133', 134, true)], [true, true, false, false, true, true, false, true, false]);
+  // a Mac's page: its own paths (/Users/…) are 预览 links, a /command isn't; on Windows a Mac's path stays code
+  const line = /^const PEEKABLE = .*$/m.exec(fs.readFileSync(require('path').join(__dirname, 'web.html'), 'utf8'))[0];
+  const pk = (win) => new Function('state', `${line}; return peekable;`)({ win });
+  assert.deepEqual(['/Users/me/a.md', '/private/tmp/x', 'C:/a.md', '/model', '/api/state', '/Users/me/&lt;id&gt;'].map((c) => pk(false)(c)), [true, true, true, false, false, false]);
+  assert.deepEqual(['/Users/me/a.md', 'C:/a.md'].map((c) => pk(true)(c)), [false, true]);
+  console.log('a Mac\'s start check and paths ok');
 }
 
 // Exercise the actual terminal parser too: string membership alone misses output replayed into the wrong buffer.

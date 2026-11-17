@@ -66,9 +66,18 @@
 
 - Windows 10 / 11，自带 PowerShell 5.1（灵动岛用到）
 - [Node.js](https://nodejs.org/) 20 或更新版本（用 GPT 要 22.13 或更新：读 Codex 的对话记录要用 Node 自带的 SQLite）
-- [Claude Code](https://docs.claude.com/en/docs/claude-code)，命令行里能直接运行 `claude`
+- [git](https://git-scm.com/)
+- [Claude Code](https://docs.claude.com/en/docs/claude-code)，命令行里能直接运行 `claude`（用下面的一行命令装时，没有会自动装上）
 - 可选：Windows Terminal（灵动岛的「整理窗口」功能要用）
 - 可选：[Codex](https://github.com/openai/codex)（`npm i -g @openai/codex`），用 GPT 时要装
+
+**一行装好。**在 PowerShell 里运行（再运行一次就是更新）：
+
+```powershell
+irm https://raw.githubusercontent.com/cacdcaecawae/claude-multi/master/install.ps1 | iex
+```
+
+它会克隆到 `%USERPROFILE%\.claude-multi`，装依赖，把下面第 3 步的通知和状态栏加进 `%USERPROFILE%\.claude\settings.json`（原来的设置保留，改之前的文件存为 `settings.json.before-claude-multi`），在「启动」文件夹放一个快捷方式（开机启动网页服务和灵动岛），然后打开网页。要手动装，按下面 1 到 3 步做。
 
 **1. 放到固定位置。**程序固定从 `%USERPROFILE%\.claude-multi` 读写数据，所以仓库必须克隆到这个位置：
 
@@ -103,6 +112,22 @@ npm install
 
 - 通知钩子：Claude 回复完（`Stop`）或在等你确认权限时（`Notification`），提示会出现在灵动岛和网页上。
 - 状态栏：每个终端底部会显示账号、模型和所在文件夹。网页底部状态栏里的模型、上下文用量也是从这里来的。
+
+### macOS（只有网页）
+
+Mac 上只能用网页，账号只能是「设置 → 接入」申请来的 API 账号。灵动岛、终端窗口、Claude 订阅账号的额度和 GPT 都没有。
+
+需要 git（没有的话运行 `xcode-select --install`）和 [Node.js](https://nodejs.org/) 20 或更新版本。在终端里运行（再运行一次就是更新）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cacdcaecawae/claude-multi/master/install.sh | bash
+```
+
+没有 Claude Code 时它会先装上，然后克隆到 `~/.claude-multi`，装依赖，把通知和状态栏加进 `~/.claude/settings.json`（原来的设置保留），设成开机自动启动网页服务，最后打开网页。之后在网页的「设置 → 接入」里申请，对方批准后，账号会出现在「额度」里。
+
+网页的链接忘了：运行 `node ~/.claude-multi/claude-multi.js web-link`。
+
+删除的对话会进废纸篓。
 
 ## 快速上手
 
@@ -228,6 +253,18 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 - 手机通知：从主屏幕打开，点底部的「设置」，打开「通知」并允许。对话回复完、等你确认时，手机会弹出通知，点一下直接打开那个对话。你正在网页上看着的对话不会推送。需要 iOS 16.4 以上。
 - 不想要 iOS 给网页通知加的「from …」那一行：装开源的 [Bark](https://github.com/Finb/Bark)，把它首页的地址写进 `%USERPROFILE%\.claude-multi\bark.json`：`{"url": "https://api.day.app/<你的 key>"}`（这个文件不进仓库，key 别外传）。有这个文件时通知只走 Bark，不再走网页推送；点通知在 Safari 里打开那个对话。改完重启网页服务。
 
+### 申请接入（可选）
+
+有人给了你一个接入地址时，可以申请用他的模型网关。地址由对方提供，这里没有默认值：
+
+1. 在网页里点「设置」，找到「接入」那一节，点「申请…」。
+2. 填地址、名字和备注（让对方认出你，比如微信名），点「提交申请」。
+3. 等对方批准。批准后，claude-multi 会自动加一个 API 账号，它会出现在「额度」里，新对话里也能选它。
+
+- 每次打开「设置」都会查一次结果。网页服务开着时，每分钟也会自动查一次。
+- 申请记录在 `%USERPROFILE%\.claude-multi\join.json`，里面有一张回执，凭它取 key，别外传。key 只写进新账号自己的 `settings.json`。
+- 对方收回 key 后，「额度」里这个账号会显示「接入已失效」，要再用就得重新申请。
+
 ## 远程访问（手机、别的电脑）
 
 网页服务只在电脑本机监听。要在外面访问，需要一台有公网 IP 的服务器做中转：
@@ -305,12 +342,15 @@ server {
 | 文件 | 内容 |
 |---|---|
 | `claude-multi.js` | 命令行和网页服务 |
+| `install.ps1` / `install.sh` | Windows / Mac 的一行安装：检查环境、拉代码、装依赖，再运行 `claude-multi setup`（设置、开机启动、打开网页） |
 | `island.ps1` | 灵动岛（WPF）。必须保存为带 BOM 的 UTF-8，否则 PowerShell 5.1 会读错中文 |
 | `console-bridge.ps1` | 读取电脑上 Claude 窗口的画面并转发按键，网页的终端视图靠它 |
 | `web.html` | 网页，单个文件，每次刷新直接读取，改完不用重启服务 |
 | `screen.js` | 从 Claude 的终端画面认出「正在回复」和选择题，网页和管家的命令共用 |
 | `butler\` | 管家的工作文件夹：`CLAUDE.md` 是它的规矩，模型设成 Sonnet |
 | `tickets.json` | 管家的工单（用户的原话、交给了哪个对话、它的汇报和每轮结束的时间），只由网页服务写，不进 git |
+| `join.json` | 申请接入还没办完的申请（地址、状态、回执），不进 git |
+| `profiles.json` 的 `ext` | 选填，一个 CommonJS 文件的绝对路径，用来接私有扩展。网页服务启动时加载它：它的 `api` 路由和网页的放在一起，同样要网页钥匙；它的 `page()` 作为 `/ext.js`，在网页脚本之前运行，可以往 `self.cmExt` 里加侧栏视图 `{ id, title, icon, draw }`。加载失败只记一条日志，服务照常运行 |
 | `claude-multi.test.js` | 测试 |
 | `web.test.js` | 隔离浏览器中的网页交互、键盘和手机布局测试 |
 | `island.test.ps1` | 隔离 WPF 窗口中的小工作区、多账号与通知滚动测试 |

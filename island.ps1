@@ -519,6 +519,9 @@ $PAY = @{
   google_play_subscription = @('Google Play 订阅', 'M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z')
   stripe_subscription = $BANK_CARD; stripe_subscription_contracted = $BANK_CARD
 }
+# a MacBook's mark (a Mac entry with icon rainbow), as the page draws it: Apple's mark in its old six colors (hard bands down it)
+$RAINBOW = "<LinearGradientBrush StartPoint='0,0' EndPoint='0,1'>" + ((@(@('#61BB46', 0, 0.369), @('#FDB827', 0.369, 0.495), @('#F5821F', 0.495, 0.621),
+  @('#E03A3E', 0.621, 0.746), @('#963D97', 0.746, 0.872), @('#009DDC', 0.872, 1)) | ForEach-Object { "<GradientStop Color='$($_[0])' Offset='$($_[1])'/><GradientStop Color='$($_[0])' Offset='$($_[2])'/>" }) -join '') + '</LinearGradientBrush>'
 # An account at its limit while conversations run on it: one notice (per account, until it's off its limit again) that
 # they wait for the reset; a click opens the running ones, each with 换账号继续. Nothing switches by itself.
 $script:limitTold = @{}
@@ -554,7 +557,8 @@ function Render {
       if ($i -eq $d.rec) { continue }
       if ($first) { [void]$PillAccts.Children.Add((X "<Border $ns Width='1' Height='14' Background='#33FFFFFF' Margin='14,0,12,0' VerticalAlignment='Center'/>")) }
       $p = Pct5 $all[$i]
-      $num = if ($all[$i].err) { "<TextBlock Text='—' FontSize='11' Foreground='#73FFFFFF' Margin='6,0,0,0' VerticalAlignment='Center'/>" }
+      $num = if ($all[$i].api) { "<TextBlock Text='API' FontSize='11' Foreground='#73FFFFFF' Margin='6,0,0,0' VerticalAlignment='Center'/>" } # 本地代理: no window to show
+        elseif ($all[$i].err) { "<TextBlock Text='—' FontSize='11' Foreground='#73FFFFFF' Margin='6,0,0,0' VerticalAlignment='Center'/>" }
         else { "$(Bar $p 36 4 '6,0,0,0' 0.7)<TextBlock Text='$p%' FontSize='11' Foreground='#8CFFFFFF' Margin='6,0,0,0' VerticalAlignment='Center'/>" }
       [void]$PillAccts.Children.Add((X ("<StackPanel $ns Orientation='Horizontal' Margin='$(if ($first) { 0 } else { 12 }),0,0,0'>" +
         "<TextBlock Text='$($i + 1)' ToolTip='$(Esc $all[$i].label)' FontSize='12' Foreground='#73FFFFFF' VerticalAlignment='Center'/>$num</StackPanel>")))
@@ -590,9 +594,10 @@ function Render {
     # the rest sit on a fainter card in greyer text with a small launch icon.
     $a = $all[$i]; $rec = $i -eq $d.rec
     $accent = if ($d.open) { '30D158' } else { 'FF9F0A' }
-    $right = if ($a.err) { '' } elseif ($rec -and -not $d.open) { "$($d.ready)后恢复" } elseif ($a.runway -gt 0) { "可连续用 $($a.runway) 小时" } else { '已用满' }
-    $rightFg = if ($rec) { "#$accent" } elseif ($a.runway -gt 0) { '#8CFFFFFF' } else { '#B3FF453A' }
-    $lines = if ($a.err) { "<TextBlock Text='$(Esc $a.err)' Margin='0,8,0,0' FontSize='11' Foreground='#B3FFD60A' TextWrapping='Wrap'/>" } else {
+    $right = if ($a.api) { '按用量计费' } elseif ($a.err) { '' } elseif ($rec -and -not $d.open) { "$($d.ready)后恢复" } elseif ($a.runway -gt 0) { "可连续用 $($a.runway) 小时" } else { '已用满' }
+    $rightFg = if ($rec) { "#$accent" } elseif ($a.api -or $a.runway -gt 0) { '#8CFFFFFF' } else { '#B3FF453A' }
+    $lines = if ($a.api) { "<TextBlock Text='API，没有 5 小时和 7 天额度' Margin='0,8,0,0' FontSize='11' Foreground='#8CFFFFFF' TextWrapping='Wrap'/>" }
+      elseif ($a.err) { "<TextBlock Text='$(Esc $a.err)' Margin='0,8,0,0' FontSize='11' Foreground='#B3FFD60A' TextWrapping='Wrap'/>" } else {
       foreach ($w in $a.windows) {
         $main = $w.k -eq 'five_hour'
         $reset = if ($w.reset) { "$($w.reset)后重置" } else { '' }
@@ -659,6 +664,31 @@ function Render {
     $card.Add_MouseLeave({ param($s) $s.Tag.Opacity = 0; $s.Tag.Tag.Visibility = 'Collapsed' })
     [void]$Rows.Children.Add($card)
   }
+  # each Mac (the Mac mini, a MacBook's accounts): Claude on that Mac, in its folder there, run by the web service
+  # (claude-multi start <its id>: a tab joined to it, so the page and the phone have it too); its usage as read on the
+  # Mac, never recommended here. Its mark: Apple's, in white; a MacBook's (icon rainbow) in its old six colors
+  foreach ($m in @($d.macs)) {
+    if (-not $m) { continue }
+    $fill = if ($m.icon -eq 'rainbow') { $RAINBOW } else { "<SolidColorBrush Color='#E6FFFFFF'/>" } # white on the dark panel
+    $lines = if ($m.err -or -not @($m.windows).Count) { "<TextBlock Text='$(Esc $(if ($m.err) { $m.err } else { '额度还没读到' }))' Margin='0,8,0,0' FontSize='11' Foreground='#8CFFFFFF' TextWrapping='Wrap'/>" } else {
+      foreach ($w in @($m.windows)) {
+        $nm = if ($names[$w.k]) { $names[$w.k] } else { $w.k }
+        $reset = if ($w.reset) { "$($w.reset)后重置" } else { '' }
+        "<StackPanel Orientation='Horizontal' Margin='0,8,0,0'><TextBlock Text='$(Esc $nm)' Width='64' FontSize='11' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
+        "$(Bar $w.pct 170 5 '0' 0.9)<TextBlock Text='$($w.pct)%' Width='46' TextAlignment='Right' FontSize='12' FontWeight='SemiBold' VerticalAlignment='Center'/>" +
+        "<TextBlock Text='$(Esc $reset)' Margin='14,0,0,0' FontSize='11' Foreground='#73FFFFFF' VerticalAlignment='Center'/></StackPanel>"
+      }
+    }
+    $card = X ("<Border $ns Background='#0AFFFFFF' CornerRadius='14' Padding='14,11,14,12' Margin='0,0,0,6'><StackPanel><DockPanel>" +
+      "<Button x:Name='Go' DockPanel.Dock='Right' Content='&#xE768;' ToolTip='在 $(Esc $m.label) 上的 $(Esc $m.dir) 里启动 Claude' Margin='6,-6,-8,-6'/>" +
+      "<TextBlock DockPanel.Dock='Right' Text='$(Esc $m.plan)' FontSize='12' Foreground='#8CFFFFFF' VerticalAlignment='Center'/>" +
+      "<Path Data='$($PAY.apple_subscription[1])' Width='14' Height='14' Stretch='Uniform' Margin='0,-2,8,0' VerticalAlignment='Center'><Path.Fill>$fill</Path.Fill></Path>" +
+      "<TextBlock Text='$(Esc $m.label)' FontSize='13' FontWeight='SemiBold' Foreground='#CCFFFFFF' Margin='0,0,12,0' VerticalAlignment='Center'/>" +
+      "</DockPanel>$($lines -join '')</StackPanel></Border>")
+    $go = $card.FindName('Go'); $go.Style = $win.FindResource('Icon')
+    $go.Tag = $m.id; $go.Add_Click({ param($s) Show-Projects $s.Tag }) # a folder here first: its project folder there
+    [void]$Rows.Children.Add($card)
+  }
   # last: a new account, logged in in a terminal window (claude-multi new); the island reads the accounts again once it's saved
   $add = New-Object Windows.Controls.Button
   $add.Style = $win.FindResource('Text'); $add.Content = '＋ 添加账号'; $add.HorizontalAlignment = 'Left'; $add.Margin = '4,0,0,0'
@@ -696,20 +726,26 @@ function Render-Gpt($gs, $names) {
 }
 
 # --- launching ----------------------------------------------------------------------------------
-function Show-Projects([string]$n) { # n: an account's number, or a GPT one's G1 (Codex then)
-  $who = if ($n -like 'G*') { "GPT $n · $(@($script:data.gpt)[[int]$n.Substring(1) - 1].label)" } else { $script:data.accounts[[int]$n - 1].label }
+function Show-Projects([string]$n) { # n: an account's number, a GPT one's G1 (Codex then), or a Mac's id (mac: the Mac mini)
+  $mm = @($script:data.macs) | Where-Object { $_ -and $_.id -ceq $n } | Select-Object -First 1 # (before G*: an id may begin with g)
+  $who = if ($mm) { $mm.label } elseif ($n -like 'G*') { "GPT $n · $(@($script:data.gpt)[[int]$n.Substring(1) - 1].label)" } else { $script:data.accounts[[int]$n - 1].label }
   $ProjTitle.Text = "用 $($who.Split('@')[0]) 启动到："
   $ProjList.Children.Clear()
-  foreach ($p in @($script:data.projects) + '') {
+  $list = @($script:data.projects) + ''
+  if ($mm) { $list = @('mac:') + $list } # the Mac's own folder first, for no folder here
+  foreach ($p in $list) {
     $b = New-Object Windows.Controls.Button
     $b.Style = $win.FindResource('Item')
     $b.Tag = @($n, $p)
-    $b.Content = if ($p) {
+    $b.Content = if ($p -eq 'mac:') {
+      X "<StackPanel $ns Orientation='Horizontal'><TextBlock Text='$(Esc (Split-Path $mm.dir -Leaf))' FontSize='13' FontWeight='SemiBold' MinWidth='120'/><TextBlock Text='就在 $(Esc $mm.label) 上，不对应这里的文件夹' FontSize='11' Foreground='#8CFFFFFF' Margin='14,1,0,0' VerticalAlignment='Center'/></StackPanel>"
+    } elseif ($p) {
       X "<StackPanel $ns Orientation='Horizontal'><TextBlock Text='$(Esc (Split-Path $p -Leaf))' FontSize='13' FontWeight='SemiBold' MinWidth='120'/><TextBlock Text='$(Esc $p)' FontSize='11' Foreground='#8CFFFFFF' Margin='14,1,0,0' MaxWidth='330' TextTrimming='CharacterEllipsis' VerticalAlignment='Center'/></StackPanel>"
     } else { X "<TextBlock $ns Text='其他文件夹…' FontSize='13' Foreground='#B3FFFFFF'/>" }
     $b.Add_Click({
       param($s)
       $dir = $s.Tag[1]
+      if ($dir -eq 'mac:') { Open-Terminal $HOME "start $($s.Tag[0]) -"; Collapse; return }
       if (-not $dir) {
         $dlg = New-Object Windows.Forms.FolderBrowserDialog
         if ($dlg.ShowDialog() -ne 'OK') { return }
@@ -950,7 +986,7 @@ function Pick-Account($s) {
   $own = [int]$s.acct + 1; $u = $script:data
   if (-not $u -or $null -eq $u.rec -or [int]$u.rec -eq [int]$s.acct) { return $own }
   $a = $u.accounts[$s.acct]; $b = $u.accounts[$u.rec]
-  if ($a.err -or $a.runway -ge 1 -or $b.runway -le $a.runway) { return $own }
+  if ($a.err -or $a.api -or $a.runway -ge 1 -or $b.runway -le $a.runway) { return $own } # an API one never runs out
   Ask-Account $s $own ([int]$u.rec + 1)
 }
 # Accounts don't share their prompt cache, so the other one reads the whole conversation in again on its
@@ -1072,8 +1108,9 @@ function Load-Chats {
   $script:chatsAt = Get-Date
   Run-Node 'sessions --json --all' { # the GPT ones too (gpt: true; acct, from 0, their G number)
     param($out)
-    # not @(...): PowerShell 5.1 hands back a JSON array as one item, which @() would wrap again
-    try { $script:chats = ConvertFrom-Json $out } catch { $script:chats = @() }
+    # not @(ConvertFrom-Json …): PowerShell 5.1 hands back a JSON array as one item, which @() would wrap again; in
+    # parentheses it's unrolled first. Not the GPT 聊天 ones (oai): no folder nor account, nothing here opens them
+    try { $script:chats = @((ConvertFrom-Json $out) | Where-Object { -not $_.oai }) } catch { $script:chats = @() }
     Render-Chats
   }
 }
@@ -1120,7 +1157,7 @@ function Draw-NewBar {
   if ($accs.Count + $gs.Count -lt 2) { return }
   $chips = @(for ($i = 0; $i -lt $accs.Count; $i++) {
     $a = $accs[$i]
-    $note = if ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
+    $note = if ($a.api) { '按用量计费' } elseif ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
     @{ tag = $i + 1; text = "账号 $($i + 1)"; note = $note; tip = $a.label }
   }) + @(for ($i = 0; $i -lt $gs.Count; $i++) { # the GPT accounts, by how much of their most used window is left
     $w = @($gs[$i].windows | Sort-Object { $_.pct } -Descending)[0]
@@ -1884,7 +1921,7 @@ function Pick-Switch($s) {
   $first = if ($rec -ge 0 -and $rec -ne $own) { $rec + 1 } else { ($own + 1) % $accs.Count + 1 }
   $chips = @(for ($i = 0; $i -lt $accs.Count; $i++) {
     $a = $accs[$i]
-    $note = if ($i -eq $own) { '当前' } elseif ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
+    $note = if ($i -eq $own) { '当前' } elseif ($a.api) { '按用量计费' } elseif ($a.err) { '读不到额度' } elseif ($a.runway -gt 0) { "可用 $($a.runway)h" } else { '已用满' }
     if ($i -eq $rec -and $i -ne $own) { $note += ' · 推荐' }
     Chip-Xaml ($i + 1) "账号 $($i + 1)" $note ($i -eq $own)
   }) -join ''
@@ -1944,13 +1981,13 @@ function Add-Chat($s) {
     elseif ($s.pid) { "<Border Background='#2E30D158' CornerRadius='8' Padding='8,2'><TextBlock Text='运行中' FontSize='11' FontWeight='SemiBold' Foreground='#30D158'/></Border>" }
     else { "<TextBlock Text='$(Ago $s.at)' FontSize='12' Foreground='#66FFFFFF'/>" }
   # a GPT one (Codex): its own account always (G1, G2…), no switching nor renaming here; deleted is archived
-  $acctName = if ($s.gpt) { "GPT G$n" } else { "账号 $n" }
+  $acctName = if ($s.mac) { $s.who } elseif ($s.gpt) { "GPT G$n" } else { "账号 $n" } # a Mac's: no account here, no switching or renaming (deleted into the Mac's Trash)
   $act = if ($s.web) { '在电脑上打开' } elseif ($s.pid) { '切回窗口' } else { "继续 · $acctName" }
-  $who = if (-not $script:data) { '' } elseif ($s.gpt) { "（$(@($script:data.gpt)[$n - 1].label)）" } else { "（$($script:data.accounts[$n - 1].label)）" }
+  $who = if (-not $script:data -or $s.mac) { '' } elseif ($s.gpt) { "（$(@($script:data.gpt)[$n - 1].label)）" } else { "（$($script:data.accounts[$n - 1].label)）" }
   $tip = if ($s.web) { '在网页上运行：点击开一个终端标签接上它，两边同步，关掉标签不会结束对话' } elseif ($s.pid) { '还开着，点击切回它的终端标签' } else { "用$acctName$who 在 $($s.cwd) 继续" }
   # one folder can hold conversations of several accounts
   $sub = @(@(if ($mixed) { "<Run Text='$(Esc (Split-Path $s.cwd -Leaf))' Foreground='#99FFFFFF'/>" }) +
-    $(if ($s.gpt) { "<Run Text='$acctName' Foreground='#19C37D'/>" } else { "<Run Text='$acctName'/>" }) +
+    $(if ($s.gpt) { "<Run Text='$(Esc $acctName)' Foreground='#19C37D'/>" } else { "<Run Text='$(Esc $acctName)'/>" }) +
     @(if ($s.prompt) { "<Run Text='$(Esc $s.prompt)' Foreground='#80FFFFFF'/>" })) -join "<Run Text='   ·   '/>"
   $b = New-Object Windows.Controls.Button
   $b.Style = $script:cw.FindResource('Item')
@@ -1968,11 +2005,11 @@ function Add-Chat($s) {
     "<Button.Template><ControlTemplate TargetType='Button'><Border Background='#FF453A' CornerRadius='10' Padding='11,3'><ContentPresenter/></Border></ControlTemplate></Button.Template>" +
     "<TextBlock Text='$(if ($s.gpt) { '确认归档' } else { '确认删除' })' FontSize='12' FontWeight='SemiBold' Foreground='White'/></Button>" +
     "$(if (-not $s.pid) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Del' Content='&#xE74D;' ToolTip='$(if ($s.gpt) { '归档' } else { '删除' })'/></Border>" })" +
-    "$(if (-not $s.gpt) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Sw' Content='&#xE8AB;' ToolTip='换账号继续'/></Border>" })" +
-    "$(if (-not $s.gpt) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,6,0'><Button x:Name='Ren' Content='&#xE70F;' ToolTip='改名'/></Border>" })<Grid VerticalAlignment='Center'>" +
+    "$(if (-not $s.gpt -and -not $s.mac) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,2,0'><Button x:Name='Sw' Content='&#xE8AB;' ToolTip='换账号继续'/></Border>" })" +
+    "$(if (-not $s.gpt -and -not $s.mac) { "<Border Style='{DynamicResource OnHover}' VerticalAlignment='Center' Margin='0,0,6,0'><Button x:Name='Ren' Content='&#xE70F;' ToolTip='改名'/></Border>" })<Grid VerticalAlignment='Center'>" +
     "<ContentControl Style='{DynamicResource OffHover}' HorizontalAlignment='Right' VerticalAlignment='Center'>$rest</ContentControl>" +
     "<Border Style='{DynamicResource OnHover}' Background='$(if ($s.pid) { '#30D158' } else { '#E6FFFFFF' })' CornerRadius='10' Padding='11,3' HorizontalAlignment='Right'>" +
-    "<TextBlock Text='$act' FontSize='12' FontWeight='SemiBold' Foreground='Black'/></Border></Grid></StackPanel></Grid>")
+    "<TextBlock Text='$(Esc $act)' FontSize='12' FontWeight='SemiBold' Foreground='Black'/></Border></Grid></StackPanel></Grid>")
   $sw = $b.Content.FindName('Sw') # none for a GPT one, nor 改名
   if ($sw) { $sw.Style = $script:cw.FindResource('Icon'); $sw.Tag = $s; $sw.Add_Click({ param($x, $e) $e.Handled = $true; Switch-Chat $x.Tag }) } # not a click on the row
   $ren = $b.Content.FindName('Ren'); $ed = $b.Content.FindName('E')
@@ -2013,7 +2050,8 @@ function Add-Chat($s) {
   $b.Add_Click({
     param($x)
     $s = $x.Tag
-    if ($s.web) { Open-WebChat $s.id $s.cwd }
+    if ($s.web) { Open-WebChat $s.id $(if ($s.mac) { $env:USERPROFILE } else { $s.cwd }) } # a Mac's folder isn't one here
+    elseif ($s.mac) { Open-Terminal $env:USERPROFILE "resume $($s.id)" } # continued on the Mac by the web service (one in a terminal there: it says so)
     elseif ($s.pid) { Focus-Claude $s.pid }
     elseif ($s.gpt) { Open-Terminal $s.cwd "resume $($s.id)" } # on its own account
     else { $n = Pick-Account $s; if ($n) { Open-Terminal $s.cwd "resume $($s.id) $n" } }
