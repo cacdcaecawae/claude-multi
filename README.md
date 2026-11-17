@@ -104,6 +104,24 @@ npm install
 - 通知钩子：Claude 回复完（`Stop`）或在等你确认权限时（`Notification`），提示会出现在灵动岛和网页上。
 - 状态栏：每个终端底部会显示账号、模型和所在文件夹。网页底部状态栏里的模型、上下文用量也是从这里来的。
 
+### macOS（只有网页）
+
+Mac 上只能用网页，账号只能是「设置 → 接入」申请来的 API 账号。灵动岛、终端窗口、Claude 订阅账号的额度和 GPT 都没有。
+
+需要 [Node.js](https://nodejs.org/) 20 或更新版本，和 [Claude Code](https://docs.claude.com/en/docs/claude-code)（终端里能直接运行 `claude`）。
+
+```sh
+git clone <这个仓库的地址> ~/.claude-multi
+cd ~/.claude-multi && npm install
+```
+
+1. 照上面第 3 步，在 `~/.claude/settings.json` 里加上通知和状态栏，路径写成 `/Users/<用户名>/.claude-multi/claude-multi.js`。之后申请到的账号会带上它们。
+2. 启动网页服务：`nohup node ~/.claude-multi/claude-multi.js web >/dev/null 2>&1 &`。重启电脑后要再运行一次。
+3. 运行 `node ~/.claude-multi/claude-multi.js web-link`，用它打印的链接在浏览器里打开。
+4. 在网页的「设置 → 接入」里申请。对方批准后，账号会出现在「额度」里。
+
+删除的对话会进废纸篓。
+
 ## 快速上手
 
 ```bat

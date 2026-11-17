@@ -1158,6 +1158,7 @@ if (SESSION0) {
   assert.deepEqual([usd(7012.4), usd(154.66), usd(0), usd(0.42), about(154.66), about(0.42), about(0)], ['$7,012', '$155', '$0', '不到 $1', '约 $155', '不到 $1', '约 $0']);
   const shut = new Function(`${part(/^const shut = .*$/m)}\nreturn shut;`)();
   assert.deepEqual([shut({ accounts: [] }), shut({ accounts: [{}], rec: null }), shut({ accounts: [{}], rec: 0, ready: '2小时' })], ['还没有 Claude 账号', '额度暂时读不到', '都到上限了，2小时后恢复']);
+  assert.deepEqual([shut({ accounts: [{ api: true }], rec: null }), shut({ accounts: [{}, { api: true }], rec: null })], ['接入已失效', '额度暂时读不到']); // API ones only: none takes the key
   console.log('review page ok');
 })();
 
@@ -1749,4 +1750,15 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.equal(JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8')).env.KEEP, '1');
   srv.close();
   console.log('申请接入 ok');
+})();
+// API accounts only (a Mac's, 申请接入's): the first one not refused is recommended, nothing to read; a subscription beside
+// one: as before (its quota unread is said so, the API one not taken in its place)
+(async () => {
+  const { usageState } = require('./claude-multi'), path = require('path');
+  const api = (id) => ({ id, configDir: path.join(TEST_HOME, id), api: { baseURL: 'http://127.0.0.1:9' } });
+  const a = (await usageState({ profiles: [api('x1'), api('x2')] })).json;
+  assert.deepEqual([a.rec, a.open], [0, true]);
+  const b = (await usageState({ profiles: [{ id: 'sub1', configDir: path.join(TEST_HOME, 'sub1') }, api('x3')] })).json;
+  assert.deepEqual([b.rec, b.open], [null, false]);
+  console.log('API accounts only: the first recommended ok');
 })();
