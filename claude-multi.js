@@ -264,6 +264,10 @@ function joinAccount(j, key) {
   const env = { ...mine.env, ANTHROPIC_BASE_URL: j.url, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1' };
   delete env.ANTHROPIC_API_KEY; delete mine.apiKeyHelper; // the gateway's key only
   const { id, dir } = accountDir({ ...mine, env });
+  // no sign-in to walk through: Claude's first-run screens (its theme, its notes) skipped, the page has no cards for them.
+  // A Claude Code just installed, never run, stopped there.
+  const cj = path.join(dir, '.claude.json');
+  fs.writeFileSync(cj, JSON.stringify({ ...JSON.parse(fs.readFileSync(cj, 'utf8')), hasCompletedOnboarding: true }, null, 2) + '\n');
   const p = { id, label: new URL(j.url).host, subscriptionType: 'API', configDir: dir, createdAt: now(), lastUsedAt: null, api: { baseURL: j.url, join: j.id } };
   update((reg) => { reg.profiles.push(p); });
   log('profile_joined', { profile_id: id, base_url: j.url });

@@ -1733,6 +1733,7 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual([p.api.join, p.subscriptionType, readJoins().length], [rec.id, 'API', 0]);
   assert.deepEqual([s.env.ANTHROPIC_BASE_URL, s.env.ANTHROPIC_AUTH_TOKEN, s.env.KEEP, s.env.ANTHROPIC_API_KEY, s.apiKeyHelper, !!s.hooks], [url, 'sk-cm-test', '1', undefined, undefined, true]);
   assert.ok(!fs.lstatSync(path.join(p.configDir, 'settings.json')).isSymbolicLink(), 'its own, not the shared one');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(p.configDir, '.claude.json'), 'utf8')).hasCompletedOnboarding, true); // no first-run screens
   fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'join.json'), JSON.stringify([rec])); // asked again: the same one
   await checkJoins();
   assert.deepEqual([mine().length, readJoins().length], [1, 0]);
