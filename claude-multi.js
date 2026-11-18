@@ -254,6 +254,26 @@ function pointJoins(via) {
     log('profile_base', { profile_id: p.id, via });
   } catch (e) { log('profile_base_fail', { profile_id: p.id, err: e.message }); }
 }
+// 代理额度 (quota-panel.js): the quotas behind a proxy. Yours, when profiles.json's localQuota.source names an adapter (a
+// file of your own, outside the repo: { read, refresh(target) }); else what each gateway 申请接入 joined lets its key see
+// (<its address>/_quota). A gateway that says no (none there, 401, 403) adds nothing; all of them unreachable is an
+// error, as an adapter's is.
+const quotaOn = (reg = load()) => !!reg.localQuota?.source || reg.profiles.some((p) => p.api?.join); // its view shown
+function quotaSource() {
+  const f = load().localQuota?.source;
+  if (f) { if (!path.isAbsolute(f)) throw Error('localQuota.source 要写绝对路径'); return require(f); }
+  const read = async () => {
+    const got = await Promise.allSettled(load().profiles.filter((p) => p.api?.join).map(async (p) => {
+      const key = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8')).env?.ANTHROPIC_AUTH_TOKEN;
+      const r = await fetch(`${p.api.baseURL}/_quota`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) { await r.body?.cancel(); if ([401, 403, 404].includes(r.status)) return []; throw Error(`_quota ${r.status}`); }
+      return jsonBody(r.body, 1 << 20);
+    }));
+    if (got.length && got.every((g) => g.status === 'rejected')) throw got[0].reason;
+    return { quotas: got.flatMap((g) => (g.status === 'fulfilled' && Array.isArray(g.value) ? g.value : [])) };
+  };
+  return { read, refresh: read }; // a gateway's reading is its own: asked again, not refreshed
+}
 async function askApply(url, what, body) {
   const r = await fetch(`${url}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
   const j = await r.json().catch(() => null);
@@ -3139,6 +3159,7 @@ async function web() {
       return require(f)({ load, root: ROOT });
     } catch (e) { log('ext_error', { err: e.message }); return null; }
   })();
+  const quota = require('./quota-panel').createQuotaPanel({ source: quotaSource, configured: () => quotaOn() });
   // delta.js send for 申请接入's accounts (viaDelta), a child of this service: a conversation here ends with it anyway.
   // shortcut: one started from a terminal (claude-multi start, the island) needs this service up too, as setup keeps it
   // Accounts go through it once it says it listens (pointJoins); one that ends before it did (its port taken) points
@@ -3658,6 +3679,9 @@ async function web() {
   const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
   const api = {
     ...ext?.api,
+    // 代理额度: read when its view is shown (a minute's cache); one account, or all, asked again by hand (30 s apart)
+    'GET /api/local-quota': () => quota.get(),
+    'POST /api/local-quota/refresh': (q, b) => quota.refresh(b?.id),
     // the questions other conversations wait on, as their screens show them (管家 mode has them as cards): each read again
     // 3 s after the last read at most, one read for every page asking
     // (a Mac's only when it runs in this service: one in a terminal on the Mac can't be read, and asking ssh'd there each time)
@@ -3708,7 +3732,7 @@ async function web() {
       list.sort((a, b) => b.at - a.at);
       // the Macs (the Mac mini, more): 新对话 offers them
       const reg = load(), macs = macList(reg).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
-      return { user: reg.user ?? null, usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      return { user: reg.user ?? null, usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), quota: quotaOn(reg), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects(), win: WIN };
     },
     'POST /api/project': (q, b) => editProjects((all) => projectOp(all, b)),
@@ -4554,7 +4578,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION) cp.spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
