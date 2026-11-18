@@ -9,10 +9,14 @@
 //     409 x-delta-miss (the receiving end hasn't that body; it answers before the gateway sees anything): that body
 //     dropped here, this request whole. A request that breaks on its way is never sent again: the gateway may have it
 //     already, and a second would run the model twice. It gets a 502, and Claude Code retries as on any dropped line.
-//   node delta.js send [--port 7789] (--to https://gateway/path | --profiles profiles.json) [--cache 512]   GET /_delta
+//   node delta.js send [--port 7789] (--to https://gateway/path [--plain url] | --profiles profiles.json) [--cache 256]
+//   GET /_delta: its numbers. Once listening it tells a parent that forked it ({ listening: port }).
 //   --profiles: claude-multi's 申请接入 accounts, each its base URL http://127.0.0.1:7789/j/<its id>, sent to the gateway
-//   it joined (api.baseURL); nowhere else. The receiving end's parts are here too (rebuild, keep); its server is the
-//   gateway's own.
+//   it joined (api.baseURL); nowhere else.
+//   --plain: another way to the same gateway, whole: taken while --to's receiving end doesn't answer a ping (a request
+//   with x-delta-ping, which it answers itself), asked every 30 s, every 2 s while it doesn't, and at once after a
+//   request broke. The way is chosen before a request goes, never after it failed.
+//   The receiving end's parts are here too (rebuild, keep); its server is the gateway's own.
 const http = require('http'), https = require('https'), crypto = require('crypto'), fs = require('fs');
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
@@ -23,7 +27,7 @@ function serve(srv, port, what) {
     if (e.code !== 'EADDRINUSE' || ++tries > 15) { console.error(`${new Date().toISOString()} ${what}: ${e.message}`); process.exit(1); }
     setTimeout(() => srv.listen(port, '127.0.0.1'), 1000);
   });
-  srv.listen(port, '127.0.0.1', () => console.error(`${new Date().toISOString()} ${what}`));
+  srv.listen(port, '127.0.0.1', () => { console.error(`${new Date().toISOString()} ${what}`); process.send?.({ listening: port }); });
 }
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 const HOP = ['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'te', 'trailer', 'upgrade', 'host'];
@@ -38,6 +42,7 @@ function cache(max) {
     put(k, v) { if (m.has(k)) return; m.set(k, v); size += v.length; for (const [o, b] of m) { if (size <= max) break; m.delete(o); size -= b.length; } },
     delete(k) { const v = m.get(k); if (v) { m.delete(k); size -= v.length; } },
     entries: () => [...m],
+    bytes: () => size,
     shown: () => ({ n: m.size, mb: Math.round(size / 2 ** 20) }),
   };
 }
@@ -82,9 +87,11 @@ function rebuild(kept, h, body) {
   return { body, key, d };
 }
 
-function read(req, done) {
-  const parts = [];
-  req.on('data', (d) => parts.push(d)).on('end', () => done(Buffer.concat(parts.splice(0)))); // pieces let go: req lives as long as its answer
+// a request's body (its pieces let go: req lives as long as its answer); null past max bytes, the rest read and dropped
+function read(req, done, max = Infinity) {
+  const parts = []; let n = 0;
+  req.on('data', (d) => { if ((n += d.length) <= max) parts.push(d); else parts.length = 0; })
+    .on('end', () => done(n > max ? null : Buffer.concat(parts.splice(0))));
 }
 // req's answer from upstream piped into res as it comes (SSE); either side going away ends the other
 function relay(up, res, onAnswer) {
@@ -99,20 +106,32 @@ function relay(up, res, onAnswer) {
 
 function send() {
   const port = Number(arg('--port', 7789)), fixed = arg('--to')?.replace(/\/+$/, ''), profiles = arg('--profiles');
-  const kept = cache(Number(arg('--cache', 512)) * 2 ** 20);
-  // the gateway and the path after it: --to's, else the 申请接入 account's /j/<id> names (read each time: one just made)
+  const kept = cache(Number(arg('--cache', 256)) * 2 ** 20), plain = fixed && arg('--plain')?.replace(/\/+$/, '');
+  const agents = { 'http:': new http.Agent({ keepAlive: true }), 'https:': new https.Agent({ keepAlive: true }) };
+  let live = !plain, asking = false; // --to's receiving end answered its last ping (no --plain: --to always)
+  const ping = () => {
+    if (!plain || asking) return;
+    asking = true;
+    const u = new URL(fixed + '/v1/models');
+    const p = (u.protocol === 'https:' ? https : http).get(u, { headers: { 'x-delta-ping': '1' }, agent: agents[u.protocol] }, (r) => { r.resume(); live = r.headers['x-delta-ok'] === '1'; asking = false; });
+    p.setTimeout(15000, () => p.destroy(Error('no answer in 15 s')));
+    p.on('error', () => { live = false; asking = false; });
+  };
+  const loop = () => { ping(); setTimeout(loop, live ? 30000 : 2000); };
+  if (plain) loop();
+  // the gateway and the path after it: --to's (or --plain's), else the 申请接入 account's /j/<id> names (read each time:
+  // one just made)
   const gateway = (url) => {
-    if (fixed) return [fixed, url];
+    if (fixed) return [live ? fixed : plain, url];
     const m = /^\/j\/([\w.-]+)(\/[^]*)?$/.exec(url);
     try { const p = m && JSON.parse(fs.readFileSync(profiles, 'utf8')).profiles.find((x) => x.id === m[1] && x.api?.join); return p ? [p.api.baseURL.replace(/\/+$/, ''), m[2] ?? ''] : []; }
     catch { return []; }
   };
   const can = new Map(); // gateway → its receiving end answers: deltas to it
-  const agents = { 'http:': new http.Agent({ keepAlive: true }), 'https:': new https.Agent({ keepAlive: true }) };
   // sent: request bodies only, every try's (a missed delta's too); failed: requests that broke on their way (502)
   const stats = { since: new Date().toISOString(), requests: 0, bytes: 0, sent: 0, misses: 0, failed: 0, last: [] };
   const srv = http.createServer((req, res) => {
-    if (req.url === '/_delta') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ ...stats, kept: kept.shown(), to: Object.fromEntries(can) }, null, 1)); }
+    if (req.url === '/_delta') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ ...stats, ...(plain && { up: live }), kept: kept.shown(), to: Object.fromEntries(can) }, null, 1)); }
     const [to, rest] = gateway(req.url);
     if (!to) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('delta.js: no such account'); }
     read(req, (body) => {
@@ -121,7 +140,7 @@ function send() {
       const go = (whole) => {
         const url = new URL(to + rest), headers = pass(req.headers);
         let data = body, d = null;
-        if (key) {
+        if (key && to !== plain) {
           headers['x-delta-sha'] = key; // kept there as it is, and a delta's base from then on
           d = whole || !can.get(to) ? null : closest(kept, body);
           if (d && d.prefix + d.suffix >= 1024) {
@@ -147,6 +166,7 @@ function send() {
           if (res.destroyed) return; // Claude Code went away: relay stopped this on purpose
           stats.failed++;
           console.error(`${new Date().toISOString()} ${url.host}: ${e.message}`);
+          if (to === fixed && plain) { live = false; ping(); } // the next goes --plain's way until a ping is answered
           if (res.headersSent) return res.destroy();
           res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' }); res.end(`delta.js: ${e.message}`);
         });
@@ -163,6 +183,6 @@ if (require.main === module) {
   process.on('uncaughtException', (e) => console.error(`${new Date().toISOString()} ${e.stack}`));
   process.on('disconnect', () => process.exit()); // started by claude-multi's web service (fork): gone with it
   if (process.argv[2] === 'send') send();
-  else console.error('node delta.js send [--port 7789] (--to https://gateway/path | --profiles profiles.json) [--cache 512]');
+  else console.error('node delta.js send [--port 7789] (--to https://gateway/path [--plain url] | --profiles profiles.json) [--cache 256]');
 }
 module.exports = { sha, common, closest, cache, keep, rebuild, read, pass, relay, serve };
