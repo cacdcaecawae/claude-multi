@@ -1731,7 +1731,8 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   await checkJoins();
   const [p] = mine(), s = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8'));
   assert.deepEqual([p.api.join, p.subscriptionType, readJoins().length], [rec.id, 'API', 0]);
-  assert.deepEqual([s.env.ANTHROPIC_BASE_URL, s.env.ANTHROPIC_AUTH_TOKEN, s.env.KEEP, s.env.ANTHROPIC_API_KEY, s.apiKeyHelper, !!s.hooks], [url, 'sk-cm-test', '1', undefined, undefined, true]);
+  // through delta.js send (the web service runs it): only what changed goes to the gateway, kept as p.api.baseURL
+  assert.deepEqual([s.env.ANTHROPIC_BASE_URL, s.env.ANTHROPIC_AUTH_TOKEN, s.env.KEEP, s.env.ANTHROPIC_API_KEY, s.apiKeyHelper, !!s.hooks], [`http://127.0.0.1:7789/j/${p.id}`, 'sk-cm-test', '1', undefined, undefined, true]);
   assert.ok(!fs.lstatSync(path.join(p.configDir, 'settings.json')).isSymbolicLink(), 'its own, not the shared one');
   assert.equal(JSON.parse(fs.readFileSync(path.join(p.configDir, '.claude.json'), 'utf8')).hasCompletedOnboarding, true); // no first-run screens
   fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'join.json'), JSON.stringify([rec])); // asked again: the same one

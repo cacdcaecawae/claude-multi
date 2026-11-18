@@ -212,7 +212,7 @@ function ask(q) {
 }
 
 // A new account's folder, acct-<day>-<n>: the shared files linked in, your preferences (theme, onboarding) copied.
-// settings: its own settings.json (an API account's), written first so the shared one isn't linked in its place.
+// settings(id): its own settings.json (an API account's), written first so the shared one isn't linked in its place.
 function accountDir(settings) {
   fs.mkdirSync(ACCOUNTS, { recursive: true });
   const day = new Date().toLocaleDateString('sv').replace(/-/g, ''); // local YYYYMMDD
@@ -222,7 +222,7 @@ function accountDir(settings) {
     dir = path.join(ACCOUNTS, id);
     try { fs.mkdirSync(dir); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
   }
-  if (settings) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings, null, 2) + '\n');
+  if (settings) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings(id), null, 2) + '\n');
   ensureLinks(dir);
   const prefs = {};
   try {
@@ -241,6 +241,9 @@ const readJoins = () => { try { return JSON.parse(fs.readFileSync(JOINS, 'utf8')
 const saveJoins = (js) => { fs.writeFileSync(JOINS + '.tmp', JSON.stringify(js, null, 2)); fs.renameSync(JOINS + '.tmp', JOINS); };
 const editJoin = (id, fn) => saveJoins(readJoins().flatMap((j) => (j.id === id ? fn(j) : [j])));
 const joinsShown = () => readJoins().map(({ ticket, ...j }) => j);
+// such an account's base URL: delta.js send, run by the web service, which sends each request to its gateway as what
+// changed since the last (the conversation whole every request, megabytes), whole to a gateway that can't rebuild it
+const viaDelta = (id) => `http://127.0.0.1:${WEB_PORT + 1}/j/${id}`;
 async function askApply(url, what, body) {
   const r = await fetch(`${url}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
   const j = await r.json().catch(() => null);
@@ -261,9 +264,9 @@ function joinAccount(j, key) {
   }
   let mine = {};
   try { mine = JSON.parse(fs.readFileSync(path.join(SHARED, 'settings.json'), 'utf8')); } catch {}
-  const env = { ...mine.env, ANTHROPIC_BASE_URL: j.url, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1' };
+  const env = { ...mine.env, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1' };
   delete env.ANTHROPIC_API_KEY; delete mine.apiKeyHelper; // the gateway's key only
-  const { id, dir } = accountDir({ ...mine, env });
+  const { id, dir } = accountDir((id) => ({ ...mine, env: { ...env, ANTHROPIC_BASE_URL: viaDelta(id) } }));
   // no sign-in to walk through: Claude's first-run screens (its theme, its notes) skipped, the page has no cards for them.
   // A Claude Code just installed, never run, stopped there.
   const cj = path.join(dir, '.claude.json');
@@ -3126,6 +3129,18 @@ async function web() {
       return require(f)({ load, root: ROOT });
     } catch (e) { log('ext_error', { err: e.message }); return null; }
   })();
+  // delta.js send for 申请接入's accounts (viaDelta), a child of this service: a conversation here ends with it anyway.
+  // shortcut: one started from a terminal (claude-multi start, the island) needs this service up too, as setup keeps it
+  const deltaLog = fs.openSync(path.join(ROOT, 'delta.log'), 'a');
+  const delta = () => require('child_process').fork(path.join(ROOT, 'delta.js'), ['send', '--port', String(WEB_PORT + 1), '--profiles', REGISTRY],
+    { stdio: ['ignore', 'ignore', deltaLog, 'ipc'], windowsHide: true }).on('exit', () => setTimeout(delta, 5000));
+  delta();
+  for (const p of load().profiles.filter((x) => x.api?.join)) try { // made before it: their gateway's address straight
+    const f = path.join(p.configDir, 'settings.json'), s = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (s.env?.ANTHROPIC_BASE_URL !== p.api.baseURL) continue;
+    fs.writeFileSync(`${f}.tmp`, JSON.stringify({ ...s, env: { ...s.env, ANTHROPIC_BASE_URL: viaDelta(p.id) } }, null, 2) + '\n'); fs.renameSync(`${f}.tmp`, f);
+    log('profile_via_delta', { profile_id: p.id });
+  } catch (e) { log('profile_via_delta_fail', { profile_id: p.id, err: e.message }); }
   let joining = false; // 申请接入: one round of asking at a time (the minute's, or 设置 opened)
   const joinRound = async () => { // a new account: 额度 read again on the page's next look, not up to a minute later
     if (joining) return;

@@ -845,7 +845,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     #peek.min .pvTab { position: relative; width: 32px; padding: 0; justify-content: center; } #peek.min .pvTab span { display: none; }
     #peek.min .pvTab .x { position: absolute; top: -3px; right: -3px; width: 16px; height: 16px; border-radius: 8px; visibility: hidden; background: var(--pop); box-shadow: 0 1px 3px var(--shadow); }
     #peek.min .pvTab .x svg { width: 10px; height: 10px; } #peek.min .pvTab:hover .x { visibility: visible; } }
-  @media (max-width: 759px) { #peek { position: fixed; inset: 0; z-index: 28; width: auto; border: 0; } #pvSash { display: none !important; } }
+  /* a phone's: the whole screen but the status bar and the home bar, as body leaves them (a fixed box ignores its padding) */
+  @media (max-width: 759px) { #peek { position: fixed; inset: 0; z-index: 28; width: auto; border: 0; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); } #pvSash { display: none !important; } }
   #zoom img { max-width: 100%; max-height: 94vh; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,.5); background: var(--bar); }
   .toast { position: fixed; z-index: 30; right: 12px; bottom: 34px; max-width: min(420px, calc(100vw - 24px)); background: var(--pop); border: 1px solid var(--popB);
     box-shadow: 0 8px 28px var(--shadow); border-radius: 12px; padding: 10px 14px; white-space: pre-wrap; display: none; }
@@ -1391,7 +1392,7 @@ function popMenu(title, list, x, y) {
   if (NARROW.matches) { $('#sheetIn').innerHTML = `<div class="stitle">${esc(title)}</div><div class="mlist">${items}</div>`; $('#sheetIn').onclick = menuPick; return $('#sheet').classList.add('on'); }
   const m = $('#cmenu');
   m.innerHTML = items; m.hidden = false;
-  m.style.left = `${Math.max(8, Math.min(x, innerWidth - m.offsetWidth - 8))}px`; m.style.top = `${Math.min(y, innerHeight - m.offsetHeight - 8)}px`;
+  m.style.left = `${Math.max(8, Math.min(x, innerWidth - m.offsetWidth - 8))}px`; m.style.top = `max(env(safe-area-inset-top), ${Math.min(y, innerHeight - m.offsetHeight - 8)}px)`; // a tall one never under a phone's status bar
 }
 // a conversation's ⋯: 新对话 (beside it, its folder and account), 换账号继续, 结束对话. Not a new one in the 管家's
 // folder (the newest one there is the 管家), nor from one looked at in 管家 mode (no tabs there to put it in)
