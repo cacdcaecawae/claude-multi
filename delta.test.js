@@ -23,7 +23,7 @@ const gw = http.createServer((req, res) => read(req, (body) => {
 }));
 // its receiving end, under /gw: rebuilds, keeps what the gateway took, says so on every answer (lost: a plain pass-on)
 let kept = cache(64 << 20), lost = false; const hosts = [];
-const recv = http.createServer((req, res) => read(req, (b) => {
+const recvAt = (req, res) => req.headers['x-delta-ping'] ? (res.writeHead(204, { 'x-delta-ok': '1' }), res.end()) : read(req, (b) => {
   hosts.push(req.headers.host);
   const r = lost ? { body: b } : rebuild(kept, req.headers, b);
   if (!r) { res.writeHead(409, { 'x-delta-miss': '1', 'x-delta-ok': '1' }); return res.end(); }
@@ -31,7 +31,8 @@ const recv = http.createServer((req, res) => read(req, (b) => {
   relay(u, res, (a) => { if (lost) return; if (r.key && a.statusCode < 300) keep(kept, r.key, r.body, r.d); res.setHeader('x-delta-ok', '1'); });
   u.on('error', () => res.destroy());
   u.end(r.body);
-}));
+});
+const recv = http.createServer(recvAt);
 // a conversation's body as Claude Code lays it out: model, messages (growing), then a big fixed system and tools
 const tail = { system: 'S'.repeat(60000), tools: Array.from({ length: 40 }, (_, i) => ({ name: `t${i}`, d: 'x'.repeat(1000) })), stream: true };
 const convo = (who, turns) => Buffer.from(JSON.stringify({ model: 'm', messages: Array.from({ length: turns }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `${who} turn ${i} ` + `${who}${i}`.repeat(4000) })), ...tail }));
@@ -176,4 +177,32 @@ test('--profiles: a 申请接入 account\'s /j/<id> goes to its gateway; any oth
   for (const c of [c1, c3]) { const x = await post(P.byId, '/j/acct-3/v1/messages', c); assert.equal(x.status, 200); await x.text(); assert.ok(got.at(-1).body.equals(c)); }
   const s = await stats(P.byId);
   assert.deepEqual(s.last.slice(-2).map((x) => x.via), ['whole', 'whole']); assert.equal(s.kept.n, 1); // acct-1's, not acct-3's
+});
+
+test('--plain: while --to\'s receiving end answers no ping, whole by --plain\'s way; back once it does; a failure switches at once', async () => {
+  const dead = await free(), port = await free(), wait = async (f) => { for (let i = 0; i < 60 && !(await f()); i++) await new Promise((r) => setTimeout(r, 100)); };
+  const fb = run('send', '--port', port, '--to', `http://127.0.0.1:${dead}/gw`, '--plain', `http://127.0.0.1:${P.gw}`), s = () => stats(port);
+  try {
+    await up(port); await wait(async () => (await s()).up === false);
+    assert.equal((await s()).up, false);
+    const b = convo('P', 1), r = await post(port, '/v1/messages', b);
+    assert.equal(r.status, 200); await r.text(); assert.ok(got.at(-1).body.equals(b));
+    assert.ok(!Object.keys(got.at(-1).headers).some((k) => k.startsWith('x-delta')), 'the plain way gets no delta header');
+    // its receiving end comes up: pinged within 2 s; whole once (nothing kept from the plain way), then the middle
+    const back = http.createServer(recvAt).listen(dead, '127.0.0.1');
+    await wait(async () => (await s()).up === true);
+    for (const c of [convo('P', 3), convo('P', 5)]) { await (await post(port, '/v1/messages', c)).text(); assert.ok(got.at(-1).body.equals(c)); }
+    assert.deepEqual((await s()).last.slice(-2).map((x) => x.via), ['whole', 'delta']);
+    // gone again: the request that finds it gone gets a 502 and goes nowhere else; the next goes the plain way
+    back.close(); back.closeAllConnections();
+    const p7 = convo('P', 7), x = await post(port, '/v1/messages', p7);
+    assert.equal(x.status, 502); await x.text(); assert.ok(!got.some((g) => g.body.equals(p7)));
+    const p9 = convo('P', 9), y = await post(port, '/v1/messages', p9);
+    assert.equal(y.status, 200); await y.text(); assert.ok(got.at(-1).body.equals(p9));
+  } finally { await stop(fb); }
+});
+
+test('forked, it tells its parent once it listens', async () => {
+  const port = await free(), c = require('child_process').fork(path.join(__dirname, 'delta.js'), ['send', '--port', String(port), '--to', `http://127.0.0.1:${P.recv}/gw`], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+  try { assert.deepEqual(await new Promise((ok) => c.once('message', ok)), { listening: port }); } finally { c.kill(); }
 });

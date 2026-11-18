@@ -1703,7 +1703,7 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
 // shared settings, less their own key), the record dropped and the service told; the same approval again: no second
 // account; the key taken back: 额度 says so; rejected: said so
 (async () => {
-  const { joinApply, checkJoins, readJoins, fetchUsage } = require('./claude-multi'), http = require('http'), path = require('path');
+  const { joinApply, checkJoins, pointJoins, readJoins, fetchUsage } = require('./claude-multi'), http = require('http'), path = require('path');
   const reg = () => JSON.parse(fs.readFileSync(path.join(TEST_HOME, '.claude-multi', 'profiles.json'), 'utf8'));
   fs.mkdirSync(path.join(TEST_HOME, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(TEST_HOME, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: 'x', env: { KEEP: '1', ANTHROPIC_API_KEY: 'mine' }, hooks: { Stop: [] } }));
@@ -1731,8 +1731,11 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   await checkJoins();
   const [p] = mine(), s = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8'));
   assert.deepEqual([p.api.join, p.subscriptionType, readJoins().length], [rec.id, 'API', 0]);
-  // through delta.js send (the web service runs it): only what changed goes to the gateway, kept as p.api.baseURL
-  assert.deepEqual([s.env.ANTHROPIC_BASE_URL, s.env.ANTHROPIC_AUTH_TOKEN, s.env.KEEP, s.env.ANTHROPIC_API_KEY, s.apiKeyHelper, !!s.hooks], [`http://127.0.0.1:7789/j/${p.id}`, 'sk-cm-test', '1', undefined, undefined, true]);
+  assert.deepEqual([s.env.ANTHROPIC_BASE_URL, s.env.ANTHROPIC_AUTH_TOKEN, s.env.KEEP, s.env.ANTHROPIC_API_KEY, s.apiKeyHelper, !!s.hooks], [url, 'sk-cm-test', '1', undefined, undefined, true]);
+  // through delta.js send once it listens (the web service runs it), straight again when it can't start; the rest kept
+  const base = () => JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8')).env;
+  pointJoins(true); assert.deepEqual([base().ANTHROPIC_BASE_URL, base().KEEP], [`http://127.0.0.1:7789/j/${p.id}`, '1']);
+  pointJoins(false); assert.deepEqual([base().ANTHROPIC_BASE_URL, base().ANTHROPIC_AUTH_TOKEN], [url, 'sk-cm-test']);
   assert.ok(!fs.lstatSync(path.join(p.configDir, 'settings.json')).isSymbolicLink(), 'its own, not the shared one');
   assert.equal(JSON.parse(fs.readFileSync(path.join(p.configDir, '.claude.json'), 'utf8')).hasCompletedOnboarding, true); // no first-run screens
   fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'join.json'), JSON.stringify([rec])); // asked again: the same one

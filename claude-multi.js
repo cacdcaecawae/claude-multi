@@ -244,6 +244,16 @@ const joinsShown = () => readJoins().map(({ ticket, ...j }) => j);
 // such an account's base URL: delta.js send, run by the web service, which sends each request to its gateway as what
 // changed since the last (the conversation whole every request, megabytes), whole to a gateway that can't rebuild it
 const viaDelta = (id) => `http://127.0.0.1:${WEB_PORT + 1}/j/${id}`;
+// such accounts' base URL: through delta.js send (via: it said it listens), else straight to their gateway (it won't
+// start: its port taken), so none points at a send that isn't there
+function pointJoins(via) {
+  for (const p of load().profiles.filter((x) => x.api?.join)) try {
+    const f = path.join(p.configDir, 'settings.json'), s = JSON.parse(fs.readFileSync(f, 'utf8')), to = via ? viaDelta(p.id) : p.api.baseURL;
+    if (s.env?.ANTHROPIC_BASE_URL === to) continue;
+    fs.writeFileSync(`${f}.tmp`, JSON.stringify({ ...s, env: { ...s.env, ANTHROPIC_BASE_URL: to } }, null, 2) + '\n'); fs.renameSync(`${f}.tmp`, f);
+    log('profile_base', { profile_id: p.id, via });
+  } catch (e) { log('profile_base_fail', { profile_id: p.id, err: e.message }); }
+}
 async function askApply(url, what, body) {
   const r = await fetch(`${url}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
   const j = await r.json().catch(() => null);
@@ -266,7 +276,7 @@ function joinAccount(j, key) {
   try { mine = JSON.parse(fs.readFileSync(path.join(SHARED, 'settings.json'), 'utf8')); } catch {}
   const env = { ...mine.env, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1' };
   delete env.ANTHROPIC_API_KEY; delete mine.apiKeyHelper; // the gateway's key only
-  const { id, dir } = accountDir((id) => ({ ...mine, env: { ...env, ANTHROPIC_BASE_URL: viaDelta(id) } }));
+  const { id, dir } = accountDir(() => ({ ...mine, env: { ...env, ANTHROPIC_BASE_URL: j.url } })); // pointJoins moves it to delta.js
   // no sign-in to walk through: Claude's first-run screens (its theme, its notes) skipped, the page has no cards for them.
   // A Claude Code just installed, never run, stopped there.
   const cj = path.join(dir, '.claude.json');
@@ -3131,21 +3141,23 @@ async function web() {
   })();
   // delta.js send for 申请接入's accounts (viaDelta), a child of this service: a conversation here ends with it anyway.
   // shortcut: one started from a terminal (claude-multi start, the island) needs this service up too, as setup keeps it
+  // Accounts go through it once it says it listens (pointJoins); one that ends before it did (its port taken) points
+  // them straight back. One that ends after: started again in 5 s, its accounts left on it
   const deltaLog = fs.openSync(path.join(ROOT, 'delta.log'), 'a');
-  const delta = () => require('child_process').fork(path.join(ROOT, 'delta.js'), ['send', '--port', String(WEB_PORT + 1), '--profiles', REGISTRY],
-    { stdio: ['ignore', 'ignore', deltaLog, 'ipc'], windowsHide: true }).on('exit', () => setTimeout(delta, 5000));
+  let deltaUp = false;
+  const delta = () => {
+    let ready = false;
+    require('child_process').fork(path.join(ROOT, 'delta.js'), ['send', '--port', String(WEB_PORT + 1), '--profiles', REGISTRY],
+      { stdio: ['ignore', 'ignore', deltaLog, 'ipc'], windowsHide: true })
+      .on('message', (m) => { if (m?.listening) { ready = deltaUp = true; pointJoins(true); } })
+      .on('exit', () => { deltaUp = false; if (!ready) pointJoins(false); setTimeout(delta, 5000); });
+  };
   delta();
-  for (const p of load().profiles.filter((x) => x.api?.join)) try { // made before it: their gateway's address straight
-    const f = path.join(p.configDir, 'settings.json'), s = JSON.parse(fs.readFileSync(f, 'utf8'));
-    if (s.env?.ANTHROPIC_BASE_URL !== p.api.baseURL) continue;
-    fs.writeFileSync(`${f}.tmp`, JSON.stringify({ ...s, env: { ...s.env, ANTHROPIC_BASE_URL: viaDelta(p.id) } }, null, 2) + '\n'); fs.renameSync(`${f}.tmp`, f);
-    log('profile_via_delta', { profile_id: p.id });
-  } catch (e) { log('profile_via_delta_fail', { profile_id: p.id, err: e.message }); }
   let joining = false; // 申请接入: one round of asking at a time (the minute's, or 设置 opened)
   const joinRound = async () => { // a new account: 额度 read again on the page's next look, not up to a minute later
     if (joining) return;
     joining = true;
-    try { if (await checkJoins()) usageAt = 0; } finally { joining = false; }
+    try { if (await checkJoins()) { usageAt = 0; pointJoins(deltaUp); } } finally { joining = false; }
   };
   setInterval(() => { if (readJoins().some((j) => j.state === 'pending')) joinRound().catch(() => {}); }, 60000);
   const http = require('http'), pty = require('@lydell/node-pty');
@@ -4542,7 +4554,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION) cp.spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { sameStart, withHooks, usageState,joinApply, checkJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
