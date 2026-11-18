@@ -170,6 +170,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 | `island` | 打开灵动岛（已经开着就不会再开一个） |
 | `chats [arrange\|tokens]` | 打开灵动岛的对话窗口、窗口整理面板或用量页 |
 | `web` | 启动网页服务 |
+| `web restart` | 重启网页服务（更新代码后、或者它卡住时）。要在终端里运行，不能在 Claude 对话里运行：那个对话本身就跑在网页服务里，会跟着一起停掉。正在回复的对话会被打断，服务起来后以空闲状态接回来。Mac 上由 launchd 重启 |
 | `web-link [new]` | 打印网页链接。加 `new` 会换一把新钥匙，以前登录过的浏览器都要重新登录（已经打开着的终端画面也会在 15 秒内断开） |
 | `wt-bind` | 给 Windows Terminal 加上灵动岛整理窗口要用的快捷键 |
 | `notify done\|ask`、`notes`、`statusline` | 给钩子、灵动岛和状态栏内部调用的，不用手动运行 |
@@ -382,4 +383,4 @@ powershell -NoProfile -STA -File island.test.ps1
 
 浏览器测试使用 Chrome 或 Edge 的独立临时配置及模拟接口，也可用 `BROWSER_EXE` 指定 Chromium 可执行文件。WPF 测试只加载窗口布局和尺寸约束，在不可见窗口里模拟小工作区，不启动灵动岛的后台逻辑。两者都不连接正在使用的网页服务。
 
-改了 `claude-multi.js` 之后要重启网页服务才会生效。重启会关掉在网页服务里运行的对话，对话记录不会丢，之后可以接着聊。
+改了 `claude-multi.js` 之后要重启网页服务才会生效：在终端里运行 `claude-multi web restart`。重启会关掉在网页服务里运行的对话，对话记录不会丢，之后可以接着聊。
