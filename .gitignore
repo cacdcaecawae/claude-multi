@@ -11,6 +11,8 @@
 !console-bridge.ps1
 !web.html
 !screen.js
+!delta.js
+!delta.test.js
 !package.json
 !package-lock.json
 !install.sh
