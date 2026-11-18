@@ -3679,6 +3679,9 @@ async function web() {
   const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
   const api = {
     ...ext?.api,
+    // claude-multi web restart: this service ends, as any stop ends it (a conversation answering is cut; wakeUp takes it up
+    // on the next start), with its exit handlers run: the tunnel's ssh goes too. The command starts the next one
+    'POST /api/quit': () => { log('web_quit', {}); setTimeout(() => process.exit(0), 200); return { ok: true }; },
     // 代理额度: read when its view is shown (a minute's cache); one account, or all, asked again by hand (30 s apart)
     'GET /api/local-quota': () => quota.get(),
     'POST /api/local-quota/refresh': (q, b) => quota.refresh(b?.id),
@@ -4261,7 +4264,7 @@ async function web() {
     // the first: a tunnel left by a service killed hard (its 'exit' never ran, nor tun.kill()) ended, or it stays up
     // for good, with a session on the server. Only this service gets here: a second one quits on the port in use.
     if (!tun) spawnSync('powershell.exe', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" | `
-      + `? { $_.CommandLine -like '*-R ${TUNNEL.sock}:*' } | % { Stop-Process -Id $_.ProcessId -Force }`], { windowsHide: true });
+      + `? { $_.CommandLine -like '*-R ${TUNNEL.sock}:*' } | % { Stop-Process -Id $_.ProcessId -Force }`], { windowsHide: true, timeout: 4000 });
     const at = Date.now();
     // a session (-tt, a command that never ends) and not -N: only a session makes both ends send small packets at once
     // (TCP_NODELAY); with -N each new connection through took ~150 ms, not ~50. The tty: the command dies with the link.
@@ -4511,6 +4514,47 @@ function withHooks(s, script) {
   const theirs = !!s.statusLine && !String(s.statusLine.command ?? '').includes('claude-multi.js');
   return { s: { ...s, hooks, ...(!theirs && { statusLine: { type: 'command', command: cmd('statusline') } }) }, theirs };
 }
+// The web service started on its own, as island.ps1 starts it on Windows (a hidden console of its own for what it runs)
+const webStart = () => WIN
+  ? spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Start-Process $env:CM_NODE -ArgumentList (\'"\' + $env:CM_JS + \'" web\') -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE'],
+    { env: { ...process.env, CM_NODE: process.execPath, CM_JS: __filename }, windowsHide: true })
+  : require('child_process').spawn(process.execPath, [__filename, 'web'], { cwd: HOME, detached: true, stdio: 'ignore' }).unref();
+const webUp = async () => { try { await fetch(`http://127.0.0.1:${WEB_PORT}/`, { signal: AbortSignal.timeout(1500) }); return true; } catch { return false; } };
+// the pid listening on the web port: netstat's or lsof's (not Get-NetTCPConnection or tasklist, which hang with WMI)
+function webPid(text = WIN ? spawnSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true }).stdout
+  : spawnSync('lsof', ['-nP', `-iTCP@127.0.0.1:${WEB_PORT}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' }).stdout) {
+  const m = (WIN ? new RegExp(`127\\.0\\.0\\.1:${WEB_PORT}\\s+\\S+\\s+LISTENING\\s+(\\d+)`) : /^(\d+)\s*$/m).exec(text ?? '');
+  return m ? Number(m[1]) : null;
+}
+// web restart: the web service ended and started again (new code, or it's stuck), as setup starts it; a Mac's launch
+// agent restarted by launchd. Only this service is ended: the one answering as it does (its key page), asked to quit
+// (/api/quit), else, one from before that route, its pid ended. A conversation answering is cut, and taken up again,
+// idle, once the new one is up (wakeUp). Not from a Claude conversation: the service runs those, and this would end
+// with it before the new one starts.
+async function restartWeb() {
+  // its exit code set, not process.exit(): that right after a fetch trips a libuv assertion on Windows (exit 127)
+  const said = (m, code) => { console.log(m); if (code != null) process.exitCode = code; }, base = `http://127.0.0.1:${WEB_PORT}`, dom = `gui/${process.getuid?.()}`;
+  if (process.env.CLAUDECODE) return said('这是在 Claude 对话里运行的：网页服务停的时候会连它一起停掉，新的就起不来了。在终端里运行 claude-multi web restart', 1);
+  if (process.platform === 'darwin' && spawnSync('launchctl', ['print', `${dom}/${LOGIN_LABEL}`]).status === 0) {
+    said('正在重启网页服务：正在回复的对话会被打断，服务起来后接回来');
+    spawnSync('launchctl', ['kickstart', '-k', `${dom}/${LOGIN_LABEL}`]);
+  } else {
+    const page = await fetch(`${base}/`, { signal: AbortSignal.timeout(5000) }).then((r) => r.text(), () => null);
+    if (page === null && webPid()) return said(`${WEB_PORT} 端口上有程序在听，但不回话（pid ${webPid()}）。是卡住的网页服务的话，先结束这个进程再运行一次`, 1);
+    if (page !== null) {
+      if (!page.includes('claude-multi web-link')) return said(`${WEB_PORT} 端口被别的程序占着，不是 claude-multi 的网页服务，没动它`, 1);
+      said('正在重启网页服务：正在回复的对话会被打断，服务起来后接回来');
+      const quit = await fetch(`${base}/api/quit`, { method: 'POST', headers: { cookie: `cm=${webKey()}`, 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(5000) }).then((r) => r.ok, () => false);
+      if (!quit) { const pid = webPid(); if (pid) try { process.kill(pid); } catch {} } // one from before web restart: no /api/quit
+      for (let i = 0; i < 30 && (await webUp()); i++) await sleep(500);
+      if (await webUp()) return said(`旧的网页服务 15 秒还没退出（pid ${webPid()}）`, 1);
+    }
+    webStart();
+  }
+  for (let i = 0; i < 60 && !(await webUp()); i++) await sleep(500);
+  if (await webUp()) said('网页服务重启好了，刷新网页就行', 0);
+  else said(`30 秒了网页服务还没起来${process.platform === 'darwin' ? `，看 ${path.join(ROOT, 'web.log')}` : `，在终端里运行 node "${__filename}" web 看报错`}`, 1);
+}
 async function setup() {
   // only the copy in ~/.claude-multi: your settings never point at another checkout
   if (path.relative(fs.realpathSync(ROOT), __filename) !== 'claude-multi.js') { console.log(`setup 只用 ${ROOT} 里的代码运行`); process.exit(1); }
@@ -4525,13 +4569,7 @@ async function setup() {
     console.log(`通知和状态栏加进了 ${f}`);
   }
   if (w.theirs) console.log('状态栏还是你自己的那个，网页底部就看不到模型和上下文用量');
-  const cp = require('child_process'), up = async () => { try { await fetch(`http://127.0.0.1:${WEB_PORT}/`, { signal: AbortSignal.timeout(1500) }); return true; } catch { return false; } };
-  const was = await up();
-  // started on its own, as island.ps1 starts it on Windows (a hidden console of its own for what it runs)
-  const start = () => WIN
-    ? spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Start-Process $env:CM_NODE -ArgumentList (\'"\' + $env:CM_JS + \'" web\') -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE'],
-      { env: { ...process.env, CM_NODE: process.execPath, CM_JS: __filename }, windowsHide: true })
-    : cp.spawn(process.execPath, [__filename, 'web'], { cwd: HOME, detached: true, stdio: 'ignore' }).unref();
+  const up = webUp, start = webStart, was = await up();
   if (process.platform === 'darwin') {
     // a launch agent: started at login and now, again if it crashes. HOME, PATH and LANG as here: launchd's PATH has no claude
     const plist = path.join(HOME, 'Library', 'LaunchAgents', `${LOGIN_LABEL}.plist`), dom = `gui/${process.getuid()}`, log = path.join(ROOT, 'web.log');
@@ -4567,7 +4605,7 @@ async function setup() {
     // the claude-multi command: beside npm's own, when that folder is on the PATH
     const bin = path.join(process.env.APPDATA ?? '', 'npm'), shim = path.join(bin, 'claude-multi.cmd');
     if ((process.env.PATH ?? '').toLowerCase().split(';').includes(bin.toLowerCase()) && !fs.existsSync(shim)) fs.writeFileSync(shim, `@node "${__filename}" %*\r\n`);
-    if (was) console.log('网页服务已经开着，重启它才用上新代码');
+    if (was) await restartWeb(); // an update (the install line again): the running one on the new code, as a Mac's is
     else { start(); island(); }
   } else if (!was) start();
   for (let i = 0; i < 40 && !(await up()); i++) await sleep(500);
@@ -4575,10 +4613,10 @@ async function setup() {
   const link = `http://127.0.0.1:${WEB_PORT}/?key=${webKey()}`;
   console.log(`装好了。网页：${link}`);
   // over ssh nobody sits at this screen: the link only
-  if (!process.env.SSH_CONNECTION) cp.spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+  if (!process.env.SSH_CONNECTION) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -4602,7 +4640,7 @@ if (require.main === module) {
   else if (cmd === 'report' || cmd === 'ask') reportTo(cmd, process.argv.slice(3));
   else if (cmd === 'delete') del(process.argv[3]);
   else if (cmd === 'remove') remove(process.argv[3]);
-  else if (cmd === 'web') web();
+  else if (cmd === 'web') process.argv[3] === 'restart' ? restartWeb() : web();
   else if (cmd === 'setup') setup();
   else if (cmd === 'web-link') console.log(`${WEB_URL}/?key=${webKey(process.argv[3] === 'new')}`); // new: the old key's browsers are out
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));

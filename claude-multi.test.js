@@ -1760,6 +1760,20 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   srv.close();
   console.log('申请接入 ok');
 })();
+// web restart: the web port's pid read off netstat (no WMI), not another port's or a connection's; run in a Claude
+// conversation, refused before anything is stopped
+{
+  const { webPid } = require('./claude-multi'), { spawnSync } = require('child_process');
+  if (process.platform === 'win32') {
+    const ns = ['  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1180', '  TCP    127.0.0.1:77880        0.0.0.0:0              LISTENING       999',
+      '  TCP    127.0.0.1:7788         127.0.0.1:61000        ESTABLISHED     42', '  TCP    127.0.0.1:7788         0.0.0.0:0              LISTENING       56852'];
+    assert.equal(webPid(ns.join('\r\n')), 56852);
+    assert.equal(webPid(ns.slice(0, 3).join('\r\n')), null);
+  } else assert.equal(webPid('56852\n'), 56852);
+  const r = spawnSync(process.execPath, [require.resolve('./claude-multi'), 'web', 'restart'], { env: { ...process.env, CLAUDECODE: '1' }, encoding: 'utf8' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /在终端里运行/);
+  console.log('web restart ok');
+}
 // API accounts only (a Mac's, 申请接入's): the first one not refused is recommended, nothing to read; a subscription beside
 // one: as before (its quota unread is said so, the API one not taken in its place)
 (async () => {
