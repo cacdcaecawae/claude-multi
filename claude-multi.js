@@ -4605,7 +4605,7 @@ async function setup() {
     // the claude-multi command: beside npm's own, when that folder is on the PATH
     const bin = path.join(process.env.APPDATA ?? '', 'npm'), shim = path.join(bin, 'claude-multi.cmd');
     if ((process.env.PATH ?? '').toLowerCase().split(';').includes(bin.toLowerCase()) && !fs.existsSync(shim)) fs.writeFileSync(shim, `@node "${__filename}" %*\r\n`);
-    if (was) console.log('网页服务已经开着：运行 claude-multi web restart 用上新代码');
+    if (was) await restartWeb(); // an update (the install line again): the running one on the new code, as a Mac's is
     else { start(); island(); }
   } else if (!was) start();
   for (let i = 0; i < 40 && !(await up()); i++) await sleep(500);

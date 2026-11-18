@@ -72,7 +72,7 @@
 - 可选：Windows Terminal（灵动岛的「整理窗口」功能要用）
 - 可选：[Codex](https://github.com/openai/codex)（`npm i -g @openai/codex`），用 GPT 时要装
 
-**一行装好。**在 PowerShell 里运行（再运行一次就是更新）：
+**一行装好。**在 PowerShell 里运行（再运行一次就是更新，网页服务会自己重启到新版本）：
 
 ```powershell
 irm https://raw.githubusercontent.com/cacdcaecawae/claude-multi/master/install.ps1 | iex
@@ -118,7 +118,7 @@ npm install
 
 Mac 上只能用网页，账号只能是「设置 → 接入」申请来的 API 账号。灵动岛、终端窗口、Claude 订阅账号的额度和 GPT 都没有。
 
-需要 git（没有的话运行 `xcode-select --install`）和 [Node.js](https://nodejs.org/) 20 或更新版本。在终端里运行（再运行一次就是更新）：
+需要 git（没有的话运行 `xcode-select --install`）和 [Node.js](https://nodejs.org/) 20 或更新版本。在终端里运行（再运行一次就是更新，网页服务会自己重启到新版本）：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cacdcaecawae/claude-multi/master/install.sh | bash
