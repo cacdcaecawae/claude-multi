@@ -1703,17 +1703,18 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
 // shared settings, less their own key), the record dropped and the service told; the same approval again: no second
 // account; the key taken back: 额度 says so; rejected: said so
 (async () => {
-  const { joinApply, checkJoins, pointJoins, readJoins, fetchUsage } = require('./claude-multi'), http = require('http'), path = require('path');
+  const { joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource } = require('./claude-multi'), http = require('http'), path = require('path');
   const reg = () => JSON.parse(fs.readFileSync(path.join(TEST_HOME, '.claude-multi', 'profiles.json'), 'utf8'));
   fs.mkdirSync(path.join(TEST_HOME, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(TEST_HOME, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: 'x', env: { KEEP: '1', ANTHROPIC_API_KEY: 'mine' }, hooks: { Stop: [] } }));
-  let st = 'pending', models = 200, done = 0;
+  let st = 'pending', models = 200, done = 0, quotas = 200;
   const srv = http.createServer((req, res) => {
     let s = '';
     req.on('data', (d) => (s += d)).on('end', () => {
       const send = (code, j) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
       const b = s ? JSON.parse(s) : {};
       if (req.url === '/m/v1/models') return send(req.headers.authorization === 'Bearer sk-cm-test' ? models : 401, {});
+      if (req.url === '/m/_quota') return send(req.headers.authorization === 'Bearer sk-cm-test' ? quotas : 401, [{ provider: 'claude', name: 'Claude Code', plan: 'pro', user: 's***@example.com', windows: [{ name: '5 hours', used: 14 }] }]);
       if (req.url === '/m/apply') return send(200, { ticket: 'T-' + b.name });
       if (b.ticket !== 'T-me' && b.ticket !== 'T-no') return send(404, { err: '没有这个申请' });
       if (req.url === '/m/apply/done') { done++; return send(200, { ok: true }); }
@@ -1743,6 +1744,9 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual([mine().length, readJoins().length], [1, 0]);
   await new Promise((r) => setTimeout(r, 200)); assert.equal(done, 2); // told the service each time
   assert.deepEqual(await fetchUsage(p), { api: true });
+  // 代理额度 from the gateway joined, with the account's key; one that won't tell (403: Magpie's key not let see) adds nothing
+  assert.deepEqual((await quotaSource().read()).quotas.map((q) => [q.name, q.plan, q.user]), [['Claude Code', 'pro', 's***@example.com']]);
+  quotas = 403; assert.deepEqual((await quotaSource().read()).quotas, []); quotas = 200;
   models = 401;
   assert.match((await fetchUsage(p)).err, /接入已失效/);
   await joinApply({ url, name: 'no' }); // a new one at the same address replaces the last

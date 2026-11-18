@@ -36,6 +36,7 @@
 | 手机 | 同一个网页，手机上是单栏布局，可以添加到主屏幕当 App 用。 |
 | 远程 | 通过你自己的服务器（SSH 反向隧道 + nginx HTTPS）在外面访问，用钥匙登录。 |
 | 用量统计 | 所有账号的 token 用量，按天、按账号统计，并按 API 价格折算成金额。 |
+| 代理额度 | 左边的喜鹊图标：经代理或网关用的那些订阅账号，各窗口用了多少、多久后重置（邮箱打码）。申请接入的账号自动读对方网关给的；自己的代理，在 `profiles.json` 的 `localQuota.source` 里写一个读取脚本的绝对路径（见下面「文件说明」）。两样都没有就不显示。 |
 | GPT | 用 ChatGPT 订阅登录 OpenAI 的 [Codex](https://github.com/openai/codex)，在网页上和 Claude 的对话放在一起用（账号 G1、G2…）。 |
 | GPT 聊天 | 用你的 OpenAI API key，在网页上直接和 GPT-6 Astra 聊天（不碰电脑上的文件），可以选 Pro 模式（ChatGPT 的 GPT-6 Pro）和思考强度，能联网、看图片和文件。 |
 
@@ -264,6 +265,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 - 每次打开「设置」都会查一次结果。网页服务开着时，每分钟也会自动查一次。
 - 申请记录在 `%USERPROFILE%\.claude-multi\join.json`，里面有一张回执，凭它取 key，别外传。key 只写进新账号自己的 `settings.json`。
 - 对方收回 key 后，「额度」里这个账号会显示「接入已失效」，要再用就得重新申请。
+- 批准后左边多一个喜鹊图标「代理额度」：对方网关后面、你的 key 能用的那些订阅账号的额度。它读 `<接入地址>/_quota`（带这个账号的 key），对方的网关没有这一项，或者没让你的 key 看，就是空的。
 - **只传变了的部分**：Claude Code 每次请求都把整段对话重发一遍，动辄几 MB，一轮却只新增几 KB。所以这种账号的地址是本机的 `http://127.0.0.1:7789/j/<账号 id>`，由网页服务带起的 `delta.js send` 转发：每个对话记住上一次的请求，下一次只发中间新加的那段，再附上完整请求的 sha256。对方的网关要有能拼回请求的接收端（它的回答带 `x-delta-ok`），没有的话就照原样整段发，和直连一样。这个账号靠网页服务转发，所以网页服务要开着（`setup` 已经设成开机启动）。网页服务启动时，等 `delta.js` 说它在听了才把这些账号改到 7789；它起不来（比如端口被占），账号就改回直连对方的地址。
 
 ## 远程访问（手机、别的电脑）
@@ -349,10 +351,12 @@ server {
 | `web.html` | 网页，单个文件，每次刷新直接读取，改完不用重启服务 |
 | `screen.js` | 从 Claude 的终端画面认出「正在回复」和选择题，网页和管家的命令共用 |
 | `delta.js` | 申请接入的账号经它发请求，只传变了的部分（见上面「申请接入」）；网关那头的接收端用它导出的 `rebuild`、`keep` 拼回请求。`delta.log` 是它的报错，不进 git |
+| `quota-panel.js` | 代理额度的服务端：一分钟缓存、手动刷新 30 秒一次，只把额度字段交给网页（邮箱打码，凭据和原始报错不出去）。数据来源二选一：`profiles.json` 的 `localQuota.source`（你自己的脚本，导出 `read()` 和 `refresh(target)`，各返回 `{ quotas: [...] }`），否则是申请接入的网关的 `/_quota` |
+| `THIRD_PARTY_NOTICES.txt` | 代理额度图标（Magpie 的小喜鹊，MIT 许可）的出处和许可 |
 | `butler\` | 管家的工作文件夹：`CLAUDE.md` 是它的规矩，模型设成 Sonnet |
 | `tickets.json` | 管家的工单（用户的原话、交给了哪个对话、它的汇报和每轮结束的时间），只由网页服务写，不进 git |
 | `join.json` | 申请接入还没办完的申请（地址、状态、回执），不进 git |
-| `profiles.json` 的 `ext` | 选填，一个 CommonJS 文件的绝对路径，用来接私有扩展。网页服务启动时加载它：它的 `api` 路由和网页的放在一起，同样要网页钥匙；它的 `page()` 作为 `/ext.js`，在网页脚本之前运行，可以往 `self.cmExt` 里加侧栏视图 `{ id, title, icon, draw }`。加载失败只记一条日志，服务照常运行 |
+| `profiles.json` 的 `ext` | 选填，一个 CommonJS 文件的绝对路径，用来接私有扩展。网页服务启动时加载它：它的 `api` 路由和网页的放在一起，同样要网页钥匙；它的 `page()` 作为 `/ext.js`，在网页脚本之前运行，可以往 `self.cmExt` 里加侧栏视图 `{ id, title, icon, draw }`（再给 `shown()` 的话，只在它说 true 时显示）。加载失败只记一条日志，服务照常运行 |
 | `claude-multi.test.js` | 测试 |
 | `web.test.js` | 隔离浏览器中的网页交互、键盘和手机布局测试 |
 | `island.test.ps1` | 隔离 WPF 窗口中的小工作区、多账号与通知滚动测试 |
@@ -361,10 +365,11 @@ server {
 
 ```bat
 node claude-multi.test.js
-node --test delta.test.js
+node --test delta.test.js quota-panel.test.js
+node quota-panel.browser.test.js
 ```
 
-每一项通过会打印一行 `… ok`（`delta.test.js` 是 Node 自带的测试格式，只连 127.0.0.1）。测试在临时目录里另建一个用户目录运行，不读也不改你真正的 `.claude-multi`（账号列表、正在用的对话都不受影响）。
+每一项通过会打印一行 `… ok`（`delta.test.js`、`quota-panel.test.js` 是 Node 自带的测试格式，只连 127.0.0.1；`quota-panel.browser.test.js` 用无头 Chrome 或 Edge 打开 `web.html`，接的是假的服务，设 `QUOTA_SCREENSHOTS=<文件夹>` 会留截图）。测试在临时目录里另建一个用户目录运行，不读也不改你真正的 `.claude-multi`（账号列表、正在用的对话都不受影响）。
 
 主测试还覆盖并发新建的 PID 绑定、快捷交代拒发保留、电脑终端清空记录、跨会话草稿与附件隔离，以及异步管道写入失败。新终端没有返回 PID 时会明确报错，避免工单绑定到附近启动的另一个对话。
 

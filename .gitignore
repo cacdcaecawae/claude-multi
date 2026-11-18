@@ -13,6 +13,10 @@
 !screen.js
 !delta.js
 !delta.test.js
+!quota-panel.js
+!quota-panel.test.js
+!quota-panel.browser.test.js
+!THIRD_PARTY_NOTICES.txt
 !package.json
 !package-lock.json
 !install.sh
