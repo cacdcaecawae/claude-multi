@@ -1867,3 +1867,40 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual(['/Users/me/a.md', 'C:/a.md'].map((c) => pk(true)(c)), [false, true]);
   console.log('a Mac\'s start check and paths ok');
 }
+// 有新版本 and claude-multi update, against a bare repo standing in for GitHub (setup isn't reached: no case here pulls a
+// change that keeps its packages). Its git and npm calls block this process, so it runs once every other test is done:
+// run beside them, they threw a timing test off
+let updRan = false;
+process.on('exit', () => { if (!updRan) { console.error('update test never ran'); process.exitCode = 1; } });
+process.once('beforeExit', () => {
+  const { updateCheck, upgrade } = require('./claude-multi'), { execFileSync } = require('child_process'), path = require('path'), fs = require('fs');
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' };
+  const g = (dir, ...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', env, stdio: 'pipe' }).trim();
+  const at = (n) => path.join(TEST_HOME, 'up', n), up = at('gh.git'), dev = at('dev'), mine = at('mine'), fork = at('fork');
+  const put = (file, text, msg) => { fs.writeFileSync(path.join(dev, file), text); g(dev, 'add', '.'); g(dev, 'commit', '-qm', msg); g(dev, 'push', '-q', 'origin', 'HEAD:master'); };
+  const said = (dir) => { const log = console.log, code = process.exitCode, out = []; console.log = (m) => out.push(m);
+    try { upgrade(dir); } finally { console.log = log; } const r = { out: out.join('\n'), code: process.exitCode }; process.exitCode = code; return r; };
+  fs.mkdirSync(at(''), { recursive: true });
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'master', up], { stdio: 'pipe' });
+  execFileSync('git', ['clone', '-q', up, dev], { stdio: 'pipe' }); put('a.txt', '1', 'one');
+  execFileSync('git', ['clone', '-q', up, mine], { stdio: 'pipe' });
+  updateCheck(mine).then(async (none) => {
+    assert.equal(none, null); // up to date
+    put('a.txt', '2', 'two');
+    assert.deepEqual(await updateCheck(mine), { n: 1, to: g(dev, 'rev-parse', '--short', 'HEAD') });
+    assert.equal(await updateCheck(at('nothing')), null); // no git there
+    // a commit of its own: not pulled over, said
+    execFileSync('git', ['clone', '-q', up, fork], { stdio: 'pipe' });
+    fs.writeFileSync(path.join(fork, 'b.txt'), 'mine'); g(fork, 'add', '.'); g(fork, 'commit', '-qm', 'local');
+    put('a.txt', '3', 'three');
+    const forked = g(fork, 'rev-parse', 'HEAD'), f = said(fork);
+    assert.match(f.out, /没拉下来/); assert.equal(f.code, 1); assert.equal(g(fork, 'rev-parse', 'HEAD'), forked);
+    // packages changed and npm failing: the code back to where it was, never new code on old packages
+    put('package.json', '{ not json', 'four');
+    const was = g(mine, 'rev-parse', 'HEAD'), m = said(mine);
+    assert.match(m.out, /拉下来 3 个更新/); assert.match(m.out, /依赖没装上/); assert.equal(m.code, 1); assert.equal(g(mine, 'rev-parse', 'HEAD'), was);
+    assert.equal(said(dev).out, '已经是最新的');
+    console.log('update ok');
+    updRan = true;
+  }).catch((e) => { console.error(e); process.exitCode = 1; updRan = true; });
+});

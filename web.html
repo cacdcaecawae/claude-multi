@@ -661,6 +661,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   #here .where.pty { background: #8250df; }
   #here .ok { color: var(--green); } #here .warn { color: var(--orange); } #here .bad { color: var(--red); }
   #sAcct:hover { background: var(--tint); }
+  #sUpd { color: #fff; background: var(--accent); font-weight: 600; } #sUpd[hidden] { display: none; } /* 有新版本 */
 
   /* a computer: as the Codex app, the activity bar on the window frame itself (a faint blue, as Codex), the side bar and each group of tabs a
      card with a thin border and round corners on it (the side bar a shade off white); the gaps between them are the sashes */
@@ -908,7 +909,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   <div id="deskBg"></div>
 </div>
 <footer id="status"><span class="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span id="host">…</span></span>
-  <span id="conn"></span><span class="grow"></span><span id="here"></span><button id="sAcct" title="看额度"></button></footer>
+  <span id="conn"></span><span class="grow"></span><span id="here"></span><button id="sUpd" hidden>有更新</button><button id="sAcct" title="看额度"></button></footer>
 <div class="sheet" id="sheet"><div class="in" id="sheetIn" role="dialog" aria-modal="true" aria-label="对话框" tabindex="-1"></div></div>
 <div class="toast" id="toast"></div>
 <div id="zoom" hidden tabindex="-1" role="dialog" aria-modal="true" aria-label="图片（点一下或按 Esc 关闭）"><img alt=""></div>
@@ -1321,9 +1322,28 @@ async function load(fresh) {
   bConv?.sync(); peek?.sync();
   if (!drag) { drawSide(); groups.forEach(drawTabs); } // not under a row or tab being dragged
   drawButler(); drawAsks(); drawDesk(); drawStatus(); drawHere(); drawMe();
-  if (document.visibilityState === 'visible') newNotes(); // its toast when you're back, not into a hidden page
+  if (document.visibilityState === 'visible') { newNotes(); drawUpdate(); } // its toast when you're back, not into a hidden page
   return ''; // read: no error
 }
+// 有新版本 (state.update: commits on GitHub this copy hasn't): said once a version as it comes, and 有更新 in the status bar
+// (not on a phone). 更新 pulls them and restarts the web service: this page, which asked, reloaded once it runs the new code
+let updSaid = null, updFrom = null;
+function drawUpdate() {
+  const u = state.update;
+  if (updFrom && state.head !== updFrom) return location.reload();
+  $('#sUpd').hidden = !u?.n; $('#sUpd').textContent = u?.busy ? '正在更新…' : `有更新`; $('#sUpd').title = u?.n ? `GitHub 上有 ${u.n} 个更新` : '';
+  if (updFrom && !u?.busy && (u?.err || !u?.n)) { toast(u?.err ? `更新没成功：${u.err}` : '已经是最新的', 8000); updFrom = null; }
+  if (!u?.n || u.busy || updFrom || updSaid === u.to) return;
+  updSaid = u.to;
+  toast('claude-multi 有新版本，点这里更新', 15000); $('#toast').onclick = upgrade;
+}
+async function upgrade() {
+  if (state.update?.busy || updFrom) return toast('正在更新…');
+  if (!confirm('更新 claude-multi？\n从 GitHub 拉最新代码，再重启网页服务：正在回复的对话会被打断，服务起来后接回来。')) return;
+  try { await post('/api/update', {}); updFrom = state.head; toast('正在更新，好了网页会自己刷新', 180000); }
+  catch (e) { toast('更新没开始：' + e.message, 4000); }
+}
+$('#sUpd').onclick = upgrade;
 // A note for you, not looked at: one you set going that answers, or asks you something (the 管家's turns there don't: it
 // tells you itself); the 管家's own answer to what you asked it (not to a [系统通知]), or its question: its newest
 // conversation's only (an older one's is never opened again, its dot would stay for good)

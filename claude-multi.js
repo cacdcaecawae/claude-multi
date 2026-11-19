@@ -3249,6 +3249,12 @@ async function web() {
     try { if (await checkJoins()) { usageAt = 0; pointJoins(deltaUp); } } finally { joining = false; }
   };
   setInterval(() => { if (readJoins().some((j) => j.state === 'pending')) joinRound().catch(() => {}); }, 60000);
+  // 有新版本 (updateCheck): asked a minute after the start, then every hour. head: the code this service runs, for a page
+  // that asked to update to see it's on the new one. updBusy, updErr: the page's 更新 running, how it ended if not restarted
+  let upd = null, updBusy = false, updErr = null;
+  const head = spawnSync('git', ['-C', __dirname, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', windowsHide: true }).stdout?.trim() || null;
+  const checkUpd = () => updateCheck().then((u) => { upd = u; }, () => {});
+  setTimeout(checkUpd, 60000); setInterval(checkUpd, 3600000);
   const http = require('http'), pty = require('@lydell/node-pty');
   const claudeExe = whereIs('claude') || CLAUDE;
   const codex = codexCmd(); // GPT conversations: none started without it
@@ -3750,6 +3756,22 @@ async function web() {
     // claude-multi web restart: this service ends, as any stop ends it (a conversation answering is cut; wakeUp takes it up
     // on the next start), with its exit handlers run: the tunnel's ssh goes too. The command starts the next one
     'POST /api/quit': () => { log('web_quit', {}); setTimeout(() => process.exit(0), 200); return { ok: true }; },
+    // 更新: claude-multi update on its own (detached), to outlive this service when its setup restarts it, and not as a
+    // Claude conversation's (one that started this service), which setup would leave unrestarted. Its words in update.log;
+    // when it ends with this service still here (it failed, or found nothing new), its last line for the page
+    'POST /api/update': () => {
+      if (updBusy) return { ok: true };
+      const f = path.join(ROOT, 'update.log'), out = fs.openSync(f, 'w'), { CLAUDECODE, ...env } = process.env;
+      const p = require('child_process').spawn(process.execPath, [__filename, 'update'], { detached: true, stdio: ['ignore', out, out], env, windowsHide: true });
+      fs.closeSync(out);
+      updBusy = true; updErr = null; log('web_update', {});
+      p.on('exit', (code) => {
+        let last = '';
+        try { last = fs.readFileSync(f, 'utf8').trim().split('\n').pop(); } catch {}
+        updBusy = false; updErr = code ? last || `更新退出了（${code}）` : null; checkUpd();
+      }).unref();
+      return { ok: true };
+    },
     // 代理额度: read when its view is shown (a minute's cache); one account, or all, asked again by hand (30 s apart)
     'GET /api/local-quota': () => quota.get(),
     'POST /api/local-quota/refresh': (q, b) => quota.refresh(b?.id),
@@ -3804,7 +3826,8 @@ async function web() {
       // the Macs (the Mac mini, more): 新对话 offers them
       const reg = load(), macs = macList(reg).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
       return { user: reg.user ?? null, usage: usageCache, gpt: gptState(), oai: fs.existsSync(OAI_KEY), quota: quotaOn(reg), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
-        tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects(), win: WIN };
+        tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects(), win: WIN,
+        head, update: upd || updBusy || updErr ? { ...upd, busy: updBusy, err: updErr } : null };
     },
     'POST /api/project': (q, b) => editProjects((all) => projectOp(all, b)),
     'GET /api/dirs': (q) => dirsIn(q.get('path') ?? ''),
@@ -4624,6 +4647,37 @@ async function restartWeb() {
   if (await webUp()) said('网页服务重启好了，刷新网页就行', 0);
   else said(`30 秒了网页服务还没起来${process.platform === 'darwin' ? `，看 ${path.join(ROOT, 'web.log')}` : `，在终端里运行 node "${__filename}" web 看报错`}`, 1);
 }
+// 有新版本: commits on GitHub this checkout hasn't (its upstream, master for an install), { n, to } (to: the newest's id,
+// for the page to say it once a version), else null: none, or it can't tell (no git, no upstream, offline)
+function updateCheck(dir = __dirname) {
+  const git = (...a) => new Promise((ok) => require('child_process').execFile('git', ['-C', dir, ...a],
+    { encoding: 'utf8', windowsHide: true, timeout: 60000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (e, out) => ok(e ? null : out.trim())));
+  return git('fetch', '-q').then(async (f) => {
+    if (f === null) return null;
+    const n = Number(await git('rev-list', '--count', 'HEAD..@{u}')), to = await git('rev-parse', '--short', '@{u}');
+    return n > 0 && to ? { n, to } : null;
+  });
+}
+// claude-multi update: the newest code from GitHub (git pull), its packages when they changed, then the new code's setup
+// (its settings, the web service restarted on it), as the install line run again. The page's 更新 runs it on its own.
+function upgrade(dir = __dirname) {
+  const git = (...a) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf8', windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  const fail = (m) => { console.log(m); process.exitCode = 1; };
+  const was = git('rev-parse', 'HEAD').stdout?.trim();
+  if (!was) return fail('这份代码不是用 git 拉下来的，用一行安装命令重装');
+  const pull = git('pull', '-q', '--ff-only');
+  if (pull.status) return fail(`没拉下来：${(pull.stderr || pull.error?.message || '').trim().split('\n').pop()}`);
+  const now = git('rev-parse', 'HEAD').stdout.trim();
+  if (now === was) return console.log('已经是最新的');
+  console.log(`拉下来 ${git('rev-list', '--count', `${was}..${now}`).stdout.trim()} 个更新`);
+  if (git('diff', '--quiet', was, now, '--', 'package.json', 'package-lock.json').status) {
+    // shortcut: on Windows npm can't replace a node-pty the running service holds open, and the update is undone; when node-pty changes version, stop the service first
+    const npm = spawnSync('npm install --no-audit --no-fund --loglevel=error', { cwd: dir, stdio: 'inherit', shell: true, windowsHide: true }); // npm.cmd: a shell's
+    if (npm.status) { git('reset', '-q', '--keep', was); return fail('依赖没装上，代码退回到更新前了'); } // never new code on old packages
+  }
+  // run by the new code (this process is the old)
+  process.exitCode = spawnSync(process.execPath, [path.join(dir, 'claude-multi.js'), 'setup', '--no-open'], { stdio: 'inherit', windowsHide: true }).status ?? 1;
+}
 async function setup() {
   // only the copy in ~/.claude-multi: your settings never point at another checkout
   if (path.relative(fs.realpathSync(ROOT), __filename) !== 'claude-multi.js') { console.log(`setup 只用 ${ROOT} 里的代码运行`); process.exit(1); }
@@ -4681,11 +4735,11 @@ async function setup() {
   if (!(await up())) { console.log(`网页服务没起来${process.platform === 'darwin' ? `，看 ${path.join(ROOT, 'web.log')}` : ''}`); process.exit(1); }
   const link = `http://127.0.0.1:${WEB_PORT}/?key=${webKey()}`;
   console.log(`装好了。网页：${link}`);
-  // over ssh nobody sits at this screen: the link only
-  if (!process.env.SSH_CONNECTION) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+  // over ssh nobody sits at this screen, and an update's page is open already: the link only
+  if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow };
+module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -4711,6 +4765,7 @@ if (require.main === module) {
   else if (cmd === 'remove') remove(process.argv[3]);
   else if (cmd === 'web') process.argv[3] === 'restart' ? restartWeb() : web();
   else if (cmd === 'setup') setup();
+  else if (cmd === 'update') upgrade();
   else if (cmd === 'web-link') console.log(`${WEB_URL}/?key=${webKey(process.argv[3] === 'new')}`); // new: the old key's browsers are out
   else if (cmd === 'rename') rename(process.argv[3], process.argv.slice(4).join(' '));
   else if (cmd === 'wt-bind') wtBind();
