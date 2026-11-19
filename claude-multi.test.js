@@ -254,6 +254,58 @@ if (SESSION0) {
   console.log('history ok');
 }
 
+// 改动: an Edit's or a Write's result is a file changed, its lines added and taken out (a new file: all its lines); a
+// failed one (its error, no patch), a helper agent's, or a file whose text only mentions a patch, none
+{
+  const { history, codexEdit } = require('./claude-multi');
+  const f = require('path').join(require('os').tmpdir(), `cm-edit-${process.pid}.jsonl`), T = '2026-10-07T08:00:00Z';
+  const res = (toolUseResult, extra = {}) => ({ type: 'user', timestamp: T, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: 'ok' }] }, toolUseResult, ...extra });
+  fs.writeFileSync(f, [
+    { type: 'user', timestamp: T, message: { content: '改一下' } },
+    { type: 'assistant', timestamp: T, message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: 'C:\\p\\a.js' } }] } },
+    res({ filePath: 'C:\\p\\a.js', originalFile: 'a\nb\nd\n', structuredPatch: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 4, lines: [' a', '-b', '+B', '+C', ' d'] }] }),
+    res('Error: String to replace not found in file.'),
+    res({ type: 'create', filePath: 'C:\\p\\new.md', content: 'x\ny\n', structuredPatch: [] }),
+    res({ filePath: 'C:\\p\\sub.js', structuredPatch: [{ lines: ['+z'] }] }, { isSidechain: true }),
+    res({ type: 'text', file: { filePath: 'C:\\p\\notes.md', content: '"structuredPatch": [] is what Edit leaves' } }),
+  ].map((x) => JSON.stringify(x)).join('\n') + '\n');
+  assert.deepEqual(history(f).items.filter((m) => m.role === 'edit').map(({ text, add, del }) => `${text} +${add} -${del}`), ['C:\\p\\a.js +2 -1', 'C:\\p\\new.md +2 -0']);
+  fs.rmSync(f);
+  // Codex's: an update's diff (its lines after @@), a new file's whole text, a deleted one's
+  assert.deepEqual(codexEdit({ path: 'a.py', kind: { type: 'update' }, diff: '@@ -1,3 +1,3 @@\n a\n-b\n+c\n+d\n' }), { text: 'a.py', add: 2, del: 1 });
+  assert.deepEqual(codexEdit({ path: 'n.py', kind: { type: 'add' }, diff: 'import os\nprint(1)\n' }), { text: 'n.py', add: 2, del: 0 });
+  assert.deepEqual(codexEdit({ path: 'o.py', kind: { type: 'delete' }, diff: 'x\n' }), { text: 'o.py', add: 0, del: 1 });
+  console.log('history edits ok');
+}
+
+// What waits in a running conversation's queue: your messages Claude hasn't taken in yet, read on as the record grows.
+// Taken in mid-turn, as the next turn, or back in its input box (popAll); a turn's end clears what's left; a background
+// task's news not yours
+{
+  const { queueNow } = require('./claude-multi');
+  const f = require('path').join(require('os').tmpdir(), `cm-queue-${process.pid}.jsonl`), T = '2026-10-07T08:00:00Z';
+  const op = (operation, content, extra = {}) => ({ type: 'queue-operation', operation, timestamp: T, sessionId: 's', ...(content != null && { content }), ...extra });
+  const put = (...lines) => fs.appendFileSync(f, lines.map((x) => JSON.stringify(x)).join('\n') + '\n');
+  const now = () => queueNow(f).map((x) => x.text);
+  fs.writeFileSync(f, '');
+  put(op('enqueue', '顺便看看日志'), op('enqueue', '<task-notification>\n<task-id>b1</task-id>'), op('enqueue', '再跑一次\n测试'));
+  assert.deepEqual(now(), ['顺便看看日志', '再跑一次\n测试']);
+  put(op('remove', '顺便看看日志', { reason: 'absorbed_mid_turn' }), { type: 'attachment', timestamp: T, attachment: { type: 'queued_command', prompt: '顺便看看日志', origin: { kind: 'human' } } });
+  assert.deepEqual(now(), ['再跑一次\n测试']);
+  fs.appendFileSync(f, '{"type":"user","timestamp":"2026-10-07T08:00:00Z","message":{"content":"再跑一'); // still being written
+  assert.deepEqual(now(), ['再跑一次\n测试']);
+  fs.appendFileSync(f, '次 测试"}}\n'); // taken in as the next turn's message (its spaces aside)
+  assert.deepEqual(now(), []);
+  put(op('enqueue', '改个说法'), op('popAll'));
+  assert.deepEqual(now(), []);
+  put(op('enqueue', '一个死掉的 Claude 留下的'), { type: 'system', subtype: 'turn_duration', durationMs: 5, timestamp: T });
+  assert.deepEqual(now(), []);
+  put(op('enqueue', '还在等'));
+  assert.deepEqual(queueNow(f), [{ text: '还在等', at: Date.parse(T) }]);
+  fs.rmSync(f);
+  console.log('queue ok');
+}
+
 // The 终端 of a window here starts at a question of yours: the record fills in from the question the first
 // message on the screen belongs to; the lines above that message are left out (the record has them).
 {

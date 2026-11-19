@@ -14,6 +14,7 @@ let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
 let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
 let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
+let histQueue = null; // set: what the record says waits in Claude's queue, with every read
 const histReads = []; // when each history read came
 // 新对话's 浏览: each folder's folders and files (a path: its own), and the places at the top ('')
 const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'C:/Users/ly/Desktop', 'D:/'], files: [] },
@@ -59,7 +60,7 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/tokens' ? tokens
       : url.pathname === '/api/open' ? { key: 'fixture', pid: 123, kind: 'pty' }
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
-      : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: histFeed ? histFeed.splice(0) : [{ role: 'claude', text: long }] }
+      : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: histFeed ? histFeed.splice(0) : [{ role: 'claude', text: long }], ...(histQueue && { queue: histQueue }) }
       : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' }
       : url.pathname === '/api/commands' ? (cmdAsks.push(url.searchParams.get('id') ?? url.searchParams.get('dir') ?? url.searchParams.get('mac')), url.searchParams.get('id') === 'M' ? { commands: [{ name: 'clear', desc: 'Start anew', hint: '[name]', also: ['reset'], builtin: true }, { name: 'maintain-formal-verification-skill', desc: 'a Mac skill', hint: '', also: [], builtin: false }] } : { commands: CMDS })
       : url.pathname.startsWith('/api/peek') ? { type: /\.exe$/.test(url.searchParams.get('path')) ? 'application/octet-stream' : /\.pptx$/.test(url.searchParams.get('path')) ? 'application/pdf' : 'image/png' }
@@ -457,6 +458,40 @@ const press = async (key, shift = false) => {
   assert.ok(after <= 2, `record still read ${after} times in 1.5 s once the answer was in`);
   await evaluate('closeConv(hw)'); histFeed = null;
   console.log('browser an answer fetched at once once its screen is done ok');
+  // 改动: the files a turn changed on a card under its answer, each once with its lines added and taken out, named from
+  // the folder they share, a click opening 预览; more read on, it stays last; your next message closes it, the next turn
+  // gets its own
+  histFeed = [{ role: 'user', text: '改两个文件', at: 1 }, { role: 'tool', text: 'Edit  C:\\p\\src\\a.js' }, { role: 'edit', text: 'C:\\p\\src\\a.js', add: 2, del: 1 }];
+  await evaluate("window.he = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, he)");
+  await until("!!he.el.querySelector('.hm.chg')");
+  assert.deepEqual(await evaluate("[...he.el.querySelectorAll('.hm.chg > div')].map((e) => e.textContent)"), ['改了 1 个文件+2−1', 'a.js+2−1']);
+  histFeed.push({ role: 'edit', text: 'C:\\p\\README.md', add: 3, del: 0 }, { role: 'edit', text: 'C:\\p\\src\\a.js', add: 1, del: 0 }, { role: 'claude', text: '改好了' });
+  await until("he.el.querySelector('.hm.chg .ch').textContent.includes('2 个文件')");
+  assert.deepEqual(await evaluate("[...he.el.querySelectorAll('.hm.chg > div')].map((e) => e.textContent)"), ['改了 2 个文件+6−1', 'src\\a.js+3−1', 'README.md+3']);
+  assert.deepEqual(await evaluate("[he.el.querySelector('.hNew').lastElementChild.matches('.chg'), he.el.querySelector('.hm.chg .cf a.peek').dataset.peek, he.el.querySelectorAll('details.tools').length]"),
+    [true, 'C:\\p\\src\\a.js', 1]);
+  histFeed.push({ role: 'user', text: '再改一个' }, { role: 'tool', text: 'Write  C:\\p\\b.js' }, { role: 'edit', text: 'C:\\p\\b.js', add: 1, del: 0 });
+  await until("he.el.querySelectorAll('.hm.chg').length === 2");
+  assert.deepEqual(await evaluate(`[...he.el.querySelectorAll('.hNew > *')].map((e) => e.matches('.chg') ? 'chg:' + e.querySelector('.ch').textContent : e.matches('.hm.user') ? 'user' : '').filter(Boolean)`),
+    ['user', 'chg:改了 2 个文件+6−1', 'user', 'chg:改了 1 个文件+1']);
+  await evaluate('closeConv(he)'); histFeed = null;
+  console.log('browser 改动 card ok');
+  // 排队中: what the record says waits in Claude's queue: one sent from here marked so, one from its window shown too, in
+  // the order sent; taken in, they go (the record's messages in their place)
+  termBusy = true; histFeed = []; histQueue = [{ text: '电脑上排的', at: Date.now() - 5000 }];
+  await evaluate("window.hq = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, hq)");
+  await until("hq.live === 'busy' && !!hq.el.querySelector('.live .hm.user.pending')");
+  await evaluate("(() => { const t = hq.el.querySelector('.send textarea'); t.value = '网页上发的'; t.dispatchEvent(new Event('input')); hq.el.querySelector('.go').click(); })()");
+  const live = "[...hq.el.querySelectorAll('.live .hm.user.pending')].map((e) => e.textContent)";
+  await until(`${live}.length === 2`);
+  assert.deepEqual(await evaluate(live), ['排队中电脑上排的', '网页上发的']); // (its own: not in the queue yet)
+  histQueue = [...histQueue, { text: '网页上发的', at: Date.now() }];
+  await until(`${live}.join() === '排队中电脑上排的,排队中网页上发的'`);
+  histQueue = []; histFeed.push({ role: 'user', text: '电脑上排的' }, { role: 'user', text: '网页上发的' });
+  await until(`${live}.length === 0`);
+  assert.equal(await evaluate("hq.el.querySelectorAll('.hNew .hm.user').length"), 2);
+  termBusy = false; await evaluate('closeConv(hq)'); histFeed = null; histQueue = null;
+  console.log('browser 排队中 ok');
   // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
   assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
     a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);

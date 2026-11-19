@@ -1208,7 +1208,7 @@ function gptHistory(home, id, { from, end, keep = 120, live = false } = {}) {
     const pick = `select rollout_ordinal o, turn_id tu, item_type k, created_at_ms at, completed_at_ms done, case item_type
       when 'userMessage' then json_extract(item_json, '$.content') when 'agentMessage' then json_extract(item_json, '$.text')
       when 'commandExecution' then json_extract(item_json, '$.command') when 'webSearch' then json_extract(item_json, '$.query')
-      when 'fileChange' then (select group_concat(json_extract(value, '$.path'), ', ') from json_each(item_json, '$.changes'))
+      when 'fileChange' then item_json
       when 'imageView' then json_extract(item_json, '$.path') when 'mcpToolCall' then json_extract(item_json, '$.server') || '.' || json_extract(item_json, '$.tool')
       when 'dynamicToolCall' then json_extract(item_json, '$.tool') when 'collabAgentToolCall' then json_extract(item_json, '$.tool') end v
       from thread_items where thread_id = ? and ${shown}`;
@@ -1231,7 +1231,13 @@ function gptHistory(home, id, { from, end, keep = 120, live = false } = {}) {
       if (text || pics) items.push({ role: 'user', text: [text, pics ? `🖼 ${pics} 张图片` : ''].filter(Boolean).join('\n'), at: r.at, o: r.o });
     } else if (r.k === 'agentMessage') { if (String(r.v ?? '').trim()) items.push({ role: 'claude', text: String(r.v).trim(), at: r.at, o: r.o }); }
     else if (r.k === 'contextCompaction') items.push({ role: 'note', text: '更早的内容已压缩', at: r.at, o: r.o });
-    else items.push({ role: 'tool', text: `${GPT_TOOL[r.k]}  ${String(r.v ?? '').split('\n')[0].slice(0, 160)}`, at: r.at, o: r.o });
+    else if (r.k === 'fileChange') { // its files on the tool's line; done, each one's lines added and taken out (as Claude's Edit)
+      let j = {};
+      try { j = JSON.parse(r.v ?? '{}'); } catch {}
+      const changes = Array.isArray(j.changes) ? j.changes : [];
+      items.push({ role: 'tool', text: `Edit  ${changes.map((c) => c.path).join(', ').split('\n')[0].slice(0, 160)}`, at: r.at, o: r.o });
+      if (j.status === 'completed') for (const c of changes) items.push({ role: 'edit', ...codexEdit(c), at: r.at, o: r.o });
+    } else items.push({ role: 'tool', text: `${GPT_TOOL[r.k]}  ${String(r.v ?? '').split('\n')[0].slice(0, 160)}`, at: r.at, o: r.o });
   }
   for (const t of turns) if (t.e >= lo && t.e < hi && (from == null || t.e >= Number(from)) && (end == null || t.e < Number(end))) items.push({ role: 'done', text: String(t.ms), o: t.e });
   items.sort((a, b) => a.o - b.o);
@@ -2682,6 +2688,10 @@ function history(file, { from, end, keep = 120 } = {}) {
     const pos = next;
     here = pos; next += Buffer.byteLength(l) + 1;
     if (!l.includes('"type":"user"') && !l.includes('"type":"assistant"') && !l.includes('"queued_command"') && !l.includes('"turn_duration"')) continue;
+    if (l.includes('"structuredPatch":')) { // an Edit's or a Write's result: the file, its lines added and taken out
+      try { const j = JSON.parse(l), e = !j.isSidechain && editOf(j.toolUseResult); if (e) out.push({ role: 'edit', ...e, at: Date.parse(j.timestamp) || 0, pos: here }); } catch {}
+      continue;
+    }
     if (l.includes('"type":"tool_result"')) continue; // tool output, often huge (screenshots): not shown, not parsed
     let j;
     try { j = JSON.parse(l); } catch { continue; }
@@ -2748,6 +2758,63 @@ function history(file, { from, end, keep = 120 } = {}) {
   let start = cut ? items[cut].pos : a + skip;
   if (cut) for (const o of out) if (o.gone && o.p && o.p === items[cut].p && o.pos < start) start = o.pos;
   return { items: items.slice(cut).map(({ pos, ...o }) => o), start, end: last < skip ? a + skip : a + last + 1 };
+}
+// A file Claude changed, from its Edit's or Write's result (a failed one's is its error, no patch): its path and the lines
+// added and taken out, its patch's + and - lines; a new file (Write, an empty patch) all its lines added
+const lineCount = (s) => (s ? s.split('\n').length - (s.endsWith('\n') ? 1 : 0) : 0);
+function editOf(r) {
+  if (typeof r?.filePath !== 'string' || !Array.isArray(r.structuredPatch)) return null;
+  let add = 0, del = 0;
+  for (const h of r.structuredPatch) for (const l of h.lines ?? []) { if (l[0] === '+') add++; else if (l[0] === '-') del++; }
+  if (r.type === 'create' && !r.structuredPatch.length) add = lineCount(String(r.content ?? ''));
+  return { text: r.filePath, add, del };
+}
+// One of a Codex fileChange's changes the same way: an update's unified diff (its + and - lines after the first @@), a
+// new file's whole text (its diff), a deleted one's
+function codexEdit(c) {
+  const diff = String(c?.diff ?? ''), kind = c?.kind?.type;
+  if (kind === 'add' || kind === 'delete') return { text: String(c.path ?? ''), add: kind === 'add' ? lineCount(diff) : 0, del: kind === 'delete' ? lineCount(diff) : 0 };
+  let add = 0, del = 0, hunk = false;
+  for (const l of diff.split('\n')) { if (l.startsWith('@@')) hunk = true; else if (hunk && l[0] === '+') add++; else if (hunk && l[0] === '-') del++; }
+  return { text: String(c?.path ?? ''), add, del };
+}
+// A running conversation's queue: your messages sent while Claude was at work (from the page, its window, the 管家) that
+// it hasn't taken in yet, as the page shows them waiting. Claude Code logs each (queue-operation enqueue) and logs again
+// when it takes it: in the middle of the turn (remove; a queued_command line with its words), as the next turn (a message
+// of yours with its words), or back in its input box to edit (popAll: ↑ there). Its own (a background task's news) left
+// out. A turn's end clears what's left: none waits then, unless a Claude that died with some queued left them behind.
+// Read on from where the last look got to; the first, the last 16 MB (as history's first look).
+const queues = new Map(); // a record → { pos: read up to, q: [{ text, at }] }
+function queueNow(file) {
+  let size;
+  try { size = fs.statSync(file).size; } catch { return []; }
+  let s = queues.get(file);
+  if (!s || size < s.pos) queues.set(file, s = { pos: Math.max(0, size - 16777216), q: [], cut: size > 16777216 });
+  if (size <= s.pos) return s.q.map(({ text, at }) => ({ text, at }));
+  const fd = fs.openSync(file, 'r'), buf = Buffer.alloc(size - s.pos);
+  try { fs.readSync(fd, buf, 0, buf.length, s.pos); } finally { fs.closeSync(fd); }
+  const skip = s.cut ? buf.indexOf(10) + 1 : 0, last = buf.lastIndexOf(10); // a line cut at the start skipped, one still being written waits
+  if (s.cut && !skip) return [];
+  const flat = (t) => String(t ?? '').replace(/\s+/g, ''), words = (j) => said(j).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
+  const take = (t) => { const i = s.q.findIndex((x) => flat(x.text) === flat(t)); if (i >= 0) s.q.splice(i, 1); };
+  const lines = last < skip ? [] : buf.toString('utf8', skip, last + 1).split('\n');
+  for (const l of lines) {
+    const op = l.includes('"queue-operation"'), queued = !op && l.includes('"queued_command"'), end = !op && !queued && l.includes('"turn_duration"');
+    const yours = !op && !queued && !end && s.q.length && l.includes('"type":"user"') && !l.includes('"tool_result"');
+    if (!op && !queued && !end && !yours) continue;
+    let j;
+    try { j = JSON.parse(l); } catch { continue; }
+    if (op && j.type === 'queue-operation') {
+      const mine = typeof j.content === 'string' && j.content.trim() && !/^\s*<(task-notification|teammate-message)/.test(j.content);
+      if (j.operation === 'enqueue' && mine) s.q.push({ text: j.content, at: Date.parse(j.timestamp) || 0 });
+      else if (j.operation === 'remove' && mine) take(j.content);
+      else if (j.operation === 'popAll') s.q = [];
+    } else if (queued && j.attachment?.type === 'queued_command') take(words(j));
+    else if (end && j.type === 'system' && j.subtype === 'turn_duration') s.q = [];
+    else if (yours && j.type === 'user' && !j.isMeta) take(words(j));
+  }
+  if (last >= skip) { s.pos += last + 1; s.cut = false; }
+  return s.q.map(({ text, at }) => ({ text, at }));
 }
 // The k-th picture of the record's line at byte pos, as history() names it ("pos.k"): its type and bytes.
 function recordImage(file, pos, k) {
@@ -2986,6 +3053,7 @@ function slashList(exe, configDir, cwd, timeout = 20000) {
 // what came between the question and the first message the lines show (a row starting ❯ or ●, found by its
 // first words), drawn the way Claude Code draws a conversation. skip: the lines before that message.
 function lead(items, lines, more = false) { // more: the record goes back further than items
+  items = items.filter((it) => it.role !== 'edit'); // the page's 改动 card: no line in a terminal
   const key = (t) => String(t).split('\n')[0].replace(/[\s*`#>]/g, '').slice(0, 16);
   let cut = -1, skip = 0;
   // each message's key at its last place in the record, made once (each row against every message took ~1 s on a long
@@ -3845,7 +3913,8 @@ async function web() {
       const { t, file } = recordOf(q);
       // its terminal on a conversation with no record yet (a /clear typed there): id null, for the page to let the other go
       if (!file) { if (t) return { items: [], start: 0, end: 0, ...(t.file === null && { id: null }) }; throw new Error('找不到这个对话'); }
-      return { ...history(file, { from: q.get('from') || undefined, end: q.get('end') || undefined }), id: path.basename(file, '.jsonl') };
+      // running, the newest piece: what waits in its queue too
+      return { ...history(file, { from: q.get('from') || undefined, end: q.get('end') || undefined }), id: path.basename(file, '.jsonl'), ...(t?.pid && !t.gone && !q.get('end') && { queue: queueNow(file) }) };
     },
     'POST /api/read': (q, b) => { // {id} one conversation's notifications, {all: true} every one; the island drops them too
       const id = b.all ? '*' : /^[\w-]{1,80}$/.test(b.id ?? '') ? b.id : null;
@@ -4616,7 +4685,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch };
+module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
