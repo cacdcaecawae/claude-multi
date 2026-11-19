@@ -572,6 +572,16 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   @media (hover: hover) { details.tools summary:hover { color: var(--fg); } }
   details.tools > div { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 4px 7px; padding-left: 11px; border-left: 2px solid var(--border); }
   .hm.sub { font-size: 13.5px; line-height: 1.6; color: var(--fg2); } /* Claude's words on the way, inside 过程 */
+  /* a turn's 改动: the files Claude changed, each one's lines added and taken out (drawChg) */
+  .hm.chg { align-self: flex-start; width: min(520px, 100%); white-space: normal; border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px; font-size: 13px; line-height: 1.7; }
+  .chg .ch, .chg .cf { display: flex; align-items: baseline; gap: 12px; }
+  .chg .ch { font-size: 12.5px; font-weight: 600; color: var(--fg2); }
+  .chg .cf { font: 12.5px/1.7 var(--mono); }
+  .chg .cf > :first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chg .cf > span:first-child { color: var(--fg); }
+  .chg .cn { flex: none; display: inline-flex; gap: 6px; margin-left: auto; font: 12px var(--mono); }
+  .chg ins { color: var(--green); text-decoration: none; } .chg del { color: var(--red); text-decoration: none; }
+  .chg summary { cursor: pointer; font-size: 12px; color: var(--fg3); }
   /* under the messages, live: what you sent (faded until the record has it), Claude at work, a menu to pick from */
   .busy { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--orange); }
   .busy i { width: 7px; height: 7px; border-radius: 4px; background: var(--orange); animation: pulse 1.2s infinite; }
@@ -2468,6 +2478,7 @@ function makeConv(body, title) {
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let gotAt = 0, waitAns = 0, waitT = 0; // when the record last brought messages; since when an answer the screen finished is waited for
   let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
+  let queued = []; // what waits in Claude's queue, as the record says (sent from here, its window, the 管家): { text, at }
   let past = false, quiet = 0; // a (re)connection's first output is everything so far: its copies were made before, not again
   let switching = 0, conversationGen = 0; // a session change cancels writes still queued for the previous one
   const drafts = new Map();
@@ -2813,7 +2824,7 @@ function makeConv(body, title) {
           conversationGen++; stops++; going = ''; typing = null; typeOpt.clear();
           session = { id: r.id };
           line.value = d?.text ?? saved ?? '';
-          atts = (d?.atts ?? []).filter((a) => !a.failed); sent = d?.sent ?? []; lastSent = d?.lastSent ?? null;
+          atts = (d?.atts ?? []).filter((a) => !a.failed); sent = d?.sent ?? []; queued = []; lastSent = d?.lastSent ?? null;
         } else { session.id = r.id; drafts.delete(null); }
         if (r.id && c.joins) { for (const p of c.joins) post('/api/project', { op: 'add', id: p, conv: [r.id] }).catch(() => {}); c.joins = null; } // ⋯'s 新对话: in its origin's 项目
         c.id = r.id; grow(); drawAtts(); redraw(); markRows(); save();
@@ -2821,6 +2832,7 @@ function makeConv(body, title) {
       }
       if (first) { histOldest = r.start; hist.innerHTML = '<div class="col"><div class="hTop hm note"></div><div class="hOld"></div><div class="hNew"></div><div class="live"></div></div>'; }
       histEnd = r.end;
+      queued = (r.queue ?? []).map((x) => ({ ...x, text: shownText(x.text) })).filter((x) => x.text); // (none: not running, or a GPT one)
       if (r.items.length) {
         gotAt = Date.now(); waitAns = 0; // (an answer waited for: in)
         const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
@@ -2895,8 +2907,14 @@ function makeConv(body, title) {
     // at once, then every 0.3 s till it's in, 10 s at most (not when the record brought something just now: likely in)
     if (busyNow && !busy && !menu && view === 'hist' && Date.now() - gotAt > 2000) { waitAns = Date.now(); loadHist(); }
     if (busy || menu || Date.now() - waitAns > 10000) waitAns = 0;
-    const h = sent.map((s) => (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
-      + (s.text ? `<div class="hm user pending">${userBody(s.text, [], true)}</div>` : '')).join('') + (menu
+    // in Claude's queue (taken in once its current step is done): 排队中 on it; one sent from elsewhere (its window, another
+    // page, the 管家) waiting there too, in the order they were sent
+    const flat = (s) => s.replace(/\s+/g, ''), same = (s, x) => flat(x.text) === flat(s.text) || (s.text && flat(x.text).includes(flat(s.text)));
+    const Q = '<span class="lab">排队中</span>';
+    const h = [...sent.map((s) => ({ at: s.at, h: (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
+      + (s.text ? `<div class="hm user pending">${queued.some((x) => same(s, x)) ? Q : ''}${userBody(s.text, [], true)}</div>` : '') })),
+    ...queued.filter((x) => !sent.some((s) => same(s, x))).map((x) => ({ at: x.at, h: `<div class="hm user pending">${Q}${userBody(x.text, [], true)}</div>` }))]
+      .sort((a, b) => a.at - b.at).map((x) => x.h).join('') + (menu
       ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${askHead(menu)}${askOpts(menu, (o) => `data-pick="${o.n}"`, (o) => typeNow && o.n === menu.cur)}
         ${typeNow ? '<div class="hint2">在下面的输入框里写你的回答，发送后填进这一项</div>' : ''}
         <div class="row2">${menu.tabs ? '<button data-key="prev">← 上一题</button><button data-key="next" class="push">下一题 →</button>' : ''}<button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
@@ -3080,7 +3098,7 @@ function makeConv(body, title) {
     c.started = true; c.ended = false; notice();
     gen++; es?.close(); es = null; term?.dispose(); scr.innerHTML = '';
     mine = ptySize = key = kind = null; switching = 0; fails = 0; past = false; quiet = 0;
-    histEnd = histOldest = null; histNow = false; histGen++; sent = []; liveHtml = ''; hist.innerHTML = '';
+    histEnd = histOldest = null; histNow = false; histGen++; sent = []; queued = []; liveHtml = ''; hist.innerHTML = '';
     term = new Terminal({ fontSize: FONT, lineHeight: 1.12, theme: THEME, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
       fontFamily: '"SF Mono", Menlo, "Cascadia Mono", Consolas, "PingFang SC", "Microsoft YaHei", monospace' });
     fit = new FitAddon.FitAddon(); term.loadAddon(fit);
@@ -3393,7 +3411,19 @@ function userBody(words, files = [], plain = false) {
   return (text ? (plain ? esc(text) : md(text)) : '') + (cards ? `<div class="atts">${cards}</div>` : '');
 }
 function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies headed GPT; {mac: its id}: a Mac's one's, headed with its mark
+  // the turn's 改动 card sits last: out while the turn's new items go in, back at its end after them (a box emptied
+  // meanwhile, a GPT 聊天's drawn again: none)
+  if (box.$chg && !box.contains(box.$chg.el)) box.$chg = null;
+  box.$chg?.el.remove();
   for (const m of items) {
+    if (m.role === 'edit') { // a file Claude changed: on this turn's card, once however many times
+      const c = box.$chg ??= { el: Object.assign(document.createElement('div'), { className: 'hm chg' }), files: new Map() };
+      const f = c.files.get(m.text) ?? { add: 0, del: 0 };
+      c.files.set(m.text, { add: f.add + (m.add ?? 0), del: f.del + (m.del ?? 0) });
+      drawChg(c);
+      continue;
+    }
+    if ((m.role === 'user' && m.text) || m.role === 'img') { if (box.$chg) box.append(box.$chg.el); box.$chg = null; } // your next message: that turn's card closed at its end
     // Claude's answer begins (its words or its first tool call right after your message): marked as Claude's
     if ((m.role === 'claude' || m.role === 'tool') && box.lastElementChild?.matches('.hm.user, .hm.img'))
       box.insertAdjacentHTML('beforeend', gpt?.mac ? `<div class="who"><i class="am">${macMark(gpt.mac)}</i>Claude</div>`
@@ -3441,6 +3471,20 @@ function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies he
     for (const t of tools) n[t.dataset.k] = (n[t.dataset.k] ?? 0) + 1;
     g.firstElementChild.textContent = `过程：${tools.length} 个操作（${Object.entries(n).map(([k, v]) => `${k} ${v}`).join('、')}）`;
   }
+  if (box.$chg) box.append(box.$chg.el);
+}
+// A turn's 改动: 改了 N 个文件 and the lines added (+, green) and taken out (−, red) in all; a row a file, named from where
+// they all are (one alone: its name), the whole path on hover, a click opening it in 预览 (one of this PC's); past 5, the
+// rest folded. No spaces between tags: .hm keeps them (pre-wrap)
+function drawChg(c) {
+  const fs = [...c.files], n = (a, d) => `<span class="cn">${a ? `<ins>+${a}</ins>` : ''}${d ? `<del>−${d}</del>` : ''}</span>`;
+  const parts = fs.map(([p]) => p.split(/[\\/]/)), dir = parts.length < 2 ? parts[0].length - 1
+    : parts.reduce((k, s) => { let i = 0; while (i < k && i < s.length - 1 && s[i] === parts[0][i]) i++; return i; }, parts[0].length - 1);
+  const row = ([p, f], i) => { const e = esc(p), name = esc(parts[i].slice(dir).join(p.includes('\\') ? '\\' : '/'));
+    return `<div class="cf">${peekable(e) ? `<a class="peek" data-peek="${e}" title="${e}">${name}</a>` : `<span title="${e}">${name}</span>`}${n(f.add, f.del)}</div>`; };
+  const rows = fs.map(row);
+  c.el.innerHTML = `<div class="ch">改了 ${fs.length} 个文件${n(fs.reduce((s, [, f]) => s + f.add, 0), fs.reduce((s, [, f]) => s + f.del, 0))}</div>${rows.slice(0, 5).join('')}`
+    + (rows.length > 5 ? `<details><summary>还有 ${rows.length - 5} 个</summary>${rows.slice(5).join('')}</details>` : '');
 }
 // A picture made ready to send: a big one (a phone's photo) to 2000 px on its long side as JPEG, on white (Claude
 // scales larger ones down anyway, and it goes up faster over a phone's network); a small PNG/JPEG/GIF/WebP as it is.
