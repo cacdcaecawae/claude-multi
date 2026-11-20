@@ -234,9 +234,9 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 **Gemini 对话**（Antigravity 命令行）
 
 - 先装好 Google 的 Antigravity 命令行：在 PowerShell 里运行 `irm https://antigravity.google/cli/install.ps1 | iex`。再运行 `claude-multi new gemini`：会打开浏览器用 Google 账号登录（没打开就把它给的网址复制到浏览器里，登好把授权码粘回去）。账号要能用 Antigravity（Google 会先让新账号验证一下）。
-- 每个 Gemini 账号有自己的文件夹（`accounts\gemini-…`）：设置、对话记录、插件、MCP 都各管各的。
-- **同一时间只有一个 Gemini 账号在线。** `agy` 自己只认 `~\.gemini` 这一个文件夹和 Windows 凭据管理器里的一条登录，换哪个文件夹都一样。所以 claude-multi 把 `~\.gemini` 做成链接，指向在线账号的文件夹，并替每个账号保管它的登录（加密存在它的文件夹里，只有这个 Windows 用户能解开）。用另一个账号开始时会先换过去；有 `agy` 在运行时换不了，先把它结束。
-- 第一次运行 `new gemini` 时，如果你已经有 `~\.gemini` 文件夹、已经登录过 `agy`，它们就直接成为 A1 的，不用重新登录。
+- **设置、MCP、插件和对话记录所有 Gemini 账号共用**，都在你自己的 `~\.gemini` 里，claude-multi 不搬也不改它（只在里面设好状态栏）。所以 A1 的额度用完了，换到 A2 可以接着聊同一个对话。
+- **同一时间只有一个 Gemini 账号在线。** `agy` 把登录存在 Windows 凭据管理器里的一条记录里，所有账号共用这一条。claude-multi 替每个账号保管它的登录（加密存在 `accounts\gemini-…` 里，只有这个 Windows 用户能解开），换账号就是把那个账号的登录换进去。用另一个账号开始时会先换过去；有 `agy` 在运行时换不了，先把它结束。列表里的 Gemini 对话显示的是现在在线的账号，接着聊就用它。
+- 第一次运行 `new gemini` 时，如果你已经登录过 `agy`，这个登录就直接成为 A1 的，不用重新登录。
 - 某个账号的登录用不了了：再运行一次 `new gemini`，用同一个 Google 账号登录，它就换上新的登录，不会多出一个账号。
 - 有了 Gemini 账号后，「新对话」上面多一个 Gemini，列表顶部可以只看 Gemini 对话，Gemini 账号的圆环写着 A1、A2。终端里也能用：`claude-multi start A1`。
 - 现在只有「终端」视图（就是 `agy` 的界面本身）。底部状态栏显示账号、模型和上下文用量（来自 `agy` 的状态栏，`new gemini` 时设好）。
