@@ -509,13 +509,14 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pane.hist .msgs { display: block; }
   .pane.hist .screen, .pane.hist .keys { display: none; }
   /* 对话's turns down its left, as Codex's (navOf): a tick a message of yours over the list's left margin, the one you're
-     reading longer and darker; many: closer together */
-  .nav { position: absolute; z-index: 2; width: 22px; display: flex; flex-direction: column; justify-content: center; padding: 24px 0; }
+     reading darker; the mouse on one, it longest and those around it less and less (--w); each line set on whole screen
+     pixels (--o, --t), so all as thick */
+  .nav { position: absolute; z-index: 2; width: 30px; }
   .pane:not(.hist) .nav, .nav:empty { display: none; }
-  .navT { flex: 0 1 9px; min-height: 0; position: relative; cursor: pointer; }
-  .navT::before { content: ''; position: absolute; left: 6px; top: 50%; width: 8px; height: 1.5px; border-radius: 1px; background: var(--fg3); opacity: .6; transition: width .12s, opacity .12s; }
-  .navT:hover::before { width: 12px; opacity: 1; }
-  .navT.on::before { width: 14px; opacity: 1; background: var(--fg); }
+  .navT { position: absolute; left: 0; right: 0; cursor: pointer; }
+  .navT::before { content: ''; position: absolute; left: 6px; top: var(--o); width: var(--w, 8px); height: var(--t); background: var(--fg3); opacity: .55; transition: width .15s, opacity .15s; }
+  .navT.nr::before { opacity: .85; }
+  .navT.on::before, .navT:hover::before { background: var(--fg); opacity: 1; }
   .col { max-width: 1200px; margin: 0 auto; /* wide: your messages out to the right, Claude's to the left; capped near 80 Chinese characters a line (1600 px ran past 100, hard to read), room enough for code and tables */ display: flex; flex-direction: column; gap: 10px; }
   .hOld, .hNew, .live { display: contents; } /* their messages sit in the column's flow */
   .hm { white-space: pre-wrap; word-break: break-word; font-size: 15px; line-height: 1.65; color: var(--msg); } /* the conversation a size up from the frame (13px), for reading */
@@ -3449,15 +3450,27 @@ function userBody(words, files = [], plain = false) {
 function navOf(pane, hist) {
   const nav = Object.assign(document.createElement('div'), { className: 'nav' }), at = (t) => us[[...nav.children].indexOf(t)];
   nav.setAttribute('aria-hidden', 'true'); pane.append(nav); // the mouse's shortcut: the list scrolls as it did
-  let us = [], pend = 0;
+  let us = [], pend = 0, laid = '';
+  // the ticks, 8 px apart (closer when many), in the middle of the list's height. A line on part of a pixel is drawn over
+  // two, fainter: each one's line set on whole pixels of the screen where it is (zoom: more than one a px), as thick
+  const lay = (n, H, at, dpr) => {
+    if (nav.children.length !== (n > 1 ? n : 0)) nav.innerHTML = n > 1 ? '<i class="navT"></i>'.repeat(n) : ''; // one: nowhere to go
+    Object.assign(nav.style, { top: hist.offsetTop + 'px', left: hist.offsetLeft + 'px', height: H + 'px' });
+    if (!H) return; // 终端 (the list not shown): laid out once it's back
+    const p = Math.min(8, Math.max(H - 48, n) / n), y0 = (H - p * n) / 2, t = Math.max(1, Math.round(1.25 * dpr)) / dpr;
+    [...nav.children].forEach((e, i) => {
+      const y = y0 + i * p, o = Math.round((at + y + p / 2 - t / 2) * dpr) / dpr - at - y;
+      e.style.cssText = `top:${y}px;height:${p}px;--o:${o}px;--t:${t}px`;
+    });
+  };
   const draw = () => {
     pend = 0;
-    const now = [...hist.querySelectorAll('.hm.user:not(.sys)')];
-    if (now.length !== us.length) nav.innerHTML = now.length > 1 ? '<i class="navT"></i>'.repeat(now.length) : ''; // one: nowhere to go
+    const now = [...hist.querySelectorAll('.hm.user:not(.sys)')], r = hist.getBoundingClientRect(), dpr = devicePixelRatio;
+    const key = [now.length, hist.clientHeight, hist.offsetTop, hist.offsetLeft, r.top, dpr].join();
+    if (key !== laid) { laid = key; lay(now.length, hist.clientHeight, r.top, dpr); }
     us = now;
-    Object.assign(nav.style, { top: hist.offsetTop + 'px', left: hist.offsetLeft + 'px', height: hist.clientHeight + 'px' });
     // the one you're reading: the last of yours at or above the view's top (the first, above them all)
-    const top = hist.getBoundingClientRect().top + 40;
+    const top = r.top + 40;
     let lo = 1, hi = us.length - 1, k = 0;
     while (lo <= hi) { const m = (lo + hi) >> 1; if (us[m].getBoundingClientRect().top <= top) { k = m; lo = m + 1; } else hi = m - 1; }
     nav.querySelector('.on')?.classList.remove('on'); nav.children[k]?.classList.add('on');
@@ -3466,9 +3479,16 @@ function navOf(pane, hist) {
   new MutationObserver(soon).observe(hist, { childList: true, subtree: true });
   new ResizeObserver(soon).observe(hist);
   hist.addEventListener('scroll', soon, { passive: true });
+  // the mouse on a tick: it out longest, the three either side of it less and less, the rest as they were
+  const bulge = (k) => [...nav.children].forEach((e, i) => {
+    const d = Math.abs(i - k), near = k >= 0 && d <= 3;
+    e.style.setProperty('--w', near ? [20, 15, 12, 10][d] + 'px' : ''); e.classList.toggle('nr', near);
+  });
+  nav.addEventListener('mouseout', (e) => { if (!nav.contains(e.relatedTarget)) bulge(-1); });
   nav.addEventListener('mouseover', (e) => { // the card's words read now: an answer still coming grows
     const t = e.target.closest('.navT'), u = t && at(t);
     if (!u) return;
+    bulge([...nav.children].indexOf(t));
     const all = [...hist.querySelectorAll('.hm.user:not(.sys), .hm.claude:not(.sub)')], a = all[all.indexOf(u) + 1];
     const words = (x, n) => { const s = x.textContent.replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
     t.title = words(u, 40) + (a?.matches('.hm.claude') ? '\n' + words(a, 70) : '');
