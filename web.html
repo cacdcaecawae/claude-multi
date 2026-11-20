@@ -35,7 +35,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   :root { --bg: #212121; --bar: #181818; --border: #2e2e2e; --hover: rgba(255,255,255,.05); --sel: rgba(255,255,255,.09); --input: #2a2a2a; --inputB: #3a3a3a;
     --fg: #e3e3e3; --fg2: #b4b4b4; --fg3: #8f8f8f; --accent: #339cff; --link: #7ab7ff; --green: #3fb950; --orange: #e5a03a; --red: #f85149;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
-    --a1: #0a84ff; --gpt: #19c37d; --apple: #f5f5f7; color-scheme: dark; --ink: #ececec; --onInk: #0d0d0d; --bubble: #303030;
+    --a1: #0a84ff; --gpt: #19c37d; --gem: #6f9cf7; --apple: #f5f5f7; color-scheme: dark; --ink: #ececec; --onInk: #0d0d0d; --bubble: #303030;
     --fgHi: #f5f5f5; --msg: #ececec; --tint: rgba(255,255,255,.07); --btn: #2f2f2f; --btnH: #3a3a3a; --badge: #4a4a4a; --badgeFg: #f5f5f5;
     --pop: #2a2a2a; --popB: #3a3a3a; --accentH: #2b8ef0; --accentBg: rgba(255,255,255,.09); --errFg: #ffa198; --cellB: #3a3a3a;
     --split: #3a3a3a; --term: #1f1f1f; --act: #181818; --purple: #b180d7; --shadow: rgba(0,0,0,.5); --lift: rgba(0,0,0,.25); --frame: #171a1e; --side: #1c1f23; --cardB: #303030; /* the terminal stays dark in 亮色 too: Claude Code draws its colors for a dark one (its theme is dark) */
@@ -46,7 +46,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     --accentBg: rgba(0,0,0,.06); --link: #1769e0; --green: #2e7d32; --orange: #b45f06; --red: #c42b1c; --errFg: #b42318; --tint: rgba(0,0,0,.05);
     --btn: #f0f0f0; --btnH: #e5e5e5; --badge: #e5e5e5; --badgeFg: #3b3b3b; --pop: #ffffff; --popB: #e5e5e5; --cellB: #e3e3e3; --ink: #0d0d0d; --onInk: #ffffff; --bubble: #f4f4f4;
     --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
-    --a1: #0066cc; --gpt: #0b8a5c; --apple: #000; --split: #e0e0e0; --purple: #8250df; --shadow: rgba(0,0,0,.12); --lift: rgba(0,0,0,.04); --frame: #f0f6f9; --side: #f9fcfd; --cardB: #e8e8e8; }
+    --a1: #0066cc; --gpt: #0b8a5c; --gem: #3367d6; --apple: #000; --split: #e0e0e0; --purple: #8250df; --shadow: rgba(0,0,0,.12); --lift: rgba(0,0,0,.04); --frame: #f0f6f9; --side: #f9fcfd; --cardB: #e8e8e8; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bar); color: var(--fg); font: 14px/1.45 var(--ui); }
   /* opened from the home screen, iOS 26 makes the page shorter than the screen by the status bar (WebKit bug 301108):
@@ -189,6 +189,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .kinds { display: flex; gap: 4px; margin: 2px 14px 6px; }
   .kinds button { flex: 1; padding: 4px 0; border-radius: 8px; font-size: 13px; color: var(--fg2); }
   .kinds button.on { background: var(--sel); color: var(--fgHi); font-weight: 500; }
+  .kinds button svg { width: 15px; height: 15px; margin: 2px auto; } /* a kind's mark (Claude's, OpenAI's, Antigravity's), in the middle as the words were */
   @media (hover: hover) { .kinds button:not(.on):hover { color: var(--fgHi); } }
   .sheet .seg.kind { display: inline-flex; margin-top: 12px; } .sheet .seg.kind button { padding: 3px 16px; font-size: 13px; } /* 新对话: Claude or GPT */
   /* 搜索对话: the box, the conversations found under it, the one Enter opens marked */
@@ -1104,8 +1105,9 @@ const I = { split: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path
 // A GPT account's (gpt): G1, G2… in GPT's color, the ring as full as its most used window has left (a plan may have only
 // a weekly one), dashed till a reply on it has said
 const winName = (k) => ({ five_hour: '5 小时', seven_day: '7 天' })[k] ?? k;
-const ac = (n, cls = '', gpt = false) => {
+const ac = (n, cls = '', gpt = false) => { // gpt: true a GPT account's, 'gem' a Gemini one's (A1: no quota read for it yet)
   if (!n) return '';
+  if (gpt === 'gem') return `<i class="ac g${cls}" style="--c:var(--gem);--p:100" title="${esc(`Gemini 账号 A${n} · ${state?.gemini?.[n - 1]?.label ?? ''}`)}">A${n}</i>`;
   if (gpt) {
     const ws = state?.gpt?.[n - 1]?.windows ?? [], w = ws.length ? ws.reduce((x, y) => (y.pct > x.pct ? y : x)) : null, left = w ? Math.max(0, 100 - w.pct) : null;
     const tip = left == null ? `GPT 账号 G${n} · 额度还没读到（在它上面回复过一次后才有）` : `GPT 账号 G${n} · ${winName(w.k)}额度还剩 ${left}%${w.reset ? `（${w.reset}后重置）` : ''}`;
@@ -1123,7 +1125,11 @@ const SPARK = `<svg class="spark" viewBox="-32 -32 64 64" fill="currentColor">${
   `<path transform="rotate(${k * 30 + 8 + TILT[k]})" d="M-4.7 0L-2.5 -${l}A2.5 2.5 0 0 1 2.5 -${l}L4.7 0z"/>`).join('')}<circle r="7.6"/></svg>`;
 // OpenAI's mark (Simple Icons), in currentColor; a conversation's mark: n its account, 1 on
 const OPENAI = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>`;
+// gpt as ac takes it ('gem': the pixel A the Antigravity CLI shows as its logo)
+const AGY = '<svg viewBox="0 0 8 8" fill="currentColor" shape-rendering="crispEdges"><path d="M3 0h2v1H3zM2 1h4v2H2zM1 3h6v1H1zM1 4h2v2H1zM5 4h2v2H5zM0 6h2v2H0zM6 6h2v2H6z"/></svg>';
+const convKind = (x) => (x?.gem ? 'gem' : !!x?.gpt); // a conversation's kind, as ac and mark take it
 const mark = (gpt, n, mac) => (mac ? `<i class="mk" style="color:var(--apple)" title="${esc(macName(mac))}">${macMark(mac)}</i>` // a Mac's one: its mark (Apple's, a MacBook's)
+  : gpt === 'gem' ? `<i class="mk" style="color:var(--gem)" title="Gemini">${AGY}</i>`
   : `<i class="mk" style="color:${gpt ? 'var(--gpt)' : ACCT[(n - 1) % ACCT.length]}" title="${gpt ? 'GPT' : 'Claude'}">${gpt ? OPENAI : SPARK}</i>`);
 $('#act .logo').insertAdjacentHTML('afterbegin', `<span class="sp">${SPARK}<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" pathLength="100"/></svg></span>`);
 
@@ -1198,7 +1204,7 @@ const secs = saved.secs ?? {}; // its 操作台's sections opened or closed by y
 let state = null, tokens = null, tokensNow = null, tokensAt = 0, tokensErr = '', groups = [], focusG = null, drag = null, restored = false;
 const folded = new Set(saved.folded ?? []); // side bar sections closed (a folder: d: and its path)
 let listMode = ['run', 'proj'].includes(saved.listMode) ? saved.listMode : 'dirs'; // 对话: by folder, (the bell) 提示 and the running ones, or (the grid) by 项目
-let listKind = ['claude', 'gpt'].includes(saved.listKind) ? saved.listKind : 'all'; // which kind of conversation it lists, with GPT accounts
+let listKind = ['claude', 'gpt', 'gem'].includes(saved.listKind) ? saved.listKind : 'all'; // which kind of conversation it lists, with GPT accounts
 let butler = !!saved.butler, bConv = null, peek = null; // 管家 mode (the spark), and its conversation once there is one
 $('#app').classList.toggle('butler', butler);
 $('#act .logo .label').textContent = butler ? '退出管家' : '管家'; // reloaded in it: says what the spark does
@@ -1213,7 +1219,7 @@ const shownConvs = () => (butler ? [peek ?? bConv] : groups.filter((g) => !g.min
 // under an hour left and the recommended one has more, a sheet asks first (accounts don't share their prompt
 // cache). Resolves to the account number, or 0 when cancelled.
 function pickAcct(s) {
-  if (s.gpt) return Promise.resolve(s.acct + 1); // a GPT one: its own account (it can't change)
+  if (s.gpt || s.gem) return Promise.resolve(s.acct + 1); // a GPT or Gemini one: its own account (it can't change)
   const u = state?.usage, a = u?.accounts?.[s.acct], b = u?.accounts?.[u?.rec];
   if (!u || u.rec == null || u.rec === s.acct || !a || a.err || a.api || a.runway >= 1 || !b || b.runway <= a.runway) return Promise.resolve(s.acct + 1);
   const own = s.acct + 1, other = u.rec + 1;
@@ -1412,14 +1418,15 @@ function drawHere() {
   const c = butler ? bConv : focusG?.active, s = c?.id ? state?.sessions.find((x) => x.id === c.id) : null, el = $('#here');
   if (!c || !state) return void (el.innerHTML = '');
   const tone = (p) => (p >= 80 ? 'bad' : p >= 50 ? 'warn' : 'ok'), w = c.where(), line = s?.line;
-  const a = c.gpt ? null : state.usage.accounts?.[c.acct - 1], five = a?.windows?.find((x) => x.k === 'five_hour')?.pct;
+  const a = c.gpt || c.gem ? null : state.usage.accounts?.[c.acct - 1], five = a?.windows?.find((x) => x.k === 'five_hour')?.pct;
   const g = c.gpt ? state.gpt?.[c.acct - 1] : null, gw = g?.windows?.length ? g.windows.reduce((x, y) => (y.pct > x.pct ? y : x)) : null; // a GPT one's: its most used window
   const left = s?.req ? s.req + HOUR - Date.now() : null, min = Math.ceil(left / 60000);
   el.innerHTML = [
-    w && `<span class="where ${w}" title="这个对话的 ${c.gpt ? 'Codex' : 'Claude'} 在哪里运行">${w === 'pc' ? (c.mac ? 'Mac 的终端' : '电脑窗口') : '网页服务'}</span>`,
+    w && `<span class="where ${w}" title="这个对话的 ${c.gem ? 'agy' : c.gpt ? 'Codex' : 'Claude'} 在哪里运行">${w === 'pc' ? (c.mac ? 'Mac 的终端' : '电脑窗口') : '网页服务'}</span>`,
     c.mac && `<span title="在 ${esc(macName(c.mac))} 上的 ${esc(macOf(c.mac)?.dir ?? '')} 里运行，用那边的账号">${mark(false, 0, c.mac)}${esc(macName(c.mac))}</span>`,
     c.acct && c.gpt && `<span title="${esc(g?.label ?? '')}"><i style="background:var(--gpt)"></i>GPT 账号 G${c.acct}${gw ? ` · ${winName(gw.k)} <b class="${tone(gw.pct)}">${gw.pct}%</b>` : ''}</span>`,
-    c.acct && !c.gpt && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % ACCT.length]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
+    c.acct && c.gem && `<span title="${esc(state.gemini?.[c.acct - 1]?.label ?? '')}"><i style="background:var(--gem)"></i>Gemini 账号 A${c.acct}</span>`,
+    c.acct && !c.gpt && !c.gem && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % ACCT.length]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
     line?.model && `<span title="模型 · 思考强度">${esc([line.model, line.effort].filter(Boolean).join(' · '))}</span>`,
     line?.ctx != null && `<span title="上下文已用">上下文 <b class="${tone(line.ctx)}">${Math.round(line.ctx)}%</b></span>`,
     left != null && (left > 0 || w) && `<span title="提示缓存在最后一次请求后留 1 小时；过期后，下一条消息要把整段对话重新写进缓存，多用额度">${left > 0
@@ -1453,22 +1460,25 @@ const nd = (k) => (k ? `<i class="nd ${k}" title="${k === 'ask' ? '在等你' : 
 const chatEnd = (x) => `${nd(chatMark(x))}${x.busy ? '<span class="spin" title="正在回复"></span>' : ''}<span class="when">${ago(x.at)}</span>
     <button class="ico aside" data-aside title="在右侧打开">${svg(I.split)}</button>`;
 // a row's first column: its account's ring, or a Mac's one's mark in the ring's place
-const lead = (x) => (x.mac ? `<i class="ac0" title="${esc(macName(x.mac))}">${macMark(x.mac)}</i>` : ac(x.acct + 1, '', x.gpt));
+const lead = (x) => (x.mac ? `<i class="ac0" title="${esc(macName(x.mac))}">${macMark(x.mac)}</i>` : ac(x.acct + 1, '', convKind(x)));
 const hint = (x, ...more) => esc([...new Set([x.title, ...more].filter(Boolean))].join('\n')); // a row's card: its title, then what's not the same
 const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.cwd)}">${lead(x)}
-    <div class="main"><div class="t">${x.mac ? '' : mark(x.gpt, x.acct + 1)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
+    <div class="main"><div class="t">${x.mac ? '' : mark(convKind(x), x.acct + 1)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
 // conversations 删除'd (or 归档'd) from here: out of the list at once, not after the server's answer (a Mac's waits on ssh to
 // it, seconds); one that failed comes back
 const deleting = new Set();
 function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
-  const kinds = !!state.gpt?.length, S = state.sessions.filter((x) => !isButler(x) && !deleting.has(x.id) && (!kinds || listKind === 'all' || (listKind === 'gpt') === !!x.gpt)), run = S.filter((x) => x.pid), bell = listMode === 'run', proj = listMode === 'proj';
+  const kindName = (x) => (x.gem ? 'gem' : x.gpt ? 'gpt' : 'claude'), kinds = !!(state.gpt?.length || state.gemini?.length);
+  const has = { all: 1, claude: 1, gpt: state.gpt?.length, gem: state.gemini?.length }, lk = has[listKind] ? listKind : 'all'; // a kind with no accounts now: all
+  const S = state.sessions.filter((x) => !isButler(x) && !deleting.has(x.id) && (!kinds || lk === 'all' || kindName(x) === lk)), run = S.filter((x) => x.pid), bell = listMode === 'run', proj = listMode === 'proj';
   const groupDot = (list) => nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : ''); // a folded group's: its rows' most urgent
   $('#sideTitle').textContent = proj ? '项目' : '对话';
   // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
-  const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', 'Claude'], ['gpt', 'GPT']].map(([k, l]) => `<button data-kind="${k}"${k === listKind ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : '';
+  const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', SPARK, 'Claude'], state.gpt?.length && ['gpt', OPENAI, 'GPT'], state.gemini?.length && ['gem', AGY, 'Gemini']].filter(Boolean)
+    .map(([k, l, name]) => `<button data-kind="${k}"${k === lk ? ' class="on"' : ''}${name ? ` title="${name}" aria-label="${name}"` : ''}>${l}</button>`).join('')}</div>` : '';
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.prompt, x.cwd)}">${lead(x)}
-    <div class="main t">${x.mac ? '' : mark(x.gpt, x.acct + 1)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
+    <div class="main t">${x.mac ? '' : mark(convKind(x), x.acct + 1)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').html = `<button class="ico${proj ? ' on' : ''}" data-proj title="${proj ? '回到按文件夹' : '按项目'}">${svg(I.grid)}</button><button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
@@ -1508,7 +1518,9 @@ function rowMenu(id, x, y, inProj) {
   menuFor = s; menuAt = Date.now(); menuIn = inProj ?? null;
   // a GPT one: not renamed nor moved to another account here; deleted is archived (Codex's own, undone with codex unarchive).
   // A GPT 聊天 one: renamed and deleted here, at any time (an answer on its way is stopped)
-  const items = (s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
+  const no = 'Gemini 对话暂时不能在这里';
+  const items = (s.gem ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', `${no}改名`], ['swap', '换账号继续…', 'Gemini 对话不能换账号'], ['del', '删除…', `${no}删除`]]
+    : s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
     ['del', '归档…', s.pid && '正在运行：先结束对话再归档']] : [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
     ['swap', '换账号继续…', s.mac && `用的是 ${macName(s.mac)} 的账号，换不了`], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean);
   if (menuIn != null) items.splice(-1, 0, ['out', '移出这个项目']); // before 删除
@@ -1527,11 +1539,11 @@ function popMenu(title, list, x, y) {
 function paneMenu(c, b) {
   const mac = c.mac || state?.sessions.find((x) => x.id === c.id)?.mac, cwd = c.dir(), r = b.getBoundingClientRect();
   const off = isButler({ cwd }) ? '管家的文件夹里不开新对话' : !c.g ? '在管家里看的对话：回到对话列表再开' : !cwd && !mac ? '不知道它的文件夹' : '';
-  const where = !mac ? `在 ${base(cwd)} 里，用${c.gpt ? ' G' : '账号 '}${c.acct ?? '?'}` : cwd && !cwd.startsWith('/') ? `在 ${base(cwd)} 里，用 ${macName(mac)} 的账号` : `在 ${macName(mac)} 的工作文件夹里`;
+  const where = !mac ? `在 ${base(cwd)} 里，用${c.gem ? ' A' : c.gpt ? ' G' : '账号 '}${c.acct ?? '?'}` : cwd && !cwd.startsWith('/') ? `在 ${base(cwd)} 里，用 ${macName(mac)} 的账号` : `在 ${macName(mac)} 的工作文件夹里`;
   menuFor = { pane: c };
   popMenu(c.title, [
     ['fresh', '新对话', off || where, !off],
-    ['swap', '换账号继续…', c.gpt ? 'GPT 对话不能换账号' : mac && `用的是 ${macName(mac)} 的账号，换不了`],
+    ['swap', '换账号继续…', c.gpt || c.gem ? `${c.gem ? 'Gemini' : 'GPT'} 对话不能换账号` : mac && `用的是 ${macName(mac)} 的账号，换不了`],
     ['end', '结束对话', !c.where() && '没有在运行'],
   ], r.left, r.bottom + 4);
   if (!NARROW.matches) $('#cmenu').style.left = `${Math.max(8, r.right - $('#cmenu').offsetWidth)}px`; // its right edge under the ⋯
@@ -1572,7 +1584,7 @@ async function menuPick(e) {
 // not running isn't started first: the account picked on the card starts it). Its tab closed meanwhile, or another one
 // looked at (or 管家 mode gone into): no card, it would come up over that
 async function swapFrom(s) {
-  if (s.gpt) return toast('GPT 对话不能换账号');
+  if (s.gpt || s.gem) return toast(`${s.gem ? 'Gemini' : 'GPT'} 对话不能换账号`);
   if (s.mac) return toast(`用的是 ${macName(s.mac)} 的账号，换不了`);
   let c = convOf(s.id);
   if (c) activate(c.g, c);
@@ -1865,7 +1877,7 @@ function drawDesk() {
   head('deskRun', '对话', [wait.length && `${wait.length} 个等你`, done.length && `${done.length} 个答完了`, n && `${n} 个在运行`].filter(Boolean).join(' · ')); // what's for you first: the rest may be cut short
   $('#deskRun').html = `<div class="counts"><span class="${wait.length ? 'o' : ''}"><b>${wait.length}</b>等你</span><span class="${busy.length ? 'g' : ''}"><b>${busy.length}</b>在回复</span>
     <span class="${done.length ? 'b' : ''}"><b>${done.length}</b>答完了</span><span><b>${idle.length}</b>空闲</span></div>
-    ${[...wait, ...busy, ...done, ...idle].map((x) => `<div class="item" data-open="${esc(x.id)}" tabindex="0" role="button" title="${esc(x.cwd)}">${mark(x.gpt, x.acct + 1, x.mac)}<span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
+    ${[...wait, ...busy, ...done, ...idle].map((x) => `<div class="item" data-open="${esc(x.id)}" tabindex="0" role="button" title="${esc(x.cwd)}">${mark(convKind(x), x.acct + 1, x.mac)}<span class="t">${esc(x.title)}</span>${tag(x)}</div>`).join('')}`;
   renewTokens(drawDesk);
   // what the 管家 itself costs today, by what set it going (its replies at the API price; the watchdog's Haiku logged)
   const bc = tokens?.butler, COST = [['you', '你问的', 'b', 'a1'], ['notice', '系统通知', 'o', 'orange'], ['bg', '后台任务', 'p', 'purple']];
@@ -2145,10 +2157,10 @@ async function renderTokens() {
 
 function newSheet() {
   if (!state) return toast('还在加载，稍等');
-  const u = state.usage, dirs = u.projects ?? [], gp = state.gpt ?? [];
-  // with a GPT account or an OpenAI key: Claude or GPT; under GPT, Codex (its accounts) or 聊天 (with the key: neither
+  const u = state.usage, dirs = u.projects ?? [], gp = state.gpt ?? [], gm = state.gemini ?? [];
+  // with a GPT account or an OpenAI key: Claude or GPT (with a Gemini account: Gemini too); under GPT, Codex (its accounts) or 聊天 (with the key: neither
   // account nor folder), whichever there are
-  let gptOn = false, chat = !gp.length, acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? '', pick = null, places = null, seq = 0;
+  let gptOn = false, gemOn = false, chat = !gp.length, acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? '', pick = null, places = null, seq = 0;
   // 浏览: a window as Windows' own: the places on its left (最近, the home folder, 桌面 文档 下载, the drives), the
   // folder's folders and, dimmed, its files; a click goes into a folder, 选择 takes the one it's in. It opens on the
   // folder typed or picked; one that isn't there: 此电脑 (the places)
@@ -2184,25 +2196,29 @@ function newSheet() {
     $('#sheet').classList.toggle('wide', !!pick);
     if (pick) return drawPick();
     // the Macs last among Claude's accounts (acct: a Mac's id): its own folder there, no folder to pick here
-    const gpt = gptOn && !chat, oai = gptOn && chat, mac = gptOn ? null : macOf(acct) ?? null;
-    const accts = gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
+    const gpt = gptOn && !chat, oai = gptOn && chat, mac = gptOn || gemOn ? null : macOf(acct) ?? null;
+    const accts = gemOn ? gm.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">A${i + 1} · ${esc(g.label)}${g.on && gm.length > 1 ? ' · 在线' : ''}</button>`)
+      : gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
       : [...u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
         账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.api ? ' · 按用量计费' : a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`),
         ...(state.macs ?? []).map((m) => `<button class="opt ${mac?.id === m.id ? 'on' : ''}" data-a="${esc(m.id)}">${esc(m.label)}</button>`)];
     $('#sheetIn').innerHTML = `<div class="stitle">新对话</div>
-      ${gp.length || state.oai ? `<div class="seg kind">${[['', 'Claude'], ['1', 'GPT']].map(([v, l]) => `<button data-g="${v}"${!!v === gptOn ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : ''}
+      ${gp.length || state.oai || gm.length ? `<div class="seg kind">${[['', 'Claude'], (gp.length || state.oai) && ['1', 'GPT'], gm.length && ['m', 'Gemini']].filter(Boolean)
+        .map(([v, l]) => `<button data-g="${v}"${v === (gemOn ? 'm' : gptOn ? '1' : '') ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : ''}
       ${gptOn && gp.length && state.oai ? `<div class="opts" style="margin-top:12px">${[['', 'Codex：在文件夹里写代码'], ['1', '聊天：用 API key，按量计费']]
         .map(([v, l]) => `<button class="opt ${!!v === chat ? 'on' : ''}" data-chat="${v}">${l}</button>`).join('')}</div>` : ''}
       ${oai ? `<div class="m" style="margin-top:12px;white-space:normal">直接和 GPT-6 Astra 聊天，能联网、看图片和文件。输入框旁边可以选模式（普通，或 ChatGPT 的 GPT-6 Pro 那种 Pro）和思考强度。
         用你的 OpenAI key 按用量计费，Pro 难的问题一次要想几分钟，答好了会通知你。</div>`
       : `<div class="m" style="margin-top:12px">账号</div><div class="opts">${accts.join('')}</div>
+      ${gemOn && gm[acct - 1] && !gm[acct - 1].on ? '<div class="m" style="white-space:normal;margin-bottom:8px">同一时间只有一个 Gemini 账号在线：开始时会先换到这个账号（有 Gemini 对话在运行时换不了）。</div>' : ''}
       <div class="m">文件夹</div><div class="opts">${mac ? `<button class="opt ${dir ? '' : 'on'}" data-d="" title="不对应你电脑上的文件夹">${esc(base(mac.dir))}</button>` : ''}${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
       <div class="dirRow"><input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径"><button class="btn" id="browse">浏览…</button></div>
       ${mac ? `<div class="m" style="margin-top:8px;white-space:normal">${dir ? `在 ${esc(mac.label)} 上的 ${esc(mac.dir)}/${esc(base(dir))} 里运行，用那边的账号，通过 ssh 改你电脑上这个文件夹里的文件。`
         : `直接在 ${esc(mac.label)} 上的 ${esc(mac.dir)} 里运行，用那边的账号，不对应你电脑上的文件夹。`}</div>` : ''}`}
       <div class="btns" style="margin-top:14px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="start" style="flex:2">开始</button></div>`;
-    const kindTo = () => { acct = gptOn && !chat ? 1 : (u.rec ?? 0) + 1; draw(); }; // the first account of the kind picked
-    document.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { gptOn = !!b.dataset.g; kindTo(); }));
+    // the first account of the kind picked (Gemini's: the one on)
+    const kindTo = () => { acct = gptOn && !chat ? 1 : gemOn ? gm.findIndex((g) => g.on) + 1 || 1 : (u.rec ?? 0) + 1; draw(); };
+    document.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { gptOn = b.dataset.g === '1'; gemOn = b.dataset.g === 'm'; kindTo(); }));
     document.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => { chat = !!b.dataset.chat; kindTo(); }));
     // a Mac: its own folder there unless one here is picked; back to an account here, a folder here again
     document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => {
@@ -2217,7 +2233,7 @@ function newSheet() {
     $('#cancel').onclick = sheetOff;
     $('#start').onclick = () => {
       sheetOff();
-      addConv(focusG, oai ? makeOai(null, '新对话') : mac ? makeConv({ mac: mac.id, open: true, dir }, base(dir) || mac.label) : makeConv({ dir, acct, gpt }, base(dir) || '新对话'));
+      addConv(focusG, oai ? makeOai(null, '新对话') : mac ? makeConv({ mac: mac.id, open: true, dir }, base(dir) || mac.label) : makeConv({ dir, acct, gpt, gem: gemOn }, base(dir) || '新对话'));
     };
   };
   draw(); $('#sheet').classList.add('on');
@@ -2329,7 +2345,7 @@ function drawTabs(g) {
     const turning = c.ended ? false : c === g.active && c.started && !g.min ? c.live === 'busy' : busy.has(c.id); // (a collapsed column's: asleep, by the list)
     const dot = c.live === 'ask' || note.get(c.id) === 'ask' ? ' ask' : note.has(c.id) ? ' done' : '';
     return `<div class="tab${c === g.active ? ' on' : ''}${c.ended ? ' gone' : ''}" data-i="${i}" tabindex="0" role="tab" aria-selected="${c === g.active}" draggable="${FINE}" title="${esc(c.title)}">
-      ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct, '', c.gpt)}<span class="tt">${mark(c.gpt, c.acct, c.mac)}${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
+      ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct, '', convKind(c))}<span class="tt">${mark(convKind(c), c.acct, c.mac)}${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
   }).join('') || '<span class="brand">Claude 多账号</span>';
   g.el.classList.toggle('blank', !g.tabs.length);
   foldBtns();
@@ -2503,13 +2519,13 @@ const SEND_BOX = () => `<div class="send"><button class="toEnd" hidden></button>
 // a listed conversation's pane: a GPT 聊天 one's, or one with a terminal behind it
 // (a Mac's has no account here: open, when you opened it, as an account given means for one of this PC's; a tab back
 // after a reload has none, and only attaches to it if it runs)
-const convFor = (s, acct) => (s.oai ? makeOai(s.id, s.title) : makeConv({ id: s.id, acct: s.mac ? null : acct, gpt: s.gpt, mac: s.mac, open: s.mac && acct !== undefined }, s.title));
+const convFor = (s, acct) => (s.oai ? makeOai(s.id, s.title) : makeConv({ id: s.id, acct: s.mac ? null : acct, gpt: s.gpt, gem: s.gem, mac: s.mac, open: s.mac && acct !== undefined }, s.title));
 // body: {id, acct?} continues one, {dir, acct} starts one, {id} alone (a tab back after a reload) only attaches to it
 // if it runs. started: /api/open asked; ended: its Claude is gone (or couldn't start).
 function makeConv(body, title) {
-  const c = { id: body.id ?? null, title, acct: body.acct ?? null, gpt: !!body.gpt, mac: body.mac === true ? 'mac' : body.mac || null, g: null, started: false, ended: false, closed: false, live: '' }; // gpt: a GPT one (Codex); mac: on the Mac mini
+  const c = { id: body.id ?? null, title, acct: body.acct ?? null, gpt: !!body.gpt, gem: !!body.gem, mac: body.mac === true ? 'mac' : body.mac || null, g: null, started: false, ended: false, closed: false, live: '' }; // gpt: a GPT one (Codex); mac: on the Mac mini
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
-  let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
+  let view = body.gem ? 'term' : 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let gotAt = 0, waitAns = 0, waitT = 0; // when the record last brought messages; since when an answer the screen finished is waited for
   let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
   let queued = []; // what waits in Claude's queue, as the record says (sent from here, its window, the 管家): { text, at }
@@ -2520,7 +2536,7 @@ function makeConv(body, title) {
   const el = c.el = document.createElement('div');
   el.className = 'pane hist';
   el.innerHTML = `<div class="crumbs"><span class="path"></span>
-      <div class="seg"><button data-v="hist" class="on">对话</button><button data-v="term">终端</button></div>
+      ${body.gem ? '' : '<div class="seg"><button data-v="hist" class="on">对话</button><button data-v="term">终端</button></div>'}
       <button class="ico" data-act="more" title="新对话、换账号继续、结束对话">${svg(I.more, 1.8)}</button></div>
     <div class="notice"><span></span><button class="btn primary" data-act="resume">接着聊</button></div>
     <div class="screen"></div><div class="msgs"></div>
@@ -2582,7 +2598,7 @@ function makeConv(body, title) {
   function slashDraw() {
     const m = /^\/(\S*)$/.exec(line.value);
     if (!m || document.activeElement !== line) return void (slash.hidden = true); // (a draft put back: not while it's not typed in)
-    if (c.gpt) { cmds = []; slashNote = 'GPT（Codex）对话的命令这里列不出，可以直接打完整的命令'; }
+    if (c.gpt || c.gem) { cmds = []; slashNote = `${c.gem ? 'Gemini（agy）' : 'GPT（Codex）'}对话的命令这里列不出，可以直接打完整的命令`; }
     if (!cmds) { // asked for (a Mac's: from that Mac, the first time a few seconds: said meanwhile)
       askCmds();
       if (c.mac) { slash.innerHTML = '<div class="slashNote">正在从 Mac 读命令和技能…（第一次要几秒）</div>'; slash.hidden = false; } else slash.hidden = true;
@@ -2624,7 +2640,7 @@ function makeConv(body, title) {
     for (const f of files) {
       // a picture goes in as one (Claude attaches it); any other file, or a picture this browser can't open, by its path (a
       // GPT one's pictures too: Codex is given the path)
-      const pic = /^image\//.test(f.type) && !c.gpt;
+      const pic = /^image\//.test(f.type) && !c.gpt && !c.gem;
       if (!pic && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
       const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name };
       a.up = a.file ? sendFile(f, c.mac) : shrink(f).then((b) => upload(b, c.mac), () => { a.file = true; a.name = f.name; drawAtts(); return sendFile(f, c.mac); });
@@ -3019,7 +3035,7 @@ function makeConv(body, title) {
   // the service comes back as event switched, one in a window on the computer as a new Claude in the same window, found
   // by asking for the conversation until it runs under another key. One not running is simply started on that account.
   function swap(to) { // to: the account already picked (the 管家's card)
-    if (c.gpt) return toast('GPT 对话不能换账号');
+    if (c.gpt || c.gem) return toast(`${c.gem ? 'Gemini' : 'GPT'} 对话不能换账号`);
     const mac = c.mac || state?.sessions.find((x) => x.id === c.id)?.mac; // a Mac's runs on that Mac's account: none of these
     if (mac) return toast(`用的是 ${macName(mac)} 的账号，换不了`);
     const accts = state?.usage?.accounts ?? [], rec = state?.usage?.rec, cur = (c.acct ?? 1) - 1;
@@ -3057,7 +3073,7 @@ function makeConv(body, title) {
       await new Promise((ok) => setTimeout(ok, 2000));
       if (!switching || !term) return;
       try {
-        const r = await post('/api/open', { id: c.id, live: true, gpt: c.gpt, cols: term.cols, rows: term.rows });
+        const r = await post('/api/open', { id: c.id, live: true, gpt: c.gpt, gem: c.gem, cols: term.cols, rows: term.rows });
         if (r.key !== was) { ({ key, kind } = r); switched(); return connect(); }
       } catch {} // between the two Claudes: none runs it for a moment
     }
@@ -3164,7 +3180,7 @@ function makeConv(body, title) {
     if (!s) return toast('这个对话已经不在列表里了');
     const acct = s.pid || s.mac ? s.acct + 1 : await pickAcct(s);
     if ((!acct && !s.mac) || c.closed) return;
-    body = { id: s.id, acct, gpt: c.gpt, mac: c.mac }; c.acct = s.mac ? null : acct; start();
+    body = { id: s.id, acct, gpt: c.gpt, gem: c.gem, mac: c.mac }; c.acct = s.mac ? null : acct; start();
   }
   // The live stream, while the tab is shown. It is opened again when it goes quiet (a computer waking up, a phone back
   // from the background, a network change: a browser never notices a dead connection itself; the server pings every
@@ -3178,7 +3194,7 @@ function makeConv(body, title) {
     if (!term || c.ended || !shown) return;
     if (again && c.id) {
       let r;
-      try { r = await post('/api/open', { id: c.id, live: true, gpt: c.gpt, cols: term.cols, rows: term.rows }); }
+      try { r = await post('/api/open', { id: c.id, live: true, gpt: c.gpt, gem: c.gem, cols: term.cols, rows: term.rows }); }
       catch (e) { // the service saying it no longer runs ends it; no network, or the PC away (a phone just woken): again soon
         if (me !== gen) return;
         if (e instanceof TypeError || e.away) setTimeout(() => { if (me === gen) connect(true); }, 5000); else end();
@@ -3220,6 +3236,7 @@ function makeConv(body, title) {
 
   let busyIdle = 0, healAt = 0; // since when the service has had it idle while its screen says answering; the last reopen for that
   c.sync = () => { // from the list: its title and account; and where it runs
+    if (c.gem && !c.id && key) { const n = state?.sessions.find((x) => x.gem && x.key === key); if (n) { c.id = session.id = n.id; markRows(); save(); } } // a new Gemini one: listed once you've said something
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null;
     if (s) { c.title = s.title; c.acct = s.pid ? s.acct + 1 : body.acct ?? s.acct + 1; }
     // its folder: a button, what's in it shown while the mouse is on it (dirPop), a click opens it in 预览; a Mac's own
@@ -3239,7 +3256,7 @@ function makeConv(body, title) {
     shown = true; el.classList.add('on'); readNote(c.id);
     if (!c.started) {
       const s = c.id && state?.sessions.find((x) => x.id === c.id);
-      if (body.acct || body.open || s?.pid) { if (!body.acct && !body.open) body = { id: c.id, acct: s.acct + 1, gpt: c.gpt }; return start(); }
+      if (body.acct || body.open || s?.pid) { if (!body.acct && !body.open) body = { id: c.id, acct: s.acct + 1, gpt: c.gpt, gem: c.gem }; return start(); }
       notice('idle', '这个对话没有在运行'); c.sync();
     } else if (!c.ended && !es && key) connect();
     setView(view);
@@ -3256,7 +3273,7 @@ function makeConv(body, title) {
   c.fresh = () => {
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null, cwd = c.dir(), mac = c.mac || s?.mac, here = cwd && !cwd.startsWith('/');
     const n = mac ? makeConv({ mac, open: true, ...(here && { dir: cwd }) }, here ? base(cwd) : macName(mac)) // not for a folder here: the Mac's own folder
-      : makeConv({ dir: cwd, acct: c.acct ?? (s ? s.acct + 1 : 1), gpt: c.gpt }, base(cwd) || '新对话');
+      : makeConv({ dir: cwd, acct: c.acct ?? (s ? s.acct + 1 : 1), gpt: c.gpt, gem: c.gem }, base(cwd) || '新对话');
     n.joins = (state?.projects ?? []).filter((p) => c.id && p.ids.includes(c.id)).map((p) => p.id); // added once it has a record
     addConv(c.g, n);
   };
