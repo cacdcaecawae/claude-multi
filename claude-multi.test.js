@@ -1905,3 +1905,16 @@ process.once('beforeExit', () => {
     updRan = true;
   }).catch((e) => { console.error(e); process.exitCode = 1; updRan = true; });
 });
+// claude installed by npm (Windows): where gives its sh shim, which nothing but a shell starts; the package's claude.exe
+if (process.platform === 'win32') {
+  const fs = require('fs'), path = require('path'), { claudeCmd } = require('./claude-multi');
+  const npm = path.join(TEST_HOME, 'npm'), exe = path.join(npm, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+  fs.mkdirSync(path.dirname(exe), { recursive: true });
+  fs.writeFileSync(path.join(npm, 'claude'), '#!/bin/sh\n'); fs.writeFileSync(exe, '');
+  assert.equal(claudeCmd(path.join(npm, 'claude')), exe);
+  assert.equal(claudeCmd(path.join(npm, 'claude.cmd')), exe);
+  assert.equal(claudeCmd('C:\\Users\\me\\.local\\bin\\claude.exe'), 'C:\\Users\\me\\.local\\bin\\claude.exe'); // the installer's: as it is
+  assert.equal(claudeCmd(path.join(TEST_HOME, 'elsewhere', 'claude')), path.join(TEST_HOME, 'elsewhere', 'claude')); // no package beside it
+  assert.equal(claudeCmd(''), 'claude'); // none found
+  console.log('claude from npm ok');
+}

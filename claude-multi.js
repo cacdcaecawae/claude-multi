@@ -28,6 +28,13 @@ const whereIs = (c) => spawnSync(WIN ? 'where' : 'which', [c], { encoding: 'utf8
 const BUTLER_ON = path.join(ROOT, 'butler-on');
 const butlerOn = () => fs.existsSync(BUTLER_ON), BUTLER_SHUT = '管家没有开启：在设置的「开发功能」里打开';
 const CLAUDE = 'claude';
+// claude's own program. npm's on Windows is a shim only a shell starts, and where lists its sh script first: the page's
+// pseudo-terminal got error 193 (no pid, every conversation ended at once), spawn without a shell no claude at all.
+// So the claude.exe its claude.cmd runs.
+function claudeCmd(at = whereIs('claude')) {
+  const npm = WIN && at && !/\.exe$/i.test(at) && path.join(path.dirname(at), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+  return npm && fs.existsSync(npm) ? npm : at || CLAUDE;
+}
 
 const SHARED_FILES = ['settings.json', 'CLAUDE.md', 'keybindings.json'];
 const SHARED_DIRS = ['hooks', 'rules', 'plugins', 'skills', 'agents', 'commands', 'output-styles', 'ide'];
@@ -186,13 +193,13 @@ function childEnv(dir) {
 function run(dir, args) {
   const ignore = () => {};
   process.on('SIGINT', ignore);
-  const r = spawnSync(CLAUDE, args, { stdio: 'inherit', env: childEnv(dir) });
+  const r = spawnSync(claudeCmd(), args, { stdio: 'inherit', env: childEnv(dir) });
   process.off('SIGINT', ignore);
   return r;
 }
 
 function authStatus(dir) {
-  const r = spawnSync(CLAUDE, ['auth', 'status', '--json'], { env: childEnv(dir), encoding: 'utf8' });
+  const r = spawnSync(claudeCmd(), ['auth', 'status', '--json'], { env: childEnv(dir), encoding: 'utf8' });
   try { return JSON.parse(r.stdout); } catch { return { loggedIn: false }; }
 }
 
@@ -536,7 +543,7 @@ async function warmup() {
       continue;
     }
     process.stdout.write(`${head}发送中…`);
-    const r = spawnSync(CLAUDE, ['-p', 'hi', '--model', 'haiku', '--tools', '', '--setting-sources', '',
+    const r = spawnSync(claudeCmd(), ['-p', 'hi', '--model', 'haiku', '--tools', '', '--setting-sources', '',
       '--strict-mcp-config', '--no-session-persistence'],
     { env: childEnv(p.configDir), cwd: os.tmpdir(), encoding: 'utf8', timeout: 120000 });
     let after = await fetchUsage(p);
@@ -3257,7 +3264,7 @@ async function web() {
   const checkUpd = () => updateCheck().then((u) => { upd = u; }, () => {});
   setTimeout(checkUpd, 60000); setInterval(checkUpd, 3600000);
   const http = require('http'), pty = require('@lydell/node-pty');
-  const claudeExe = whereIs('claude') || CLAUDE;
+  const claudeExe = claudeCmd();
   const codex = codexCmd(); // GPT conversations: none started without it
   const sshExe = whereIs('ssh') || 'ssh'; // the Mac's
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
@@ -4740,7 +4747,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade };
+module.exports = { sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, claudeCmd };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

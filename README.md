@@ -285,7 +285,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 
 **1. 电脑能免密 SSH 登录服务器。**在 `~/.ssh/config` 里给服务器起一个名字，比如 `myserver`，并配好密钥登录。
 
-**2. 写服务器信息。**在 `%USERPROFILE%\.claude-multi\` 里新建 `tunnel.json`（这个文件不进仓库）：
+**2. 写服务器信息。**在 `%USERPROFILE%\.claude-multi\`（Mac 是 `~/.claude-multi/`）里新建 `tunnel.json`（这个文件不进仓库）：
 
 ```json
 { "ssh": "myserver", "url": "https://你的服务器地址:8443" }
@@ -334,7 +334,7 @@ server {
 }
 ```
 
-**5. 启动网页服务**（`claude-multi web`），它会自己建好隧道。然后用 `claude-multi web-link` 打印的链接在手机上打开。
+**5. 重启网页服务**（`claude-multi web restart`，Mac 上是 `node ~/.claude-multi/claude-multi.js web restart`）。网页服务只在启动时读 `tunnel.json`，一行安装已经让它在跑了，所以写完要重启一次，它会自己建好隧道。然后用 `claude-multi web-link` 打印的链接在手机上打开。
 
 > 如果电脑开着 Clash 之类的 TUN 模式代理，记得让到服务器的连接走直连。
 
