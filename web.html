@@ -510,10 +510,12 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .pane.hist .screen, .pane.hist .keys { display: none; }
   /* 对话's turns down its left, as Codex's (navOf): a tick a message of yours over the list's left margin, the one you're
      reading darker; the mouse on one, it longest and those around it less and less (--w); each line set on whole screen
-     pixels (--o, --t), so all as thick */
-  .nav { position: absolute; z-index: 2; width: 30px; }
+     pixels (--o, --t), so all as thick. The words start right of them (they took the mouse from a line's first letters:
+     a selection begun there began elsewhere); only the ticks take the mouse, not the strip around them */
+  @media (pointer: fine) and (min-width: 760px) { .pane.hist .msgs { padding-left: 36px; } }
+  .nav { position: absolute; z-index: 2; width: 30px; pointer-events: none; }
   .pane:not(.hist) .nav, .nav:empty { display: none; }
-  .navT { position: absolute; left: 0; right: 0; cursor: pointer; }
+  .navT { position: absolute; left: 0; right: 0; cursor: pointer; pointer-events: auto; }
   .navT::before { content: ''; position: absolute; left: 6px; top: var(--o); width: var(--w, 8px); height: var(--t); background: var(--fg3); opacity: .55; transition: width .15s, opacity .15s; }
   .navT.nr::before { opacity: .85; }
   .navT.on::before, .navT:hover::before { background: var(--fg); opacity: 1; }
