@@ -1918,21 +1918,22 @@ if (process.platform === 'win32') {
   assert.equal(claudeCmd(''), 'claude'); // none found
   console.log('claude from npm ok');
 }
-// Gemini (agy): each account's conversations from its conversation_summaries.db and history.jsonl; its status line; the
-// account on switched by its sign-in (Credential Manager: a test entry here, never agy's own) and ~/.gemini's link
+// Gemini (agy): its conversations from ~/.gemini's conversation_summaries.db and history.jsonl, shared by all accounts;
+// its status line; the account on switched by its sign-in alone (Credential Manager: a test entry here, never agy's own)
 {
   const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemOn, agyCred, gemSettings, statusline, saveLine, readLine } = require('./claude-multi');
   const { DatabaseSync } = require('node:sqlite');
   const regFile = path.join(TEST_HOME, '.claude-multi', 'profiles.json'), reg0 = fs.readFileSync(regFile, 'utf8');
+  const GEM = path.join(TEST_HOME, '.gemini', 'antigravity-cli');
   const acc = (n) => {
     const home = path.join(TEST_HOME, '.claude-multi', 'accounts', `gemini-t-00${n}`);
-    fs.mkdirSync(path.join(home, 'antigravity-cli'), { recursive: true });
+    fs.mkdirSync(home, { recursive: true });
     return { id: `gemini-t-00${n}`, label: `g${n}@example.com`, email: `g${n}@example.com`, home };
   };
   const a1 = acc(1), a2 = acc(2), work = path.join(TEST_HOME, 'gem-work'), uri = url.pathToFileURL(work).href;
-  fs.mkdirSync(work);
+  fs.mkdirSync(work); fs.mkdirSync(GEM, { recursive: true });
   fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, a2], geminiOn: a1.id }));
-  const d = new DatabaseSync(path.join(a1.home, 'antigravity-cli', 'conversation_summaries.db'));
+  const d = new DatabaseSync(path.join(GEM, 'conversation_summaries.db'));
   d.exec("create table conversation_summaries (conversation_id text, title text not null default '', preview text not null default '', last_modified_time datetime not null, workspace_uris text not null, parent_conversation_id text not null default '')");
   const ins = d.prepare('insert into conversation_summaries values (?, ?, ?, ?, ?, ?)');
   ins.run('c-new', '', '', '0001-01-01 00:00:00+00:00', JSON.stringify([uri]), '');               // no title yet: your first message's first line
@@ -1942,7 +1943,7 @@ if (process.platform === 'win32') {
   ins.run('c-gone', 'x', '', '2026-11-20 09:00:00+00:00', JSON.stringify([url.pathToFileURL(path.join(TEST_HOME, 'nope')).href]), ''); // its folder gone
   d.close();
   const h = JSON.stringify;
-  fs.writeFileSync(path.join(a1.home, 'antigravity-cli', 'history.jsonl'), [
+  fs.writeFileSync(path.join(GEM, 'history.jsonl'), [
     h({ display: '/model', timestamp: 1000, workspace: work, type: 'slash_command' }),
     h({ display: '把登录改好', timestamp: Date.parse('2026-11-19T07:59:00Z'), workspace: work, conversationId: 'c-old' }),
     h({ display: '加一个测试\n第二行', timestamp: Date.parse('2026-11-20T10:00:00Z'), workspace: work, conversationId: 'c-new' }),
@@ -1952,13 +1953,23 @@ if (process.platform === 'win32') {
   const L = listGemini();
   assert.deepEqual(L.map((s) => [s.id, s.title, s.prompt, s.cwd, s.acct, s.gem]), [['c-new', '加一个测试', null, work, 0, true], ['c-old', '修复登录', '把登录改好', work, 0, true]]);
   assert.deepEqual(L.map((s) => [s.at, s.made]), [[Date.parse('2026-11-20T10:05:00Z'), Date.parse('2026-11-20T10:00:00Z')], [Date.parse('2026-11-19T08:00:00.123Z'), Date.parse('2026-11-19T07:59:00Z')]]);
-  // its status line: ours set in its settings (what's there kept), a status line of your own left; what it says, by
-  // the account on (its email), and kept for the page's status bar (its effort is the model's)
-  const sf = path.join(a2.home, 'antigravity-cli', 'settings.json');
+  // the same ones with A2 on (they go on with it); none before there's an account
+  fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, a2], geminiOn: a2.id }));
+  assert.deepEqual(listGemini().map((s) => [s.id, s.acct]), [['c-new', 1], ['c-old', 1]]);
+  fs.writeFileSync(regFile, reg0);
+  assert.deepEqual(listGemini(), []);
+  fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, a2], geminiOn: a1.id }));
+  // its status line: ours set in ~/.gemini's settings (what's there kept), a status line of your own left; what it says,
+  // by the account on (its email), and kept for the page's status bar (its effort is the model's)
+  const sf = path.join(GEM, 'settings.json');
   fs.writeFileSync(sf, JSON.stringify({ model: 'gemini-4-neon-high' }));
-  gemSettings(a2.home, '/x/claude-multi.js');
+  gemSettings(undefined, '/x/claude-multi.js');
   assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')), { model: 'gemini-4-neon-high', statusLine: { type: 'command', command: 'node "/x/claude-multi.js" statusline' } });
-  fs.writeFileSync(sf, JSON.stringify({ statusLine: { command: 'mine.cmd' } })); gemSettings(a2.home, '/x/claude-multi.js');
+  fs.writeFileSync(sf, String.fromCharCode(0xfeff) + JSON.stringify({ theme: 'dark' })); gemSettings(undefined, '/x/claude-multi.js'); // a BOM before (Notepad's)
+  assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')), { theme: 'dark', statusLine: { type: 'command', command: 'node "/x/claude-multi.js" statusline' } });
+  fs.writeFileSync(sf, '{ theme: dark }'); gemSettings(undefined, '/x/claude-multi.js'); // not JSON: left as it is
+  assert.equal(fs.readFileSync(sf, 'utf8'), '{ theme: dark }');
+  fs.writeFileSync(sf, JSON.stringify({ statusLine: { command: 'mine.cmd' } })); gemSettings(undefined, '/x/claude-multi.js');
   assert.equal(JSON.parse(fs.readFileSync(sf, 'utf8')).statusLine.command, 'mine.cmd');
   const gin = { product: 'antigravity', email: 'g2@example.com', session_id: 'c-gem', model: { display_name: 'Gemini 4 Neon', effort: 'high' }, context_window: { used_percentage: 12 } };
   assert.equal(statusline(gin), 'Gemini 账号 A2  │  Gemini 4 Neon · high  │  context 12%');
@@ -1972,54 +1983,49 @@ if (process.platform === 'win32') {
   // the switching: once everything else is done (a PowerShell each step, a minute in all, would hold up the tests with a
   // timer of their own), the registry with them meanwhile
   if (process.platform === 'win32') process.once('beforeExit', async () => {
-    const { execFileSync } = require('child_process'), { newGemini } = require('./claude-multi'), link = path.join(TEST_HOME, '.gemini'), ACCOUNTS_T = path.join(TEST_HOME, '.claude-multi', 'accounts');
+    const { execFileSync } = require('child_process'), { newGemini } = require('./claude-multi'), gh = path.join(TEST_HOME, '.gemini'), ACCOUNTS_T = path.join(TEST_HOME, '.claude-multi', 'accounts');
     process.env.CM_AGY_CRED = `cm-test-${process.pid}:antigravity`;
     const set = (v) => execFileSync('cmdkey', [`/generic:${process.env.CM_AGY_CRED}`, '/user:antigravity', `/pass:${v}`], { stdio: 'pipe' });
     const now = async () => { const r = await agyCred('peek'); return r.status ? null : Buffer.from(r.stdout, 'base64').toString('latin1').replace(/\0/g, ''); }; // (cmdkey writes UTF-16)
-    const reg = () => JSON.parse(fs.readFileSync(regFile, 'utf8')), to = () => path.resolve(fs.readlinkSync(link)).toLowerCase();
-    const on = async () => [reg().geminiOn, to(), await now()];
+    const reg = () => JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    const on = async () => [reg().geminiOn, await now()];
     const quiet = async (f) => { const log = console.log; console.log = () => {}; try { return await f(); } finally { console.log = log; } };
+    // ~/.gemini yours throughout: a folder, what's in it where it was
+    const yours = () => assert.ok(!fs.lstatSync(gh).isSymbolicLink() && fs.readFileSync(path.join(gh, 'mine.txt'), 'utf8') === 'x' && fs.existsSync(path.join(GEM, 'conversation_summaries.db')));
     try {
+      fs.writeFileSync(path.join(gh, 'mine.txt'), 'x');
       fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, a2], geminiOn: a1.id }));
       set('two'); assert.equal((await agyCred('save', path.join(a2.home, 'cm-login.dpapi'))).status, 0);
       set('one'); assert.equal((await agyCred('save', path.join(a1.home, 'cm-login.dpapi'))).status, 0);
-      await gemOn(a1, async () => false); // on in the registry, never linked yet: linked, its sign-in put in
-      assert.deepEqual(await on(), [a1.id, a1.home.toLowerCase(), 'one']);
+      await gemOn(a1, async () => true); // already on: nothing to switch, whatever runs
+      assert.deepEqual(await on(), [a1.id, 'one']);
       await assert.rejects(gemOn(a2, async () => true), /有 Gemini（agy）在运行.*A2/); // an agy running: no switch
-      assert.deepEqual(await on(), [a1.id, a1.home.toLowerCase(), 'one']);
+      assert.deepEqual(await on(), [a1.id, 'one']);
       set('one-refreshed'); // agy refreshed A1's sign-in meanwhile: kept with A1 on the switch
       await gemOn(a2, async () => false);
-      assert.deepEqual(await on(), [a2.id, a2.home.toLowerCase(), 'two']);
-      await gemOn(a2, async () => true); // already on: nothing to switch, whatever runs
+      assert.deepEqual(await on(), [a2.id, 'two']);
       await gemOn(a1, async () => false);
-      assert.deepEqual(await on(), [a1.id, a1.home.toLowerCase(), 'one-refreshed']);
+      assert.deepEqual(await on(), [a1.id, 'one-refreshed']);
       // A2's saved sign-in unreadable: no switch, none on (A1's sign-in kept with it and still in), and A1 on again after
       fs.writeFileSync(path.join(a2.home, 'cm-login.dpapi'), 'not dpapi');
       await assert.rejects(gemOn(a2, async () => false), /A2 的登录读不出来/);
-      assert.deepEqual(await on(), [null, a1.home.toLowerCase(), 'one-refreshed']);
+      assert.deepEqual(await on(), [null, 'one-refreshed']);
       await gemOn(a1, async () => false);
-      assert.deepEqual(await on(), [a1.id, a1.home.toLowerCase(), 'one-refreshed']);
-      // a ~/.gemini of yours (a folder, or a link elsewhere): left alone, said, before any sign-in moves
-      const elsewhere = path.join(TEST_HOME, 'my-gemini'); fs.mkdirSync(elsewhere);
-      fs.unlinkSync(link); fs.symlinkSync(elsewhere, link, 'junction');
-      fs.writeFileSync(regFile, JSON.stringify({ ...reg(), geminiOn: a2.id }));
-      await assert.rejects(gemOn(a1, async () => false), /不是 claude-multi 建的链接/);
-      assert.deepEqual([to(), await now()], [elsewhere.toLowerCase(), 'one-refreshed']);
-      fs.unlinkSync(link); fs.mkdirSync(link); fs.writeFileSync(path.join(link, 'mine.txt'), 'x');
-      await assert.rejects(gemOn(a1, async () => false), /不是 claude-multi 建的链接/);
-      assert.ok(fs.existsSync(path.join(link, 'mine.txt')));
-      // new gemini (agy here: a program that signs nobody in). The first takes your ~/.gemini as its folder and the
-      // sign-in there as its own; the next, not signed in, puts back what was: the first on, its sign-in, its folder
+      assert.deepEqual(await on(), [a1.id, 'one-refreshed']);
+      yours();
+      // new gemini (agy here: a program that signs nobody in). The first takes the sign-in there as its own (its folder:
+      // that alone, the status line in ~/.gemini's settings); the next, not signed in: its folder gone, the first on again
       process.env.CM_AGY = process.execPath;
-      fs.writeFileSync(regFile, reg0); set('mine');
+      fs.writeFileSync(regFile, reg0); fs.rmSync(sf); set('mine');
       assert.equal(await quiet(() => newGemini(async () => false)), true);
       const g1 = reg().gemini?.[0], day = new Date().toLocaleDateString('sv').replace(/-/g, '');
-      assert.deepEqual([g1?.id, g1?.label, reg().geminiOn, to(), await now()], [`gemini-${day}-001`, 'Google 账号', g1?.id, g1?.home.toLowerCase(), 'mine']);
-      assert.ok(fs.existsSync(path.join(g1.home, 'mine.txt')) && fs.existsSync(path.join(g1.home, 'cm-login.dpapi')));
-      assert.match(fs.readFileSync(path.join(g1.home, 'antigravity-cli', 'settings.json'), 'utf8'), /claude-multi\.js\\" statusline/);
+      assert.deepEqual([g1?.id, g1?.label, ...await on()], [`gemini-${day}-001`, 'Google 账号', g1?.id, 'mine']);
+      assert.deepEqual(fs.readdirSync(g1.home), ['cm-login.dpapi']);
+      assert.match(fs.readFileSync(sf, 'utf8'), /claude-multi\.js\\" statusline/);
       assert.equal(await quiet(() => newGemini(async () => false)), null);
-      assert.deepEqual([reg().gemini.length, reg().geminiOn, to(), await now()], [1, g1.id, g1.home.toLowerCase(), 'mine']);
-      assert.ok(fs.existsSync(path.join(ACCOUNTS_T, `gemini-${day}-002`))); // its folder left, as said
+      assert.deepEqual([reg().gemini.length, ...await on()], [1, g1.id, 'mine']);
+      assert.ok(!fs.existsSync(path.join(ACCOUNTS_T, `gemini-${day}-002`)));
+      yours();
       // the same Google account again (A1's, its email known now): A1's sign-in renewed, A1 on, the folder made for it gone.
       // agy here: a program named models in the folder it runs in, putting a sign-in in; Google: says it's A1's
       fs.writeFileSync(regFile, JSON.stringify({ ...reg(), gemini: [{ ...g1, email: 'g1@example.com' }] }));
@@ -2029,11 +2035,12 @@ if (process.platform === 'win32') {
       global.fetch = async () => ({ ok: true, json: async () => ({ email: 'g1@example.com' }) });
       process.chdir(TEST_HOME);
       try { assert.equal(await quiet(() => newGemini(async () => false)), true); } finally { process.chdir(cwd); global.fetch = fetch0; }
-      assert.deepEqual([reg().gemini.length, reg().geminiOn, to(), await now()], [1, g1.id, g1.home.toLowerCase(), json]);
-      assert.ok(!fs.existsSync(path.join(ACCOUNTS_T, `gemini-${day}-003`)) && fs.existsSync(path.join(ACCOUNTS_T, `gemini-${day}-002`)));
+      assert.deepEqual([reg().gemini.length, ...await on()], [1, g1.id, json]);
+      assert.deepEqual(fs.readdirSync(ACCOUNTS_T).filter((x) => x.startsWith(`gemini-${day}`)), [g1.id]);
+      yours();
       assert.equal((await agyCred('has')).status, 0); await agyCred('drop'); assert.equal((await agyCred('has')).status, 3);
     } finally {
-      await agyCred('drop'); fs.rmSync(link, { recursive: true, force: true }); fs.writeFileSync(regFile, reg0);
+      await agyCred('drop'); fs.rmSync(gh, { recursive: true, force: true }); fs.writeFileSync(regFile, reg0);
       delete process.env.CM_AGY_CRED; delete process.env.CM_AGY;
     }
     console.log('gemini switch ok');

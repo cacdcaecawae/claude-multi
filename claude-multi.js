@@ -1322,12 +1322,13 @@ function notifyGpt(arg, home = process.env.CODEX_HOME) {
 }
 
 // --- Gemini: Google's Antigravity CLI (agy), signed in with a Google account, as a third kind of conversation (Windows
-// only). Its accounts are A1, A2… (the registry's gemini), each a folder in accounts\. agy keeps everything in ~/.gemini
-// (no setting moves it) and its sign-in in one Credential Manager entry, the same whatever the folder: so one account is
-// on at a time (geminiOn), its folder linked as ~/.gemini and its sign-in in that entry. Each account's sign-in is kept
-// in its folder (cm-login.dpapi: encrypted for this Windows user); switching puts the other's in, only while no agy runs
-// (a running one would go on as the new account, as it reads the entry again).
-const GEMINI_LINK = path.join(HOME, '.gemini'), AGY_CRED = 'gemini:antigravity';
+// only). Its accounts are A1, A2… (the registry's gemini). agy keeps its sign-in in one Credential Manager entry, so one
+// account is on at a time (geminiOn), its sign-in in that entry; everything else (settings, MCP, plugins, conversations)
+// is in your ~/.gemini, shared by all and never moved, so a conversation goes on with whichever is on (as Antigravity
+// Manager does it). Each account's sign-in is kept in its folder in accounts\ (cm-login.dpapi: encrypted for this
+// Windows user, all that's there); switching puts the other's in, only while no agy runs (a running one would go on as
+// the new account, as it reads the entry again).
+const GEMINI_HOME = path.join(HOME, '.gemini'), AGY_CRED = 'gemini:antigravity';
 const geminiAccounts = (reg = load()) => reg.gemini ?? [];
 const gemByName = (x, reg) => (/^a\d+$/i.test(x ?? '') ? geminiAccounts(reg)[Number(x.slice(1)) - 1] ?? null : null);
 const gemLogin = (home) => path.join(home, 'cm-login.dpapi');
@@ -1386,23 +1387,7 @@ switch ($env:CM_OP) {
 // (the script whole, as -EncodedCommand: its quotes never meet the command line's; CM_AGY_CRED: another entry, for tests)
 const agyCred = (op, file = '') => execA('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(AGY_CRED_PS, 'utf16le').toString('base64')],
   { env: { ...process.env, CM_OP: op, CM_FILE: file, CM_CRED: process.env.CM_AGY_CRED || AGY_CRED } });
-// what ~/.gemini is: nothing; ours, a link to an account's folder (its path); or yours, a folder (folder: true) or a link
-// elsewhere: never replaced
-const NOT_OURS = `${GEMINI_LINK} 不是 claude-multi 建的链接（是你自己的文件夹或链接）：先把它挪走`;
-function geminiAt() {
-  let st;
-  try { st = fs.lstatSync(GEMINI_LINK); } catch { return {}; }
-  if (!st.isSymbolicLink()) return { yours: true, folder: true };
-  const to = path.resolve(fs.readlinkSync(GEMINI_LINK));
-  return sameDir(path.dirname(to), ACCOUNTS) ? { ours: to } : { yours: true };
-}
-function pointGemini(to) {
-  const at = geminiAt();
-  if (at.yours) throw new Error(NOT_OURS);
-  if (at.ours) fs.unlinkSync(GEMINI_LINK); // the link only: what it points at stays
-  fs.symlinkSync(to, GEMINI_LINK, 'junction');
-}
-// Account g on: the one on before keeps its sign-in as agy last refreshed it, g's put in, ~/.gemini to its folder. Never
+// Account g on: the one on before keeps its sign-in as agy last refreshed it, g's put in. Never
 // while an agy runs; while the entry changes the registry says none is on (stopped there, the next switch saves no
 // sign-in into the wrong account), g once its sign-in is in; one that can't be read leaves none on. One switch at a
 // time. shortcut: one at a time in this process only (the web service and a start An at the same instant could
@@ -1414,9 +1399,8 @@ function gemOn(g, running = agyRunning) {
   return p;
 }
 async function gemSwitch(g, running) {
-  const reg = load(), at = geminiAt(), all = geminiAccounts(reg), n = all.findIndex((x) => x.id === g.id) + 1;
-  if (reg.geminiOn === g.id && at.ours && sameDir(at.ours, g.home)) return;
-  if (at.yours) throw new Error(NOT_OURS); // before any sign-in moves
+  const reg = load(), all = geminiAccounts(reg), n = all.findIndex((x) => x.id === g.id) + 1;
+  if (reg.geminiOn === g.id) return;
   if (await running()) throw new Error(`有 Gemini（agy）在运行：先结束它，才能换到 Gemini 账号 A${n}（同一时间只有一个 Gemini 账号在线）`);
   const was = all.find((x) => x.id === reg.geminiOn && x.id !== g.id);
   if (was && ![0, 3].includes((await agyCred('save', gemLogin(was.home))).status)) // 3: none there (signed out meanwhile): its file as it was
@@ -1424,7 +1408,6 @@ async function gemSwitch(g, running) {
   update((x) => { x.geminiOn = null; });
   if ((await agyCred('load', gemLogin(g.home))).status !== 0) throw new Error(`Gemini 账号 A${n} 的登录读不出来：用 claude-multi new gemini 再登录一次这个 Google 账号`);
   update((x) => { x.geminiOn = g.id; });
-  pointGemini(g.home);
   log('gemini_on', { profile_id: g.id });
 }
 // the signed-in account's email, asked of Google with its token (right after signing in: fresh)
@@ -1436,66 +1419,57 @@ async function gemWho() {
     return u.ok ? (await u.json()).email ?? null : null;
   } catch { return null; }
 }
-// its status line (model, context used: the page's status bar), unless one of your own is set there
-function gemSettings(home, script = __filename.replace(/\\/g, '/')) {
+// its status line (model, context used: the page's status bar), unless one of your own is set there; settings it can't
+// read (not JSON) left as they are (trim: a BOM too)
+function gemSettings(home = GEMINI_HOME, script = __filename.replace(/\\/g, '/')) {
   const f = path.join(home, 'antigravity-cli', 'settings.json');
   let s = {};
-  try { s = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
+  try { const t = fs.readFileSync(f, 'utf8').trim(); s = t ? JSON.parse(t) : {}; } catch (e) { if (e.code !== 'ENOENT') return; }
   if (s.statusLine && !String(s.statusLine.command ?? '').includes('claude-multi.js')) return;
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, JSON.stringify({ ...s, statusLine: { type: 'command', command: `node "${script}" statusline` } }, null, 2) + '\n');
 }
 // new gemini: an account, signed in with Google (agy models: it asks for one when there's none; a browser, or its link
-// opened anywhere and the code pasted back). The first one takes what's here already: a ~/.gemini of yours as its folder
-// (or the account folder an earlier try left linked), a sign-in agy has as its own. A Google account already here: its
-// sign-in renewed. Not signed in (Ctrl+C there too): what was is put back, the one on before on again.
+// opened anywhere and the code pasted back). The first one takes a sign-in agy has already as its own. A Google account
+// already here: its sign-in renewed. Not signed in (Ctrl+C there too): its folder gone, the one on before on again.
 async function newGemini(running = agyRunning) {
   const agy = agyCmd();
   if (!agy) { console.log(`没找到 agy，先装好 Antigravity 的命令行（在 PowerShell 里）：${AGY_GET}`); return null; }
   if (await running()) { console.log('有 Gemini（agy）在运行：先结束它，再加账号'); return null; }
-  const reg = load(), first = !geminiAccounts(reg).length, was = geminiAccounts(reg).find((x) => x.id === reg.geminiOn), at = geminiAt();
-  const adopt = first && at.folder, stray = first && at.ours && fs.existsSync(at.ours) ? at.ours : null;
-  if (at.yours && !adopt) { console.log(NOT_OURS); return null; }
+  const reg = load(), first = !geminiAccounts(reg).length, was = geminiAccounts(reg).find((x) => x.id === reg.geminiOn);
   if (was && ![0, 3].includes((await agyCred('save', gemLogin(was.home))).status)) { console.log('现在在线的 Gemini 账号的登录没能存下来，先不加新账号'); return null; }
   let id, home;
-  if (stray) { home = stray; id = path.basename(stray); }
-  else {
-    fs.mkdirSync(ACCOUNTS, { recursive: true });
-    const day = new Date().toLocaleDateString('sv').replace(/-/g, '');
-    for (let n = 1; ; n++) { // mkdir without recursive is the uniqueness check, as newGpt's (the first's: taken by yours)
-      id = `gemini-${day}-${String(n).padStart(3, '0')}`; home = path.join(ACCOUNTS, id);
-      try { fs.mkdirSync(home); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
-    }
-    if (adopt) { fs.rmdirSync(home); fs.renameSync(GEMINI_LINK, home); }
+  fs.mkdirSync(ACCOUNTS, { recursive: true });
+  const day = new Date().toLocaleDateString('sv').replace(/-/g, '');
+  for (let n = 1; ; n++) { // mkdir without recursive is the uniqueness check, as newGpt's
+    id = `gemini-${day}-${String(n).padStart(3, '0')}`; home = path.join(ACCOUNTS, id);
+    try { fs.mkdirSync(home); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
   }
   update((x) => { x.geminiOn = null; }); // the entry is no account's from here till it's this one's, or the one before's again
   const back = async (why) => {
     console.log(why);
-    const o = geminiAt().ours;
-    if (!stray && o && sameDir(o, home)) try { fs.unlinkSync(GEMINI_LINK); } catch {}
-    if (adopt) try { fs.renameSync(home, GEMINI_LINK); } catch {} // yours back where it was
-    if (was && !(await running()) && (await agyCred('load', gemLogin(was.home))).status === 0) try { pointGemini(was.home); update((x) => { x.geminiOn = was.id; }); } catch {}
+    if (!geminiAccounts().some((x) => x.id === id)) fs.rmSync(home, { recursive: true, force: true }); // only made now, never listed: a sign-in at most
+    if (was && !(await running()) && (await agyCred('load', gemLogin(was.home))).status === 0) update((x) => { x.geminiOn = was.id; });
     log('gemini_failed', { profile_id: id });
     return null;
   };
   try {
     if (!first) await agyCred('drop'); // so agy asks for this one
-    pointGemini(home);
-    log('gemini_created', { profile_id: id, adopted: !!(adopt || stray) });
-    console.log(`Gemini 账号目录：${id}\n正在用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回这里）……`);
+    log('gemini_created', { profile_id: id });
+    console.log('正在用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回这里）……');
     process.on('SIGINT', () => {}); // Ctrl+C is agy's (signing in given up): this goes on, and puts back what was
     spawnSync(agy, ['models'], { stdio: 'inherit' });
-    if ((await agyCred('save', gemLogin(home))).status !== 0) return back(`还没检测到登录成功，目录先留着：${id}（没有加进账号列表）`);
+    if ((await agyCred('save', gemLogin(home))).status !== 0) return back('还没检测到登录成功，没有加上账号');
     const email = await gemWho(), all = geminiAccounts(), d = email ? all.findIndex((x) => x.email === email) : -1;
     if (d >= 0) { // an account here already (its saved sign-in unreadable, say): this its sign-in now, it on; the new folder (only made now) gone
       fs.copyFileSync(gemLogin(home), gemLogin(all[d].home));
-      pointGemini(all[d].home); update((x) => { x.geminiOn = all[d].id; });
+      update((x) => { x.geminiOn = all[d].id; });
       fs.rmSync(home, { recursive: true, force: true });
       log('gemini_relogin', { profile_id: all[d].id });
       console.log(`Gemini 账号 A${d + 1}（${email}）重新登录好了，现在在线的就是它`);
       return true;
     }
-    gemSettings(home);
+    try { gemSettings(); } catch {} // (no status line: no reason to lose the sign-in)
     const r = update((x) => { (x.gemini ??= []).push({ id, label: email || 'Google 账号', email, home, createdAt: now() }); x.geminiOn = id; });
     log('gemini_registered', { profile_id: id });
     console.log(`已保存 Gemini 账号 A${r.gemini.length}：${email || 'Google 账号'}（现在在线的就是它）`);
@@ -1513,18 +1487,20 @@ async function runGem(g, args = []) {
   child.on('error', (e) => { console.error(`无法启动 agy：${e.message}`); process.exit(1); });
   child.on('exit', (code) => process.exit(code ?? 1));
 }
-// The Gemini conversations: each account's (its conversation_summaries.db) with something you said in it (history.jsonl,
-// a line a message: the first is its title till agy gives one), not a helper agent's, their folder still there; newest
-// first. An account's read again only once one of those changed; a read that fails (a write in flight) keeps the last.
-// shortcut: history.jsonl read whole on each change; read its tail only if it grows to megabytes
-const gemHeads = new Map();
+// The Gemini conversations, once there's an account: ~/.gemini's (its conversation_summaries.db) with something you said
+// in it (history.jsonl, a line a message: the first is its title till agy gives one), not a helper agent's, their folder
+// still there; newest first; each on the account on (any goes on with it). Read again only once one of those changed; a
+// read that fails (a write in flight) keeps the last. shortcut: history.jsonl read whole on each change; read its tail
+// only if it grows to megabytes
+let gemHead = null;
 const gemTime = (s) => { const t = Date.parse(String(s ?? '').replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1')); return t > 0 ? t : 0; };
 function listGemini(reg = load()) {
-  const out = [], mt = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
-  geminiAccounts(reg).forEach((g, acct) => {
-    const dir = path.join(g.home, 'antigravity-cli'), hist = path.join(dir, 'history.jsonl');
+  const out = [], mt = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } }, all = geminiAccounts(reg);
+  if (all.length) {
+    const acct = Math.max(0, all.findIndex((g) => g.id === reg.geminiOn));
+    const dir = path.join(GEMINI_HOME, 'antigravity-cli'), hist = path.join(dir, 'history.jsonl');
     const at = Math.max(0, ...['conversation_summaries.db', 'conversation_summaries.db-wal', 'history.jsonl'].map((x) => mt(path.join(dir, x))));
-    let r = gemHeads.get(g.home);
+    let r = gemHead;
     if (at && r?.at !== at) try {
       const d = codexDb(dir, 'conversation_summaries.db');
       let rows;
@@ -1539,8 +1515,7 @@ function listGemini(reg = load()) {
         if (x) x.last = Math.max(x.last, h.timestamp || 0);
         else said.set(h.conversationId, { first: s, made: h.timestamp || 0, last: h.timestamp || 0, cwd: h.workspace ?? '' });
       } catch {}
-      r = { at, rows, said };
-      gemHeads.set(g.home, r);
+      r = gemHead = { at, rows, said };
     } catch {}
     for (const t of r?.rows ?? []) {
       const s = r.said.get(t.id);
@@ -1549,10 +1524,10 @@ function listGemini(reg = load()) {
       try { cwd = require('url').fileURLToPath(JSON.parse(t.ws)[0]); } catch {}
       const first = s.first.split('\n')[0].trim(), title = String(t.title || first).split('\n')[0].trim().slice(0, 100);
       if (!cwd || !fs.existsSync(cwd)) continue;
-      out.push({ id: t.id, gem: true, acct, home: g.home, cwd, title, prompt: first !== title ? first.slice(0, 200) : null,
+      out.push({ id: t.id, gem: true, acct, cwd, title, prompt: first !== title ? first.slice(0, 200) : null,
         at: Math.max(gemTime(t.up), s.last), made: s.made, pid: null, busy: false, wait: false });
     }
-  });
+  }
   return out.sort((a, b) => b.at - a.at);
 }
 
@@ -3576,7 +3551,7 @@ async function web() {
     if (twice) return twice;
     const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`;
     const proc = pty.spawn(agy, resume ? ['--conversation', resume] : [], { name: 'xterm-256color', cols, rows, cwd, env: { ...process.env, TERM: 'xterm-256color' } });
-    const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, gem: { acct: acct - 1, id: resume ?? null, since: Date.now(), enters: [] } };
+    const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, gem: { id: resume ?? null, since: Date.now(), enters: [] } };
     proc.onData((d) => { keepOut(t, d); send(t, 'data', d); });
     proc.onExit(() => { t.gone = true; gemCache = null; send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t); gemCache = null;
@@ -3588,7 +3563,7 @@ async function web() {
     if (gemCache && Date.now() - gemAt < 3000) return gemCache;
     const list = listGemini(load()), live = gemLive(), taken = new Set(live.map((t) => t.gem.id).filter(Boolean));
     for (const t of live.filter((x) => !x.gem.id)) { // (the earliest such: its first message)
-      const s = list.filter((x) => x.acct === t.gem.acct && !taken.has(x.id) && x.made >= t.gem.since - 5000 && sameDir(x.cwd, t.cwd)
+      const s = list.filter((x) => !taken.has(x.id) && x.made >= t.gem.since - 5000 && sameDir(x.cwd, t.cwd)
         && t.gem.enters.some((e) => x.made >= e - 3000 && x.made <= e + 10000)).sort((a, b) => a.made - b.made)[0];
       if (s) { t.gem.id = s.id; taken.add(s.id); }
     }
@@ -4103,7 +4078,7 @@ async function web() {
       // and the GPT ones among them, by when they were last written (a GPT one runs here or not at all)
       for (const { home, ...s } of gptSessions()) list.push({ ...s, where: !s.pid ? null : s.web ? 'web' : 'pc', line: s.pid ? { model: s.model, effort: s.effort } : null });
       // and the Gemini ones (running: here), with what agy's status line shows; key: a new one's tab finds its id by it
-      for (const { home, made, ...s } of gemSessions()) list.push({ ...s, where: s.pid ? 'web' : null, line: s.pid ? readLine(s.id) : null });
+      for (const { made, ...s } of gemSessions()) list.push({ ...s, where: s.pid ? 'web' : null, line: s.pid ? readLine(s.id) : null });
       // and the GPT 聊天 ones: no folder, no account, none running anywhere (busy: an answer pending at OpenAI)
       for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
@@ -4309,7 +4284,7 @@ async function web() {
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         return { key: startGpt(s.acct + 1, s.cwd, s.id, cols, rows).key, kind: 'pty' };
       }
-      if (b.gem) { // a Gemini one: {id} its agy here, or continued here on its own account; {dir, acct} a new one
+      if (b.gem) { // a Gemini one: {id} its agy here, or continued here on the account on; {dir, acct} a new one
         if (!b.id) {
           if (!isDir(b.dir)) throw new Error('文件夹不存在');
           return opened(await startGem(Number(b.acct) || 1, b.dir, null, cols, rows));
