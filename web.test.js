@@ -498,6 +498,11 @@ const press = async (key, shift = false) => {
   await evaluate("window.hn = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, hn)");
   const navOn = "[...hn.el.querySelectorAll('.nav .navT')].findIndex((t) => t.matches('.on'))";
   await until(`hn.el.querySelectorAll('.nav .navT').length === 4 && ${navOn} === 3`);
+  // the words start right of the ticks: a line's first letter under the mouse is the reply's (the ticks once took it, and
+  // a selection begun there began elsewhere); only the ticks take the mouse, not the strip above and below them
+  assert.deepEqual(await evaluate(`(() => { const r = [...hn.el.querySelectorAll('.hm.claude')].pop().getBoundingClientRect(), y = hn.el.querySelector('.msgs').getBoundingClientRect().bottom - 30;
+    const nav = hn.el.querySelector('.nav').getBoundingClientRect(), t = hn.el.querySelector('.nav .navT').getBoundingClientRect();
+    return [nav.right < r.left, !!document.elementFromPoint(r.left + 1, y)?.closest('.hm.claude'), !document.elementFromPoint(nav.left + 10, t.top - 10)?.closest('.nav')]; })()`), [true, true, true]);
   // every line on whole screen pixels, all as thick (a line on part of one is drawn fainter over two)
   assert.ok(await evaluate(`[...hn.el.querySelectorAll('.nav .navT')].every((e) => { const y = (e.getBoundingClientRect().top + parseFloat(e.style.getPropertyValue('--o'))) * devicePixelRatio;
     return Math.abs(y - Math.round(y)) < 0.02 && e.style.getPropertyValue('--t') === hn.el.querySelector('.nav .navT').style.getPropertyValue('--t'); })`));
