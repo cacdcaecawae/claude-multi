@@ -492,6 +492,21 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate("hq.el.querySelectorAll('.hNew .hm.user').length"), 2);
   termBusy = false; await evaluate('closeConv(hq)'); histFeed = null; histQueue = null;
   console.log('browser 排队中 ok');
+  // 对话's ticks down its left: one a message of yours, the one you're reading marked (at the end: the last); the mouse on
+  // one, it and its answer's start in the card; a click scrolls there; in 终端, none
+  histFeed = [1, 2, 3, 4].flatMap((i) => [{ role: 'user', text: `第${i}问` }, { role: 'claude', text: `回答${i}。` + '很长的一段话。\n\n'.repeat(40) }]);
+  await evaluate("window.hn = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, hn)");
+  const navOn = "[...hn.el.querySelectorAll('.nav .navT')].findIndex((t) => t.matches('.on'))";
+  await until(`hn.el.querySelectorAll('.nav .navT').length === 4 && ${navOn} === 3`);
+  const card = await evaluate(`(() => { const t = hn.el.querySelectorAll('.nav .navT')[1]; t.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    const s = t.title || t.dataset.tip; t.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })); return s; })()`);
+  assert.ok(card.startsWith('第2问\n回答2。很长的一段话。') && card.endsWith('…') && card.length < 150, card);
+  await evaluate("hn.el.querySelectorAll('.nav .navT')[1].click()"); // (the first: at the list's top, no scrolling it higher)
+  await until(`${navOn} === 1 && (() => { const u = hn.el.querySelectorAll('.hm.user')[1].getBoundingClientRect().top - hn.el.querySelector('.msgs').getBoundingClientRect().top; return u > 4 && u < 20; })()`);
+  await evaluate("hn.el.querySelector('[data-v=term]').click()");
+  await until("getComputedStyle(hn.el.querySelector('.nav')).display === 'none'");
+  await evaluate('closeConv(hn)'); histFeed = null;
+  console.log('browser 对话 ticks ok');
   // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
   assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
     a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);
