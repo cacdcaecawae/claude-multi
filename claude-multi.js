@@ -1300,8 +1300,9 @@ function notifyGpt(arg, home = process.env.CODEX_HOME) {
   try { j = JSON.parse(arg); } catch { return; }
   const kind = j.type === 'agent-turn-complete' ? 'done' : j.type === 'approval-requested' ? 'ask' : null, id = j['thread-id'];
   if (!kind || !id) return;
-  let t = null;
-  try { const d = codexDb(home, 'state_5.sqlite'); try { t = d.prepare('select title, name, first_user_message first, cwd, source from threads where id = ?').get(id); } finally { d.close(); } } catch {}
+  let t = null, read = false;
+  try { const d = codexDb(home, 'state_5.sqlite'); try { t = d.prepare('select title, name, first_user_message first, cwd, source from threads where id = ?').get(id); read = true; } finally { d.close(); } } catch {}
+  if (read && !t) return; // a temporary thread of Codex's own (naming its thread, reviewing a command): never saved, nothing to open
   if (/subagent/.test(t?.source ?? '')) return;
   const dir = longPath(t?.cwd) || j.cwd || '';
   // its Codex, by its marker (a click on the island's card finds its window by that pid): this thread's, or the one in its
