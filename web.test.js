@@ -498,9 +498,15 @@ const press = async (key, shift = false) => {
   await evaluate("window.hn = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, hn)");
   const navOn = "[...hn.el.querySelectorAll('.nav .navT')].findIndex((t) => t.matches('.on'))";
   await until(`hn.el.querySelectorAll('.nav .navT').length === 4 && ${navOn} === 3`);
+  // every line on whole screen pixels, all as thick (a line on part of one is drawn fainter over two)
+  assert.ok(await evaluate(`[...hn.el.querySelectorAll('.nav .navT')].every((e) => { const y = (e.getBoundingClientRect().top + parseFloat(e.style.getPropertyValue('--o'))) * devicePixelRatio;
+    return Math.abs(y - Math.round(y)) < 0.02 && e.style.getPropertyValue('--t') === hn.el.querySelector('.nav .navT').style.getPropertyValue('--t'); })`));
+  // the mouse on the second: it longest, those around it less and less; off the ticks, back as they were
+  const widths = "[...hn.el.querySelectorAll('.nav .navT')].map((e) => e.style.getPropertyValue('--w')).join()";
   const card = await evaluate(`(() => { const t = hn.el.querySelectorAll('.nav .navT')[1]; t.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    const s = t.title || t.dataset.tip; t.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })); return s; })()`);
-  assert.ok(card.startsWith('第2问\n回答2。很长的一段话。') && card.endsWith('…') && card.length < 150, card);
+    return [t.title || t.dataset.tip, ${widths}, (t.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })), ${widths})]; })()`);
+  assert.deepEqual(card.slice(1), ['15px,20px,15px,12px', ',,,']);
+  assert.ok(card[0].startsWith('第2问\n回答2。很长的一段话。') && card[0].endsWith('…') && card[0].length < 150, card[0]);
   await evaluate("hn.el.querySelectorAll('.nav .navT')[1].click()"); // (the first: at the list's top, no scrolling it higher)
   await until(`${navOn} === 1 && (() => { const u = hn.el.querySelectorAll('.hm.user')[1].getBoundingClientRect().top - hn.el.querySelector('.msgs').getBoundingClientRect().top; return u > 4 && u < 20; })()`);
   await evaluate("hn.el.querySelector('[data-v=term]').click()");
