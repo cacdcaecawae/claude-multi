@@ -39,6 +39,7 @@
 | 代理额度 | 左边的喜鹊图标：经代理或网关用的那些订阅账号，各窗口用了多少、多久后重置（邮箱打码）。申请接入的账号自动读对方网关给的；自己的代理，在 `profiles.json` 的 `localQuota.source` 里写一个读取脚本的绝对路径（见下面「文件说明」）。两样都没有就不显示。 |
 | GPT | 用 ChatGPT 订阅登录 OpenAI 的 [Codex](https://github.com/openai/codex)，在网页上和 Claude 的对话放在一起用（账号 G1、G2…）。 |
 | GPT 聊天 | 用你的 OpenAI API key，在网页上直接和 GPT-6 Astra 聊天（不碰电脑上的文件），可以选 Pro 模式（ChatGPT 的 GPT-6 Pro）和思考强度，能联网、看图片和文件。 |
+| Gemini | 用 Google 账号登录 Google 的 [Antigravity 命令行](https://antigravity.google/docs/cli/overview)（`agy`），在网页上和 Claude、GPT 的对话放在一起用（账号 A1、A2…，同一时间一个在线）。 |
 
 ## 截图
 
@@ -152,11 +153,12 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 | `claude-multi [claude 的参数]` | 选择账号后启动 Claude Code |
 | `new` | 登录并添加一个账号 |
 | `new gpt` | 用 ChatGPT 登录并添加一个 GPT 账号（Codex），编号 G1、G2… |
+| `new gemini` | 用 Google 账号登录并添加一个 Gemini 账号（Antigravity 命令行 `agy`），编号 A1、A2… |
 | `list` | 列出所有账号 |
 | `switch` | 改默认账号（不启动 Claude） |
 | `usage [--json]` | 各账号额度和推荐账号 |
 | `warmup` | 预热：给还没开始计时的账号各发一条很小的消息 |
-| `start N [claude 的参数]` | 不弹菜单，直接用账号 N 启动。`start G1` 在当前终端用 GPT 账号 G1 启动 Codex |
+| `start N [claude 的参数]` | 不弹菜单，直接用账号 N 启动。`start G1` 在当前终端用 GPT 账号 G1 启动 Codex，`start A1` 用 Gemini 账号 A1 启动 agy |
 | `sessions [--json] [--all]` | 列出所有对话，● 表示正在运行。`--all` 连 GPT 对话一起列 |
 | `resume ID N` | 用账号 N 接着一个之前的对话。GPT 对话不用写账号，就在它自己的账号上接着 |
 | `swap ID N [--now]` | 把正在运行的对话换到账号 N。默认等 Claude 这一轮答完再换，`--now` 立即换 |
@@ -228,6 +230,17 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 - 对话内容 OpenAI 也会保存（后台回答要求这样），每条新消息接着上一个回答继续，图片和文件不用重发。OpenAI 只保存 30 天，超过 30 天的对话不能再接着聊。
 - 列表里 GPT 聊天单独放在最上面一组。右键可以重命名、删除（移到回收站；正在回答的会先停下）。
 - 管家也能用：你跟它说「问问 GPT …」，它用 `claude-multi chat new --oai <问题>` 开一个 GPT 聊天，用 `chat say`／`chat look` 接着问、看回答，答完网页服务会告诉它。它默认用普通 · medium，你说要 Pro、要想得深才加 `--mode pro --effort max`。管家发的这几轮不推到你手机（它会自己告诉你）。GPT 聊天不能派工单。
+
+**Gemini 对话**（Antigravity 命令行）
+
+- 先装好 Google 的 Antigravity 命令行：在 PowerShell 里运行 `irm https://antigravity.google/cli/install.ps1 | iex`。再运行 `claude-multi new gemini`：会打开浏览器用 Google 账号登录（没打开就把它给的网址复制到浏览器里，登好把授权码粘回去）。账号要能用 Antigravity（Google 会先让新账号验证一下）。
+- 每个 Gemini 账号有自己的文件夹（`accounts\gemini-…`）：设置、对话记录、插件、MCP 都各管各的。
+- **同一时间只有一个 Gemini 账号在线。** `agy` 自己只认 `~\.gemini` 这一个文件夹和 Windows 凭据管理器里的一条登录，换哪个文件夹都一样。所以 claude-multi 把 `~\.gemini` 做成链接，指向在线账号的文件夹，并替每个账号保管它的登录（加密存在它的文件夹里，只有这个 Windows 用户能解开）。用另一个账号开始时会先换过去；有 `agy` 在运行时换不了，先把它结束。
+- 第一次运行 `new gemini` 时，如果你已经有 `~\.gemini` 文件夹、已经登录过 `agy`，它们就直接成为 A1 的，不用重新登录。
+- 某个账号的登录用不了了：再运行一次 `new gemini`，用同一个 Google 账号登录，它就换上新的登录，不会多出一个账号。
+- 有了 Gemini 账号后，「新对话」上面多一个 Gemini，列表顶部可以只看 Gemini 对话，Gemini 账号的圆环写着 A1、A2。终端里也能用：`claude-multi start A1`。
+- 现在只有「终端」视图（就是 `agy` 的界面本身）。底部状态栏显示账号、模型和上下文用量（来自 `agy` 的状态栏，`new gemini` 时设好）。
+- 现在还没有：「对话」视图、回复完的提示、Gemini 的额度、在网页上改名和删除。在电脑终端窗口里开着的 Gemini 对话，列表里不显示「在运行」。网页服务重启后，在里面运行的 Gemini 对话会结束，之后可以在列表里点开接着聊。
 
 **对话里**
 

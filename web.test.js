@@ -12,6 +12,7 @@ const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
+const openBodies = []; // what each open asked for
 let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
 let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
 let histQueue = null; // set: what the record says waits in Claude's queue, with every read
@@ -27,7 +28,7 @@ dirs['C:/test'] = { path: 'C:/test', up: 'C:/', dirs: ['C:/test/sub'], files: ['
 dirs['C:/test/sub'] = { path: 'C:/test/sub', up: 'C:/test', dirs: [], files: ['c.txt'] };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/api/open') opens++;
+  if (url.pathname === '/api/open') { opens++; let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { openBodies.push(JSON.parse(b)); } catch {} }); }
   if (url.pathname === '/api/history') histReads.push(Date.now());
   if (url.pathname === '/api/history' && histHang) { histHang = false; hung = res; return; } // left open, never answered
   if (url.pathname.startsWith('/api/peek') && /missing/.test(url.searchParams.get('path'))) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('没有这个文件：' + url.searchParams.get('path')); }
@@ -518,6 +519,35 @@ const press = async (key, shift = false) => {
   await until("getComputedStyle(hn.el.querySelector('.nav')).display === 'none'");
   await evaluate('closeConv(hn)'); histFeed = null;
   console.log('browser 对话 ticks ok');
+  // Gemini: its kind in the list's filter and in 新对话; a Gemini conversation under its A1 ring and star, opened in its
+  // terminal (no 对话 view), the service asked for it as a Gemini one on its own account; a new one, on the account
+  // picked, takes its id once the list has it by its terminal's key, its account in the status bar
+  const opened = async () => { for (let i = 0; i < 100 && !openBodies.length; i++) await new Promise((r) => setTimeout(r, 50)); return openBodies.shift(); };
+  openBodies.length = 0;
+  await evaluate("state.gemini = [{ label: 'g@example.com', on: true }]; state.sessions.push({ id: 'GEM1', gem: true, title: 'Gemini 对话', acct: 0, cwd: 'C:/test', at: Date.now(), pid: null }); listKind = 'all'; renderChats()");
+  assert.deepEqual(await evaluate(`(() => { const r = document.querySelector('#view [data-open="GEM1"]');
+    return [r.querySelector('.ac').textContent, r.querySelector('.mk').dataset.tip ?? r.querySelector('.mk').title, [...document.querySelectorAll('.kinds button')].map((b) => (b.querySelector('svg') ? 'mark:' : '') + (b.getAttribute('aria-label') ?? b.textContent)).join()]; })()`), ['A1', 'Gemini', '全部,mark:Claude,mark:Gemini']);
+  await evaluate("document.querySelector('[data-kind=\"gem\"]').click()");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('#view [data-open]')].map((r) => r.dataset.open)"), ['GEM1']);
+  await evaluate("document.querySelector('[data-kind=\"all\"]').click()");
+  await evaluate("document.querySelector('#view [data-open=\"GEM1\"]').click()"); // (one not running: started, as a Claude one)
+  const rb = await opened();
+  assert.deepEqual([rb.id, rb.acct, rb.gem], ['GEM1', 1, true]);
+  assert.deepEqual(await evaluate("[focusG.active.id, !!focusG.active.el.querySelector('.seg'), focusG.active.el.classList.contains('hist')]"), ['GEM1', false, false]);
+  await evaluate('closeConv(focusG.active)');
+  assert.ok(openBodies.every((b) => b.live && b.gem), JSON.stringify(openBodies)); // any more: reconnects to it, never a second agy
+  openBodies.length = 0;
+  await evaluate("document.querySelector('[data-new]').click()");
+  await evaluate("document.querySelector('[data-g=\"m\"]').click()");
+  assert.equal(await evaluate("[...document.querySelectorAll('#sheetIn [data-a]')].map((b) => b.textContent).join()"), 'A1 · g@example.com');
+  await evaluate("{ const i = document.querySelector('#dirIn'); i.value = 'C:/test'; i.dispatchEvent(new Event('input')); document.querySelector('#start').click(); }");
+  const nb = await opened();
+  assert.deepEqual([nb.dir, nb.acct, nb.gem, nb.id], ['C:/test', 1, true, undefined]);
+  await until("focusG.active?.where() === 'pty'");
+  await evaluate("state.sessions.push({ id: 'GEM2', gem: true, key: 'fixture', title: '新的', acct: 0, cwd: 'C:/test', at: Date.now(), pid: 123, where: 'web' }); focusG.active.sync(); drawHere()");
+  assert.deepEqual(await evaluate("[focusG.active.id, document.querySelector('#here').textContent.includes('Gemini 账号 A1')]"), ['GEM2', true]);
+  await evaluate("closeConv(focusG.active); state.sessions = state.sessions.filter((x) => !x.gem); state.gemini = []; renderChats()");
+  console.log('browser Gemini ok');
   // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
   assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
     a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);
