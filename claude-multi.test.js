@@ -666,6 +666,7 @@ if (SESSION0) {
   require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), 'notify', 'gpt', home, j({ type: 'approval-requested', 'thread-id': 't1' })],
     { env: { ...process.env, USERPROFILE: root, HOME: root, CODEX_HOME: '' } }); // its home given, as the web service gives it
   notifyGpt({ type: 'agent-turn-complete', 'thread-id': 't3' });                 // a helper agent's
+  notifyGpt({ type: 'agent-turn-complete', 'thread-id': 't9' });                 // a temporary one of Codex's, not in its database
   notifyGpt({ type: 'something-else', 'thread-id': 't1' });
   const notes = fs.readFileSync(path.join(cm, 'notes.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(notes.map((n) => [n.kind, n.id, n.title, n.project, n.gpt]), [['done', 't1', '修复登录', path.basename(work), true], ['ask', 't1', '修复登录', path.basename(work), true]]);
