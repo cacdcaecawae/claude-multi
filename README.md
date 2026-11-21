@@ -166,7 +166,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 | `chat look\|wait\|say\|pick\|new …` | 管家用的：看一个对话（含它正在问的选择题）、等它答完或等到某个时间、给它发消息、替你选一项、在后台新开对话（`new … --gpt` 开 GPT 对话）。不带参数运行 `chat` 看用法 |
 | `rename ID 名字` | 给没在运行的对话改名 |
 | `delete ID` | 把没在运行的对话移到回收站。GPT 对话是归档（`codex unarchive` 能找回） |
-| `remove N` | 移除账号 N。它的文件夹移到回收站，有对话正在用它时不让移除。`remove G1` 移除 GPT 账号 G1（有 Codex 在它上面运行时同样不让移除） |
+| `remove N` | 移除账号 N。它的文件夹移到回收站，有对话正在用它时不让移除。`remove G1` 移除 GPT 账号 G1（有 Codex 在它上面运行时同样不让移除），`remove A1` 移除 Gemini 账号 A1（只删它保存的登录，`~\.gemini` 里的设置和对话不动） |
 | `tokens [--json]` | token 用量和按 API 价格折算的金额 |
 | `renew N 月-日` / `renew N auto` | 手动记下账号 N 的续费日，或改回自动推算 |
 | `island` | 打开灵动岛（已经开着就不会再开一个） |

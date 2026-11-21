@@ -1380,7 +1380,7 @@ switch ($env:CM_OP) {
     Move-Item -Force -LiteralPath ($f + '.tmp') -Destination $f }
   'load' { $b = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String([IO.File]::ReadAllText($f).Trim()), $null, $me)
     [CmCred]::Write($t, $t.Substring($t.IndexOf(':') + 1), $b) }
-  'drop' { [CmCred]::Delete($t) }
+  'drop' { [CmCred]::Delete($t); if ($null -ne [CmCred]::Read($t)) { exit 1 } }
   'has' { if ($null -eq [CmCred]::Read($t)) { exit 3 } }
   'peek' { $b = [CmCred]::Read($t); if ($null -eq $b) { exit 3 }; [Console]::Out.Write([Convert]::ToBase64String($b)) }
 }`;
@@ -1436,6 +1436,7 @@ function gemSettings(home = GEMINI_HOME, script = __filename.replace(/\\/g, '/')
 async function newGemini(running = agyRunning) {
   const agy = agyCmd();
   if (!agy) { console.log(`没找到 agy，先装好 Antigravity 的命令行（在 PowerShell 里）：${AGY_GET}`); return null; }
+  process.on('SIGINT', () => {}); // Ctrl+C is agy's (signing in given up): this goes on, and puts back what was
   if (await running()) { console.log('有 Gemini（agy）在运行：先结束它，再加账号'); return null; }
   const reg = load(), first = !geminiAccounts(reg).length, was = geminiAccounts(reg).find((x) => x.id === reg.geminiOn);
   if (was && ![0, 3].includes((await agyCred('save', gemLogin(was.home))).status)) { console.log('现在在线的 Gemini 账号的登录没能存下来，先不加新账号'); return null; }
@@ -1447,10 +1448,12 @@ async function newGemini(running = agyRunning) {
     try { fs.mkdirSync(home); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
   }
   update((x) => { x.geminiOn = null; }); // the entry is no account's from here till it's this one's, or the one before's again
-  const before = path.join(home, 'before.dpapi'); // (the first's) agy's own sign-in, from before there were accounts
+  // (the first's) agy's own sign-in, from before there were accounts: kept here till one is made, so one cut short (its
+  // window closed) gets it back the next time; kept as it is when the entry has none to keep now
+  const before = path.join(ACCOUNTS, 'gemini-before.dpapi');
   const back = async (why) => {
     console.log(why);
-    if (first) await agyCred('load', before); // (none there: fails, nothing to put back)
+    if (first && (await agyCred('load', before)).status === 0) fs.rmSync(before, { force: true });
     if (!geminiAccounts().some((x) => x.id === id)) fs.rmSync(home, { recursive: true, force: true }); // only made now, never listed: a sign-in at most
     if (was && !(await running()) && (await agyCred('load', gemLogin(was.home))).status === 0) update((x) => { x.geminiOn = was.id; });
     log('gemini_failed', { profile_id: id });
@@ -1458,10 +1461,9 @@ async function newGemini(running = agyRunning) {
   };
   try {
     if (first && ![0, 3].includes((await agyCred('save', before)).status)) return back('agy 现在的登录没能先存下来，没有加账号');
-    await agyCred('drop'); // so agy asks for one
+    if ((await agyCred('drop')).status !== 0) return back('agy 现在的登录没能清掉（不清掉它就会直接拿来用），没有加账号'); // so agy asks for one
     log('gemini_created', { profile_id: id });
     console.log('正在用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回这里）……');
-    process.on('SIGINT', () => {}); // Ctrl+C is agy's (signing in given up): this goes on, and puts back what was
     spawnSync(agy, ['models'], { stdio: 'inherit' });
     if ((await agyCred('save', gemLogin(home))).status !== 0) return back('还没检测到登录成功，没有加上账号');
     fs.rmSync(before, { force: true });
@@ -1478,8 +1480,21 @@ async function newGemini(running = agyRunning) {
     const r = update((x) => { (x.gemini ??= []).push({ id, label: email || 'Google 账号', email, home, createdAt: now() }); x.geminiOn = id; });
     log('gemini_registered', { profile_id: id });
     console.log(`已保存 Gemini 账号 A${r.gemini.length}：${email || 'Google 账号'}（现在在线的就是它）`);
+    if (!email) console.log(`没查到这个 Google 账号的邮箱（可能连不上 googleapis.com），先叫它「Google 账号」。同一个号别再加一次；加重了用 claude-multi remove A${r.gemini.length} 去掉`);
     return true;
   } catch (e) { return back(`没加上：${e.message}`); }
+}
+// remove An: Gemini account n leaves the list, its folder (its sign-in alone) to the Recycle Bin. The one on: none on
+// after (agy's entry keeps its sign-in till another's is put in; a running agy goes on with it)
+function removeGemini(n) {
+  const g = geminiAccounts()[n - 1];
+  if (!g) { console.log('没有这个 Gemini 账号：用 claude-multi list 看编号（A1、A2…）'); process.exit(1); }
+  canRecycle();
+  update((r) => { r.gemini = (r.gemini ?? []).filter((x) => x.id !== g.id); if (r.geminiOn === g.id) r.geminiOn = null; });
+  log('gemini_removed', { profile_id: g.id });
+  const r = recycle([g.home]);
+  if (fs.existsSync(g.home)) console.log(`已移除 Gemini 账号 ${g.label}，但文件夹没能放进回收站（${(r.stderr || '').trim().split('\n')[0]}），可以之后手动删：${g.home}`);
+  else console.log(`已移除 Gemini 账号 ${g.label}，文件夹在回收站里。`);
 }
 // start An: agy on that account here, in this terminal (switched on first)
 async function runGem(g, args = []) {
@@ -2260,6 +2275,7 @@ function unlinkAll(d) {
 // By its id too (the island's way): a number names whichever account is there now, and the island's list can be older.
 function remove(x) {
   if (/^g[0-9]+$/i.test(x ?? '')) return removeGpt(Number(x.slice(1))); // a GPT account: G1, G2…
+  if (/^a[0-9]+$/i.test(x ?? '')) return removeGemini(Number(x.slice(1))); // a Gemini account: A1, A2…
   const reg = load(), i = /^\d+$/.test(x ?? '') ? Number(x) - 1 : reg.profiles.findIndex((q) => q.id === x), p = reg.profiles[i];
   if (!p) { console.log('用法：claude-multi remove <账号编号或 id，如 acct-20261010-002>'); process.exit(1); }
   if (runsOn(p.configDir)) { console.log('这个账号上有 Claude 正在运行，先关掉再移除。'); process.exit(1); }
@@ -3560,9 +3576,13 @@ async function web() {
     proc.onData((d) => { keepOut(t, d); send(t, 'data', d); });
     proc.onExit(() => { t.gone = true; gemCache = null; send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t); gemCache = null;
+    if (!resume) gemIdle(t); // (a page that never connects: its tab closed while this started)
     log('web_session', { profile_id: g.id, cwd, args: resume ? `--conversation ${resume}` : '' });
     return t;
   }
+  // a new one nothing was ever sent to, unwatched 30 s on: ended (the list couldn't find it again, and it would hold up
+  // every switch)
+  const gemIdle = (t) => setTimeout(() => { gemCache = null; gemSessions(); if (!t.clients.size && !t.gem.id && !t.gem.enters.length && !t.gone) t.proc.kill(); }, 30000);
   let gemCache = null, gemAt = 0;
   const gemSessions = () => {
     if (gemCache && Date.now() - gemAt < 3000) return gemCache;
@@ -4465,8 +4485,7 @@ async function web() {
           closed = true; clearInterval(beat); t.clients.delete(sse); z?.destroy();
           // nobody watching: the reader stays 20 min, still keeping what scrolls by, for when you come back
           if (t.kind === 'pc') setTimeout(() => { if (!t.clients.size) t.proc.kill(); }, 1200000);
-          // a new Gemini one nothing was ever sent to, still unwatched: ended (the list couldn't find it again)
-          if (t.gem) setTimeout(() => { gemCache = null; gemSessions(); if (!t.clients.size && !t.gem.id && !t.gem.enters.length && !t.gone) t.proc.kill(); }, 30000);
+          if (t.gem) gemIdle(t);
         });
         return;
       }

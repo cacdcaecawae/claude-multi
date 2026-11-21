@@ -1179,6 +1179,10 @@ if (SESSION0) {
     assert.equal(rm2.status, 1, rm2.stdout); assert.match(rm2.stdout, /回收站/);
     assert.equal(JSON.parse(fs.readFileSync(path.join(r1, '.claude-multi', 'profiles.json'), 'utf8')).gpt.length, 1); assert.ok(fs.existsSync(g));
   }
+  const r0 = homeOf((r) => ({ profiles: [], gemini: [{ id: 'gemini-1', label: 'g@example.com', home: path.join(r, 'gemini-1') }], geminiOn: 'gemini-1' }));
+  const ra = run(r0, 'remove', 'A2'); // a Gemini one, by its A number (not read as a Claude account's)
+  assert.equal(ra.status, 1, ra.stdout); assert.match(ra.stdout, /没有这个 Gemini 账号/);
+  fs.rmSync(r0, { recursive: true, force: true });
   const u = run(r1, 'usage', '--json'), uj = JSON.parse(u.stdout);
   assert.deepEqual([uj.accounts, uj.rec, uj.open, uj.gpt.map((x) => x.label)], [[], null, false, ['g@example.com']]);
   fs.rmSync(r1, { recursive: true, force: true });
@@ -2025,13 +2029,17 @@ if (process.platform === 'win32') {
       global.fetch = async () => ({ ok: true, json: async () => ({ email: 'g1@example.com' }) });
       try {
         fs.writeFileSync(regFile, reg0); fs.rmSync(sf); set('mine');
+        const stash = path.join(ACCOUNTS_T, 'gemini-before.dpapi');
         assert.equal(await add(false), null); // the first, not signed in: nothing added, agy's own sign-in back
-        assert.deepEqual([reg().gemini, ...await on(), made()], [undefined, null, 'mine', []]);
+        assert.deepEqual([reg().gemini, ...await on(), made(), fs.existsSync(stash)], [undefined, null, 'mine', [], false]);
+        await agyCred('save', stash); assert.equal((await agyCred('drop')).status, 0); // one cut short (its window closed) once agy's own was out
+        assert.equal(await add(false), null); // the next: agy's own back all the same
+        assert.deepEqual([...await on(), fs.existsSync(stash)], [null, 'mine', false]);
         const one = '{"token":{"access_token":"t1"}}'; signs(one);
         assert.equal(await add(true), true); // signed in: that one A1 (its folder: its sign-in alone), the status line set
         const g1 = reg().gemini?.[0];
         assert.deepEqual([g1?.id, g1?.email, ...await on()], [`gemini-${day}-001`, 'g1@example.com', g1?.id, one]);
-        assert.deepEqual(fs.readdirSync(g1.home), ['cm-login.dpapi']);
+        assert.deepEqual([fs.readdirSync(g1.home), fs.existsSync(stash)], [['cm-login.dpapi'], false]);
         assert.match(fs.readFileSync(sf, 'utf8'), /claude-multi\.js\\" statusline/);
         assert.equal(await add(false), null); // the next, not signed in: its folder gone, A1 on again
         assert.deepEqual([reg().gemini.length, ...await on(), made()], [1, g1.id, one, [g1.id]]);
@@ -2041,7 +2049,8 @@ if (process.platform === 'win32') {
         assert.deepEqual([reg().gemini.length, ...await on(), made()], [1, g1.id, two, [g1.id]]);
         yours();
       } finally { global.fetch = fetch0; }
-      assert.equal((await agyCred('has')).status, 0); await agyCred('drop'); assert.equal((await agyCred('has')).status, 3);
+      assert.equal((await agyCred('has')).status, 0); assert.equal((await agyCred('drop')).status, 0); assert.equal((await agyCred('has')).status, 3);
+      assert.equal((await agyCred('drop')).status, 0); // none there: nothing to clear
     } finally {
       await agyCred('drop'); fs.rmSync(gh, { recursive: true, force: true }); fs.writeFileSync(regFile, reg0);
       delete process.env.CM_AGY_CRED; delete process.env.CM_AGY;
