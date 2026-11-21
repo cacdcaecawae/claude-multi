@@ -1628,7 +1628,7 @@ function termRows(out, cols, rows) {
 // The Gemini conversations agy runs outside the web service (a terminal window: start An, or agy itself), by agy's own
 // log: one per agy (log\cli-<started>.log), its first line its pid (「…process with pid 9604」), a line naming each
 // conversation it creates, resumes or sends to: the last of them its own now. pids: the agy running to look for. A log's
-// pid read once; what it adds as it grows. → Map id → { pid, since (its start) }
+// pid read once; what it adds as it grows. → Map id → { pid, since (its start), cut (its last turn cut short, or 0) }
 const gemLogPid = new Map(), gemLogTail = new Map();
 function gemAgyConvs(pids) {
   const out = new Map(), dir = path.join(GEMINI_HOME, 'antigravity-cli', 'log');
@@ -1648,15 +1648,21 @@ function gemAgyConvs(pids) {
     try { st = fs.statSync(path.join(dir, f)); } catch { continue; }
     // what it added since the last read (a line cut there read again whole); the first time, all of it: an agy idle for
     // hours named its conversation long before its last 256 KB. shortcut: 16 MB at most then, an agy days on in one log may outrun it
-    const c = gemLogTail.get(f), on = c && c.size < st.size; // on: grown since (else new, or begun anew)
+    // and the last turn it cut short (Esc: 「Cancelling in-progress response for conversation <id>」, its time; the
+    // record says nothing of it), by the line's own month and day, the log's year
+    const c = gemLogTail.get(f), on = c && c.size < st.size, m = /^cli-(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/.exec(f); // on: grown since (else new, or begun anew)
+    let cut = c?.cut ?? null;
     id = c?.id ?? null;
     if (c?.size !== st.size) try {
       const from = on ? Math.max(0, c.size - 200) : Math.max(0, st.size - 16777216), fd = fs.openSync(path.join(dir, f), 'r');
-      try { id = [...slice(fd, from, st.size - from).matchAll(/(?:Created|Resuming|Streaming|Forwarding user message to) conversation ([0-9a-f-]{36})/g)].pop()?.[1] ?? (on ? c.id : null); } finally { fs.closeSync(fd); }
-      gemLogTail.set(f, { size: st.size, id });
+      try {
+        const t = slice(fd, from, st.size - from), k = [...t.matchAll(/^I(\d\d)(\d\d) (\d\d):(\d\d):(\d\d\.\d{3}).*Cancelling in-progress response for conversation ([0-9a-f-]{36})/gm)].pop();
+        id = [...t.matchAll(/(?:Created|Resuming|Streaming|Forwarding user message to) conversation ([0-9a-f-]{36})/g)].pop()?.[1] ?? (on ? c.id : null);
+        cut = k ? { id: k[6], at: new Date(+m[1] + (+k[1] < +m[2] ? 1 : 0), k[1] - 1, +k[2], +k[3], +k[4]).getTime() + Math.round(k[5] * 1000) } : on ? c.cut : null;
+      } finally { fs.closeSync(fd); }
+      gemLogTail.set(f, { size: st.size, id, cut });
     } catch {} // (unread: as it was, read again next time)
-    const m = /^cli-(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/.exec(f);
-    if (id) out.set(id, { pid, since: new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() });
+    if (id) out.set(id, { pid, since: new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime(), cut: cut?.id === id ? cut.at : 0 });
   }
   return out;
 }
@@ -3864,13 +3870,17 @@ async function web() {
   // it for 30 s ends it (it couldn't be found again). shortcut: one in a terminal window isn't listed as running (agy
   // says nowhere which it holds); opened here meanwhile, a second agy goes on with the same conversation
   const gemLive = () => [...terms.values()].filter((t) => t.gem && !t.gone);
-  // the ones an agy runs in a terminal window (not here), by agy's logs: looked for every 10 s (id → { pid, since })
-  let gemPc = new Map();
+  // the ones an agy runs in a terminal window (not here), by agy's logs: looked for every 10 s (id → { pid, since }); and
+  // of every agy running (here too), when it last cut its turn short (id → time): after that its record isn't at work,
+  // till it has a step since
+  let gemPc = new Map(), gemCuts = new Map();
   const gemPcScan = async () => {
-    if (!WIN || !geminiAccounts().length) { gemPc = new Map(); return; }
-    const r = await execA('tasklist', ['/fi', 'imagename eq agy.exe', '/fo', 'csv', '/nh']), pids = new Set([...r.stdout.matchAll(/^"agy\.exe","(\d+)"/gim)].map((m) => +m[1]));
-    for (const t of gemLive()) pids.delete(t.pid);
-    gemPc = gemAgyConvs(pids); gemCache = null;
+    if (!WIN || !geminiAccounts().length) { gemPc = new Map(); gemCuts = new Map(); return; }
+    const r = await execA('tasklist', ['/fi', 'imagename eq agy.exe', '/fo', 'csv', '/nh']), all = gemAgyConvs(new Set([...r.stdout.matchAll(/^"agy\.exe","(\d+)"/gim)].map((m) => +m[1])));
+    const ours = new Set(gemLive().map((t) => t.pid));
+    gemPc = new Map([...all].filter(([, m]) => !ours.has(m.pid)));
+    gemCuts = new Map([...all].filter(([, m]) => m.cut).map(([id, m]) => [id, m.cut]));
+    gemCache = null;
   };
   setInterval(() => gemPcScan().catch(() => {}), 10000);
   setTimeout(() => gemPcScan().catch(() => {}), 2000);
@@ -3937,7 +3947,8 @@ async function web() {
     for (const s of list) {
       const t = live.find((x) => x.gem.id === s.id);
       // what its record says, from steps this agy wrote (one an earlier agy left mid-turn isn't at work now); to the second
-      const m = !t && gemPc.get(s.id), now = t ? s.lastAt >= t.gem.since - 1000 : m && s.lastAt >= m.since - 1000;
+      // (one cut short since its last step: not at work)
+      const m = !t && gemPc.get(s.id), now = (t ? s.lastAt >= t.gem.since - 1000 : m && s.lastAt >= m.since - 1000) && !(gemCuts.get(s.id) >= s.lastAt);
       if (t) { s.pid = t.pid; s.key = t.key; s.web = true; } else if (m) { s.pid = m.pid; s.web = false; } // (one in a terminal window: not here)
       if (t || m) { s.busy = !!now && s.going === 'busy'; s.wait = !!now && s.going === 'wait'; }
     }
@@ -4787,6 +4798,8 @@ async function web() {
       if (b.by === 'butler') { if (Date.now() - (t.typed ?? 0) < 120000) throw new Error('用户两分钟内在这个对话里打过字，先别发，过一会儿再试'); }
       else if (/[^\x00-\x1f\x7f]/.test(String(b.data).replace(/\x1b(\[[0-9;?]*[A-Za-z~]|O.)/g, ''))) t.typed = Date.now();
       if (t.gem && !t.gem.id && String(b.data).includes('\r')) t.gem.enters = [...t.gem.enters.slice(-20), Date.now()];
+      if (t.gem && b.data === '\x1b') setTimeout(() => gemPcScan().catch(() => {}), 800); // Esc: a turn it cut short, in its log by then
+
       const write = (d) => t.kind === 'pty' ? t.proc.write(d)
         : new Promise((resolve, reject) => t.proc.stdin.write(JSON.stringify({ k: d }) + '\n', (e) => e ? reject(e) : resolve()));
       if (!t.gpt && !t.codex) { await write(String(b.data)); return {}; }

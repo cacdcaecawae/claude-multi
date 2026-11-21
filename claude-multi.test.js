@@ -2068,11 +2068,15 @@ if (process.platform === 'win32') {
   logAt('cli-20261120_100000.log', 'Starting language server process with pid 111', `Created conversation ${u(1)} (backend=X)`, `Resuming conversation ${u(2)}`, `Streaming conversation ${u(2)}`);
   logAt('cli-20261119_090000.log', 'Starting language server process with pid 111', `Created conversation ${u(3)} (backend=X)`);
   logAt('cli-20261120_110000.log', 'Starting language server process with pid 222', 'Language server version: 1.5.13');
-  assert.deepEqual([...gemAgyConvs(new Set([111, 222, 333]))], [[u(2), { pid: 111, since: new Date(2026, 10, 20, 10, 0, 0).getTime() }]]);
+  assert.deepEqual([...gemAgyConvs(new Set([111, 222, 333]))], [[u(2), { pid: 111, since: new Date(2026, 10, 20, 10, 0, 0).getTime(), cut: 0 }]]);
   // what a log adds read on (another conversation sent to); one an agy named long before its last 256 KB (idle for hours)
   fs.appendFileSync(path.join(logs, 'cli-20261120_100000.log'), `I1120 10:05:00.000000      1 x.go:1] Forwarding user message to conversation ${u(4)}\n`);
   logAt('cli-20261120_120000.log', 'Starting language server process with pid 444', `Created conversation ${u(5)} (backend=X)`, ...Array(4000).fill('x'.repeat(100)));
   assert.deepEqual([...gemAgyConvs(new Set([111, 444]))].map(([id, m]) => [id, m.pid]), [[u(5), 444], [u(4), 111]]);
+  // a turn cut short (Esc), as agy 1.5 logs it: its time (a cut of another conversation isn't its own one's)
+  fs.appendFileSync(path.join(logs, 'cli-20261120_100000.log'), `I1120 10:06:00.250000    2524 conversation_manager.go:1920] Cancelling in-progress response for conversation ${u(4)}\n`);
+  fs.appendFileSync(path.join(logs, 'cli-20261120_120000.log'), `I1120 12:01:00.000000    2524 conversation_manager.go:1920] Cancelling in-progress response for conversation ${u(6)}\n`);
+  assert.deepEqual([...gemAgyConvs(new Set([111, 444]))].map(([id, m]) => [id, m.cut]), [[u(5), 0], [u(4), new Date(2026, 10, 20, 10, 6, 0).getTime() + 250]]);
   // its status line: ours set in ~/.gemini's settings (what's there kept), a status line of your own left; what it says,
   // by the account on (its email), and kept for the page's status bar (its effort is the model's)
   const sf = path.join(GEM, 'settings.json');
