@@ -3703,8 +3703,9 @@ const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)
 const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
 // a path of this PC as Claude writes one in `code` (D:\… or D:/…): opened by 预览 (preview). Not one with a stand-in in it
 // (runs/<id>: its < > here as &lt; &gt;, the code being escaped already) nor a ". A Mac's service: its own paths too
-// (/Users/…; under its usual tops, not a /command); on Windows one of those is a Mac's, out of reach
-const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, MAC_PEEKABLE = /^\/(?:Users|Volumes|private|tmp|Applications|Library|opt)\/(?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, peekable = (c) => PEEKABLE.test(c) || (typeof state !== 'undefined' && state?.win === false && MAC_PEEKABLE.test(c));
+// (/Users/…; under its usual tops, not a /command); on Windows one of those is a Mac's, out of reach. One cut short with
+// … or ... (D:\…\a.md) names no file: shown as written
+const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, MAC_PEEKABLE = /^\/(?:Users|Volumes|private|tmp|Applications|Library|opt)\/(?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, peekable = (c) => !/…|\.{3}/.test(c) && (PEEKABLE.test(c) || (typeof state !== 'undefined' && state?.win === false && MAC_PEEKABLE.test(c)));
 // as Codex shows one: its kind's mark and its name (a folder's: one ending in \ or /, or with no .ext), the whole path on hover
 const peekLink = (c, words) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || c, dir = /[\\/]$/.test(c) || !/\.\w{1,8}$/.test(n);
   return `<a class="peek" data-peek="${c}" title="${c}">${svg(dir ? I.folder : I.file)}${words ?? n}</a>`; };
