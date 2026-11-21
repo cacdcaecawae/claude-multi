@@ -56,12 +56,26 @@
   // (Run this command?, or its own 「Question 1/1: …」): numbered options over 「↑/↓ Navigate · …」 with > at the current
   // one, read as Claude's with that > as ❯ (your messages above and its box start > too: the last numbered one only); its
   // own question's 「Write-in...」 open (Your answer:, 「enter Submit · esc Back」): writing; what waits in its queue,
-  // 「▸ … (alt+m to send immediately)」 (its row may be cut short: …)
+  // 「▸ … (alt+m to send immediately)」 (its row may be cut short: …).
+  // A list without numbers (> at the current one, 「enter Confirm」 or 「enter Select」 under it; not the / commands' own,
+  // 「tab Complete」): its trust question, /model's, /resume's. Its options: the rows around > up to a blank one, or its
+  // search box's; its title: the rows over them (as agy 1.5 draws them)
   function parseAgyScreen(rows) {
     const spin = rows.map((r) => /^\s*[⠀-⣿]\s+(\S.*?)\s*$/.exec(r)).find(Boolean), foot = rows.findLastIndex((r) => /↑\/↓ Navigate/.test(r));
     const up = rows.slice(0, Math.max(0, foot)), cur = up.findLastIndex((r) => /^\s*>\s*\d+\.\s/.test(r));
     if (cur >= 0) up[cur] = up[cur].replace('>', '❯');
-    return { busy: spin ? [spin[0], spin[1], ''] : null, menu: cur >= 0 ? parseScreen(up).menu : null,
+    let menu = cur >= 0 ? parseScreen(up).menu : null;
+    const c = !menu && foot >= 0 && /enter (Confirm|Select)/.test(rows[foot]) && !/tab Complete/.test(rows[foot]) ? up.findLastIndex((r) => /^\s*>\s+\S/.test(r)) : -1;
+    if (c >= 0) {
+      const search = (r) => /search|tab to cycle/i.test(r), rule = (r) => /^[\s─━]*$/.test(r) || /^\s*>\s*$/.test(r); // (its box's rows above: not its title)
+      let a = c, z = c;
+      while (a > 0 && up[a - 1].trim() && !search(up[a - 1])) a--;
+      while (z + 1 < up.length && up[z + 1].trim()) z++;
+      const said = up.slice(Math.max(0, a - 6), a).filter((r) => !rule(r) && !search(r)).map((r) => r.trim());
+      menu = { cur: c - a + 1, opts: up.slice(a, z + 1).map((r, k) => ({ n: k + 1, label: r.replace(/^\s*>?\s*/, '').replace(/\s{2,}/g, ' · ').trim() })),
+        ask: said.some((l) => /Do you trust the contents of this project/.test(l)) ? '要信任这个文件夹吗？选「Yes, I trust this folder」，Gemini 才能在这里工作。' : said.join('\n') };
+    }
+    return { busy: spin ? [spin[0], spin[1], ''] : null, menu,
       writing: foot < 0 && rows.some((r) => /enter Submit · esc Back/.test(r)),
       queue: rows.map((r) => /^\s*▸\s+(.*?)\s*\(alt\+m to send immediately\)\s*$/.exec(r)?.[1]?.replace(/…$/, '')).filter(Boolean) };
   }

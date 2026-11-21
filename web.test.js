@@ -583,6 +583,7 @@ const press = async (key, shift = false) => {
   await evaluate("{ const c = focusG.active, t = c.el.querySelector('.send textarea'); t.value = '紫色'; t.dispatchEvent(new Event('input')); c.el.querySelector('.go').click(); }");
   for (let i = 0; i < 60 && inputs.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(inputs.slice(0, 2), ['\x1b[200~紫色\x1b[201~', '\r']);
+  assert.equal(await evaluate("!!focusG.active.el.querySelector('.live .hm.user.pending')"), false); // an answer, not a message waiting for the record
   // 换账号继续 on another Gemini account (its quota on the card): the service asked to end it here and go on there
   openBodies.length = 0;
   await evaluate("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false, windows: [{ k: 'five_hour', pct: 30, reset: '1小时' }] }]; focusG.active.acct = 1; focusG.active.swap()");
