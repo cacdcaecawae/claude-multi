@@ -539,6 +539,9 @@ if (SESSION0) {
   const fl = md('[当前进展.md](file:///D:/paper/%E8%AE%BA%E6%96%87%2004/当前进展.md) 和 [a.js](D:\\x\\a.js:12) 和 [稿件](file:///D:/paper/稿件/) 和 [b](docs/b.md) [c](file:///Users/me/c.md)');
   const fk = /^<a class="peek" data-peek="D:\/paper\/论文 04\/当前进展\.md" title="[^"]+">(<svg.*?<\/svg>)当前进展\.md<\/a> 和 <a class="peek" data-peek="D:\\x\\a\.js" [^>]+>(<svg.*?<\/svg>)a\.js<\/a> 和 <a class="peek" data-peek="D:\/paper\/稿件\/" [^>]+>(<svg.*?<\/svg>)稿件<\/a> 和 \[b\]\(docs\/b\.md\) \[c\]\(file:\/\/\/Users\/me\/c\.md\)$/.exec(fl);
   assert.ok(fk && fk[1] === fk[2] && fk[1] !== fk[3], fl);
+  // one written in `code` is shown as written (a reply about such links); a link's words in code still a link, its code kept
+  assert.equal(md('写的是 `[当前进展.md](file:///D:/a/…)` 这种'), '写的是 <code>[当前进展.md](file:///D:/a/…)</code> 这种');
+  assert.ok(/^<a class="peek" data-peek="D:\/a\.md" [^>]+>(<svg.*?<\/svg>)<code>a\.md<\/code><\/a> \*\*$/.test(md('[`a.md`](file:///D:/a.md) **')), md('[`a.md`](file:///D:/a.md) **'));
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);
