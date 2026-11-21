@@ -463,11 +463,11 @@ if (SESSION0) {
   fs.mkdirSync(path.dirname(f));
   const status = (s) => fs.writeFileSync(f, JSON.stringify({ pid: process.pid, status: s }));
   status('busy');
-  let t = Date.now();
-  setTimeout(() => status('shell'), 700); setTimeout(() => status('idle'), 1500);
+  let t, idleAt = null;
+  setTimeout(() => status('shell'), 700); setTimeout(() => { status('idle'); idleAt = Date.now(); }, 1500);
   await untilFree(dir, process.pid, false);
-  const waited = Date.now() - t;
-  assert.ok(waited >= 1400 && waited < 3500, `waited ${waited} ms`);       // through busy and shell, out at idle
+  // timed from idle, not from the start: these timers wait for the rest of this file's tests, all run first (it took 4.4 s)
+  assert.ok(idleAt && Date.now() - idleAt < 2500, `out ${idleAt && Date.now() - idleAt} ms after idle`); // through busy and shell, out at idle (a 1 s poll)
   status('busy'); t = Date.now(); await untilFree(dir, process.pid, true);
   assert.ok(Date.now() - t < 200);                                        // now: at once
   status('waiting'); t = Date.now(); await untilFree(dir, process.pid, false);
@@ -796,7 +796,8 @@ if (SESSION0) {
   fs.rmSync(root, { recursive: true, force: true });
 }
 // A Gemini one for the 管家, in a home of its own (its ~/.gemini, one account): listed by sessions --all (gem, A1), read
-// with chat look (where it runs: not here, the service there being another's), a new one on an account there isn't refused
+// with chat look (where it runs: nowhere, no service reached: its fetch fails, and the one on 7788, the one in use, is
+// never asked), a new one on an account there isn't refused
 {
   const fs = require('fs'), path = require('path'), os = require('os'), url = require('url'), { spawnSync } = require('child_process'), { DatabaseSync } = require('node:sqlite');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-home-')), work = path.join(root, 'work'), a = path.join(root, '.gemini', 'antigravity-cli'), id = '9e1f0000-1111-2222-3333-444444444444';
@@ -808,7 +809,8 @@ if (SESSION0) {
   fs.writeFileSync(path.join(a, 'brain', id, '.system_generated', 'logs', 'transcript.jsonl'), [
     { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-20T09:59:00Z', content: '<USER_REQUEST>\n把登录改好\n</USER_REQUEST>' },
     { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-11-20T09:59:30Z', content: '改好了。' }].map((x) => JSON.stringify(x)).join('\n') + '\n');
-  const cli = (...x) => spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), ...x], { env: { ...process.env, USERPROFILE: root, HOME: root }, encoding: 'utf8' }).stdout.trim();
+  const noFetch = 'data:text/javascript,globalThis.fetch=()=>Promise.reject(new Error("no service in tests"))';
+  const cli = (...x) => spawnSync(process.execPath, ['--import', noFetch, path.join(__dirname, 'claude-multi.js'), ...x], { env: { ...process.env, USERPROFILE: root, HOME: root }, encoding: 'utf8' }).stdout.trim();
   assert.deepEqual(JSON.parse(cli('sessions', '--json', '--all')).filter((s) => s.gem).map((s) => [s.id, s.title, s.who, s.cwd]), [[id, '修复登录', 'A1', work]]);
   assert.equal(cli('chat', 'look', '登录'), `「修复登录」 ${id}\nGemini 账号 A1 · ${work} · 没在运行\n\n最后的回答：\n改好了。`);
   assert.equal(cli('chat', 'new', work, '你好', '--gemini', '--acct', 'A3'), '没有 Gemini 账号 A3（用户要先运行 claude-multi new gemini 加一个）');
