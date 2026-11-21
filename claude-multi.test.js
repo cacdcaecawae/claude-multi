@@ -2101,6 +2101,14 @@ if (process.platform === 'win32') {
   assert.equal(fs.readFileSync(sf, 'utf8'), '{ theme: dark }');
   fs.writeFileSync(sf, JSON.stringify({ statusLine: { command: 'mine.cmd' } })); gemSettings(undefined, '/x/claude-multi.js');
   assert.equal(JSON.parse(fs.readFileSync(sf, 'utf8')).statusLine.command, 'mine.cmd');
+  // a folder a Gemini one starts in from here: in agy's trusted list (once, however written; what's there kept), so agy
+  // asks nothing there; settings it can't read left as they are
+  const { gemTrust } = require('./claude-multi'), gh0 = path.join(TEST_HOME, '.gemini');
+  fs.writeFileSync(sf, JSON.stringify({ model: 'm', trustedWorkspaces: ['C:\\a'] }));
+  gemTrust('c:/A/', gh0); gemTrust('E:\\proj\\新项目', gh0); gemTrust('E:/proj/新项目', gh0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')), { model: 'm', trustedWorkspaces: ['C:\\a', path.resolve('E:\\proj\\新项目')] });
+  fs.writeFileSync(sf, '{ x'); gemTrust('C:/b', gh0);
+  assert.equal(fs.readFileSync(sf, 'utf8'), '{ x');
   const gin = { product: 'antigravity', email: 'g2@example.com', session_id: 'c-gem', model: { display_name: 'Gemini 4 Neon', effort: 'high' }, context_window: { used_percentage: 12 } };
   assert.equal(statusline(gin), 'Gemini 账号 A2  │  Gemini 4 Neon · high  │  context 12%');
   assert.equal(statusline({ ...gin, email: 'other@example.com' }).split('  │  ')[0], 'Gemini');
