@@ -546,6 +546,9 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     font-size: 10px; font-weight: 700; letter-spacing: .02em; color: #fff; background: var(--attc, #6e7681); }
   .hm .att.pdf { --attc: #d93a2b; } .hm .att.doc { --attc: #2b6cd9; } .hm .att.xls { --attc: #1f8a4c; } .hm .att.ppt { --attc: #d9662b; } .hm .att.zip { --attc: #8a6d3b; }
   .hm .att .ak { display: none; } .hm .att .an { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .hm .att.pic { flex-direction: column; align-items: flex-start; gap: 4px; padding: 4px; } .hm .att.pic::before { display: none; }
+  .hm .att.pic img { height: auto; max-height: 180px; width: auto; max-width: 100%; border: 0; border-radius: 6px; object-fit: contain; }
+  .hm .att.pic .an { font-size: 12px; color: var(--fg3); padding: 0 4px 2px; max-width: 100%; }
   .hm.long:not(.open) .clip { max-height: 16.5em; overflow: hidden; -webkit-mask: linear-gradient(#000 55%, transparent); mask: linear-gradient(#000 55%, transparent); } /* 10 lines: a long message of yours, a huge answer */
   .hm .more { display: block; margin-top: 4px; font-size: 12.5px; color: var(--link); }
   .hm .more::after { content: '展开全部'; } .hm.open .more::after { content: '收起'; }
@@ -1059,7 +1062,7 @@ const shownText = (t) => t.replace(/\[Image #\d+\]\s*/g, '').replace(ATT, '附�
 let zoomFrom = null;
 const zoomOff = () => { const z = $('#zoom'); if (z.hidden) return; z.hidden = true; z.querySelector('img').removeAttribute('src'); zoomFrom?.focus?.({ preventScroll: true }); zoomFrom = null; };
 document.addEventListener('click', (e) => {
-  const a = e.target.closest?.('a.hm.img');
+  const a = e.target.closest?.('a.hm.img, .hm a.att.pic'); // (a picture sent as a file: a Gemini or GPT one's)
   if (!a || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
   e.preventDefault(); e.stopPropagation();
   const z = $('#zoom');
@@ -3518,8 +3521,10 @@ function userBody(words, files = [], plain = false) {
     const k = left.findIndex((f) => f.endsWith(`-${name}`)), saved = k >= 0 ? left.splice(k, 1)[0] : null;
     const ext = (/\.([a-z0-9]{1,5})$/i.exec(name)?.[1] ?? '').toUpperCase();
     const kind = { PDF: 'pdf', DOC: 'doc', DOCX: 'doc', RTF: 'doc', XLS: 'xls', XLSX: 'xls', CSV: 'xls', PPT: 'ppt', PPTX: 'ppt', ZIP: 'zip', RAR: 'zip', '7Z': 'zip', GZ: 'zip' }[ext] ?? 'any';
-    const inner = `<span class="ak">附件：</span><span class="an">${esc(name)}</span>`, at = ` class="att ${kind}" data-ext="${esc(ext || '文件')}"`;
-    return saved ? `<a${at} href="/api/file?n=${encodeURIComponent(saved)}" target="_blank" title="打开 ${esc(name)}">${inner}</a>` : `<span${at}>${inner}</span>`;
+    const inner = `<span class="ak">附件：</span><span class="an">${esc(name)}</span>`, at = ` class="att ${kind}" data-ext="${esc(ext || '文件')}"`, href = `/api/file?n=${encodeURIComponent(saved ?? '')}`;
+    // a picture (sent as a file: a Gemini or GPT one's): itself, small, its name under it (the text stays 附件：name)
+    if (saved && /^(PNG|JPE?G|GIF|WEBP)$/.test(ext)) return `<a class="att pic" href="${href}" target="_blank" title="${esc(name)}"><img src="${href}" alt="" loading="lazy">${inner}</a>`;
+    return saved ? `<a${at} href="${href}" target="_blank" title="打开 ${esc(name)}">${inner}</a>` : `<span${at}>${inner}</span>`;
   }).join('');
   return (text ? (plain ? esc(text) : md(text)) : '') + (cards ? `<div class="atts">${cards}</div>` : '');
 }

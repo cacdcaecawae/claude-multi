@@ -535,7 +535,7 @@ const press = async (key, shift = false) => {
   await evaluate("document.querySelector('[data-kind=\"gem\"]').click()");
   assert.deepEqual(await evaluate("[...document.querySelectorAll('#view [data-open]')].map((r) => r.dataset.open)"), ['GEM1']);
   await evaluate("document.querySelector('[data-kind=\"all\"]').click()");
-  historyId = 'GEM1'; histFeed = [{ role: 'user', text: 'hi', at: 1 }, { role: 'claude', text: 'Hi! How can I help you today?' }];
+  historyId = 'GEM1'; histFeed = [{ role: 'user', text: 'hi\n附件：C:\\Users\\me\\.claude-multi\\uploads\\20261121T010203-abcdef-猫.png', at: 1 }, { role: 'claude', text: 'Hi! How can I help you today?' }];
   termGem = '\r\n> 你是什么模型\r\n⣟  Generating...\r\n────────\r\n';
   await evaluate("document.querySelector('#view [data-open=\"GEM1\"]').click()"); // (one not running: started, as a Claude one)
   const rb = await opened();
@@ -544,6 +544,9 @@ const press = async (key, shift = false) => {
   await until("focusG.active.el.querySelector('.who')");
   assert.deepEqual(await evaluate("[focusG.active.id, !!focusG.active.el.querySelector('.seg'), focusG.active.el.querySelector('.seg .on').dataset.v, focusG.active.el.querySelector('.who').textContent]"), ['GEM1', true, 'hist', 'Gemini']);
   assert.ok(histUrls.some((u) => /[?&]gem=1/.test(u) && /id=GEM1/.test(u)), histUrls.join(' '));
+  // a picture it was sent (as a file: 附件：its path): itself in the bubble, small, its name under it
+  assert.deepEqual(await evaluate("(() => { const a = focusG.active.el.querySelector('.hm.user a.att.pic'); return a && [a.querySelector('img').getAttribute('src'), a.textContent]; })()"),
+    [`/api/file?n=${encodeURIComponent('20261121T010203-abcdef-猫.png')}`, '附件：猫.png']);
   // agy at work on its screen: 正在回复 at once (the list's word comes seconds later), its tab turning too
   await until("focusG.active.live === 'busy'");
   assert.match(await evaluate("focusG.active.el.querySelector('.live .busy')?.textContent"), /^Gemini 正在回复 · \d+s$/); // how long: since the page saw it start (agy's screen says none)
