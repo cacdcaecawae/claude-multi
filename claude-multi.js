@@ -5152,6 +5152,8 @@ function tokenRoots(reg = load()) {
     // each Mac's records, as copied here; and what its other folders cost (others\: their replies' usage only), an amount
     // beside its own (those last: tokenStats takes them out of the rows)
     .concat(macList(reg).map((m) => ({ id: m.id, label: m.label, dir: path.join(macHome(m), 'projects'), mac: m.id, icon: m.icon ?? null })),
+      // each Gemini account (gem: its A number): all of theirs in agy's one folder of records (brain), told apart in tokenStats
+      geminiAccounts(reg).map((g, i) => ({ id: g.id, label: g.label, gem: i + 1, brain: path.join(GEMINI_HOME, 'antigravity-cli', 'brain') })),
       macList(reg).map((m) => ({ id: `${m.id}-other`, of: m.id, label: '', dir: path.join(macHome(m), 'others'), other: true })));
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
@@ -5159,12 +5161,17 @@ function tokenRoots(reg = load()) {
 // name for it (本地代理's claude/claude-opus-5-5) by what follows its provider/.
 // ponytail: copied by hand from Anthropic's price list (2026-06; Fable 5.2 from Claude Code 2.1.321's notes); a model not
 // listed is priced as Opus 5.5, so add a row when a new one shows up
+// Gemini's (agy names one with its effort after it: gemini-4-neon-high): Google's Standard paid tier, AI Studio's price
+// page as of 2026-11-21 (output includes thinking). A price that changes on a day: the day, then the new three (a reply
+// priced by its own day)
 const PRICES = { 'claude-fable-5-2': [8, 40, 0.2], 'claude-fable-5-1': [10, 50, 0.25], 'claude-fable-5': [10, 50, 1], 'claude-opus-5-5': [4, 20, 0.2],
   'claude-opus-5': [5, 25, 0.5], 'claude-opus-4': [5, 25, 0.5], 'claude-sonnet-5': [2, 10, 0.2], 'claude-sonnet-4': [3, 15, 0.3],
-  'claude-haiku-4': [1, 5, 0.1], '<synthetic>': [0, 0, 0] };
-function replyCost([, , i, o, w5, w1, r, model, fast]) {
+  'claude-haiku-4': [1, 5, 0.1], '<synthetic>': [0, 0, 0],
+  'gemini-4-neon': [3, 15, 0.15], 'gemini-4-hydrogen': [1.5, 7.5, 0.075], 'gemini-4-argon': [2, 10, 0.1, '2026-12-01', 4, 20, 0.2],
+  'gemini-4-carbon': [2, 10, 0.1, '2026-12-01', 4, 20, 0.2], 'gemini-3.8-flash': [0.75, 3.75, 0.075, '2027-01-01', 1.5, 7.5, 0.15] };
+function replyCost([, day, i, o, w5, w1, r, model, fast]) {
   const name = (model ?? '').replace(/^[\w.-]+\//, ''), k = Object.keys(PRICES).filter((p) => name.startsWith(p)).sort((a, b) => b.length - a.length)[0];
-  const [pi, po, pr] = PRICES[k ?? 'claude-opus-5-5'];
+  const p = PRICES[k ?? 'claude-opus-5-5'], [pi, po, pr] = p[3] && String(day) >= p[3] ? p.slice(4) : p;
   return ((i + w5 * 1.25 + w1 * 2) * pi + o * po + r * pr) / 1e6 * (fast ? 2 : 1);
 }
 // The page's usage (as GET /api/tokens gives it) counted in a child node: reading the records takes ~0.3 s, and in the web
@@ -5193,8 +5200,10 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // Which account ran a conversation when: going on with another account copies its whole record there (logged as
   // session_copied), so a reply is that account's when it came after the copy, before any other.
   const moves = new Map(); // conversation id -> [[ms, profile id]], oldest first
+  const gemOnAt = []; // [[ms, profile id]]: a Gemini account on from then (registered, switched to, signed in again), oldest first
   try {
     for (const l of fs.readFileSync(logFile, 'utf8').split('\n')) {
+      if (/"event":"gemini_(on|registered|relogin)"/.test(l)) { const j = JSON.parse(l); gemOnAt.push([Date.parse(j.timestamp), j.profile_id]); continue; }
       if (!l.includes('"session_copied"')) continue;
       const j = JSON.parse(l);
       if (!moves.has(j.session_id)) moves.set(j.session_id, []);
@@ -5256,9 +5265,44 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
       count(c, ri, sidOf(ri, f));
     }
   });
-  // Claude Code deletes records older than 30 days (cleanupPeriodDays): their replies stay counted from here.
+  // The Gemini ones (agy's records, every account's in one folder): a model step's usage (input not cached, output with
+  // its thinking, cache reads), each the account's that was on when it was made (before any switch logged, or one
+  // removed since: the first's). A step once, by its index and time (a /rewind writes over an index: both counted).
+  // shortcut: a record read whole the first time (agy's are a few MB at most); read in pieces as Claude's if one grows to hundreds
+  const gems = roots.map((r, ri) => [r, ri]).filter(([r]) => r.gem);
+  const gemCount = (c) => { for (const x of c.recs) { let id = null; for (const [t, p] of gemOnAt) if (t <= x[9]) id = p; best.set(x[0], { x, ri: (gems.find(([r]) => r.id === id) ?? gems[0])[1], born: 0, rank: 0 }); } };
+  if (gems.length) {
+    let ids = []; try { ids = fs.readdirSync(gems[0][0].brain); } catch {}
+    for (const id of ids) {
+      const f = path.join(gems[0][0].brain, id, '.system_generated', 'logs', 'transcript.jsonl');
+      let size; try { size = fs.statSync(f).size; } catch { continue; }
+      const c = cache.files[f] ?? { size: 0, recs: [], gem: true }, was = c.size;
+      if (size < c.size) c.size = 0; // written anew (a /rewind): read again, what was counted stays
+      if (size > c.size) try {
+        const fd = fs.openSync(f, 'r'), buf = Buffer.alloc(size - c.size);
+        try { fs.readSync(fd, buf, 0, buf.length, c.size); } finally { fs.closeSync(fd); }
+        const end = buf.lastIndexOf(10) + 1, at = new Map(c.recs.map((x, i) => [x[0], i])); // (a line still being written: next time)
+        for (const l of buf.toString('utf8', 0, end).split('\n')) {
+          if (!l.includes('"output_tokens"')) continue;
+          let s; try { s = JSON.parse(l); } catch { continue; }
+          const ts = gemTime(s.created_at);
+          if (!s.model || !ts) continue;
+          const x = [`gem:${id}:${s.step_index}:${s.created_at}`, day(ts), s.input_tokens ?? 0, s.output_tokens ?? 0, 0, 0, s.cache_read_tokens ?? 0, s.model, 0, ts];
+          const i = at.get(x[0]);
+          if (i === undefined) { at.set(x[0], c.recs.length); c.recs.push(x); } else c.recs[i] = x;
+        }
+        c.size += end;
+      } catch {} // (unreadable now: as it was, read again next time)
+      next[f] = c;
+      if (c.size !== was) dirty = true;
+      gemCount(c);
+    }
+  }
+  // Claude Code deletes records older than 30 days (cleanupPeriodDays): their replies stay counted from here (a Gemini
+  // one deleted: its too, while there's a Gemini account; kept in the cache all the same).
   // ponytail: the cache keeps every reply forever (~2 MB per busy fortnight); fold old files into day totals if it gets slow
   for (const [f, c] of Object.entries(cache.files)) {
+    if (c.gem) { if (!next[f]) { next[f] = c; if (gems.length) gemCount(c); } continue; }
     const ri = roots.findIndex((r) => f.startsWith(r.dir + path.sep));
     if (next[f] || ri < 0 || fs.existsSync(f)) continue;
     next[f] = c;
@@ -5275,7 +5319,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 });
   const add = (t, x, usd) => { t.i += x[2]; t.o += x[3]; t.cw += x[4] + x[5]; t.cr += x[6]; t.usd += usd; t.n++; };
-  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0, ...(r.mac && { mac: r.mac, icon: r.icon ?? null }) }));
+  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0, ...(r.mac && { mac: r.mac, icon: r.icon ?? null }), ...(r.gem && { gem: r.gem }) }));
   const plus = {}; // what each Mac's other folders cost (by its id): in no total and no day, one amount beside that Mac's (plus)
   for (const { x, ri } of best.values()) {
     const usd = replyCost(x);

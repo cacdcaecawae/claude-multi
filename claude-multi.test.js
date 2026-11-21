@@ -161,6 +161,28 @@ assert.equal(t.total, 2); near(t.usd, (1 + 1 * 2) * 4 / 1e6);
   t = tokenStats(r2, require('path').join(tmp, 'sw.json'), log);
   assert.deepEqual(t.accounts.map((a) => a.total), [5, 2]); // a: msg_a and msg_c; b: msg_b
 }
+// Gemini (agy): its records' model steps (input, output, cache reads), every account's in one folder, each reply the
+// account's that was on then (by the log; before any switch: the first's), at Google's prices by the reply's day (Argon
+// up on 2026-12-01); one read on as it grows; a deleted one stays counted
+{
+  const path = require('path'), brain = path.join(tmp, 'gem', 'brain'), log = path.join(tmp, 'gem-events.jsonl'), cache = path.join(tmp, 'gem.json');
+  const step = (i, at, model, inp, out, cr) => JSON.stringify({ step_index: i, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at, model, input_tokens: inp, output_tokens: out, cache_read_tokens: cr, content: 'x' }) + '\n';
+  const rec = (id) => path.join(brain, id, '.system_generated', 'logs', 'transcript.jsonl');
+  for (const id of ['g1', 'g2']) fs.mkdirSync(path.dirname(rec(id)), { recursive: true });
+  fs.writeFileSync(rec('g1'), JSON.stringify({ step_index: 0, type: 'USER_INPUT', created_at: '2026-11-20T11:59:00Z', content: '"output_tokens" in your words' }) + '\n'
+    + step(1, '2026-11-20T12:00:00Z', 'gemini-4-neon-high', 1e6, 1e6, 1e6) + step(2, '2026-11-20T14:00:00Z', 'gemini-4-argon-high', 1e6, 0, 0));
+  fs.writeFileSync(rec('g2'), step(0, '2026-12-02T12:00:00Z', 'gemini-4-argon-xhigh', 1e6, 1e6, 1e6) + '{"step_index":1');
+  fs.writeFileSync(log, JSON.stringify({ timestamp: '2026-11-20T13:00:00Z', event: 'gemini_on', profile_id: 'gb' }) + '\n');
+  const gr = [{ id: 'c', label: 'c', dir: path.join(tmp, 'none') }, { id: 'ga', label: 'ga', gem: 1, brain }, { id: 'gb', label: 'gb', gem: 2, brain }];
+  t = tokenStats(gr, cache, log);
+  assert.deepEqual(t.accounts.map((a) => [a.total, a.gem]), [[0, undefined], [3e6, 1], [4e6, 2]]);
+  near(t.accounts[1].usd, 3 + 15 + 0.15); near(t.accounts[2].usd, 2 + (4 + 20 + 0.2)); // Neon; Argon before and after its price went up
+  fs.appendFileSync(rec('g1'), step(3, '2026-11-21T12:00:00Z', 'gemini-4-hydrogen', 0, 2e6, 0));
+  t = tokenStats(gr, cache, log);
+  assert.deepEqual([t.accounts[2].total, t.accounts[2].usd.toFixed(2)], [6e6, '41.20']); // Hydrogen $7.50 out, read on once
+  fs.rmSync(path.join(brain, 'g2'), { recursive: true }); // deleted: still counted
+  assert.equal(tokenStats(gr, cache, log).total, 9e6);
+}
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('tokens ok');
 
@@ -1461,6 +1483,9 @@ if (SESSION0) {
   assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5-20260101', false]), 0.2); assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5', false]), 1);
   // 本地代理's names (a gateway's provider/ before the model's): its own price, not Opus 5.5's for any it doesn't know
   assert.equal(replyCost(['k', 'd', 1e6, 0, 0, 0, 0, 'claude/claude-sonnet-5-5', false]), 2); assert.equal(replyCost(['k', 'd', 1e6, 0, 0, 0, 0, 'claude/claude-fable-5-1', false]), 10);
+  // Gemini's (agy's name: its effort after it), by the reply's day where Google changes a price on one
+  assert.deepEqual([['2026-11-30', 'gemini-4-argon-high'], ['2026-12-01', 'gemini-4-argon-high'], ['2026-12-31', 'gemini-3.8-flash'], ['2027-01-01', 'gemini-3.8-flash'], ['2026-11-21', 'gemini-4-neon-xhigh']]
+    .map(([d, m]) => +replyCost(['k', d, 1e6, 1e6, 0, 0, 1e6, m, false]).toFixed(3)), [12.1, 24.2, 4.575, 9.15, 18.15]);
   // the web service's last guard: a throw before it listens ends it; listening, it's logged (the same once in 10 min) and it goes on
   const guardLog = [], exits = [];
   const guard = (listening) => vm.runInNewContext(part(js, '  const fell = new Map();', '\n  process.on(') + '\nkeepOn;', {
