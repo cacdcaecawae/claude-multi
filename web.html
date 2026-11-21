@@ -3708,10 +3708,11 @@ const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, MAC_PEEKAB
 // as Codex shows one: its kind's mark and its name (a folder's: one ending in \ or /, or with no .ext), the whole path on hover
 const peekLink = (c, words) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || c, dir = /[\\/]$/.test(c) || !/\.\w{1,8}$/.test(n);
   return `<a class="peek" data-peek="${c}" title="${c}">${svg(dir ? I.folder : I.file)}${words ?? n}</a>`; };
-// a file of this PC linked as Gemini writes one, [名字](file:///D:/…) (or [名字](D:\…)): its words as such a link, its
-// %-escapes read, a line number after it dropped; one that isn't a path of this PC (relative, a Mac's here) as written
-const FILE_LINK = /\[([^\]\n]+)\]\((?:file:\/\/)?(\/?[A-Za-z]:[\\/][^\s()<>"`]*|\/[^\s()<>"`]*)\)/g;
-const fileLink = (m, words, u) => { let p; try { p = decodeURIComponent(u.replace(/&amp;/g, '&')).replace(/^\/(?=[A-Za-z]:)/, '').replace(/(?::\d+){1,2}$|#L\d+(?:-L?\d+)?$/, ''); } catch { return m; }
+// a file of this PC linked as Gemini writes one, [名字](file:///D:/…) (or [名字](D:\…), as GPT does): its words as such a
+// link, its %-escapes read, a line number after it dropped; one that isn't a path of this PC (relative, a Mac's here) as
+// written, and one in `code` (shown as it is written there) stepped over
+const FILE_LINK = /`[^`\n]+`|\[([^\]\n]+)\]\((?:file:\/\/)?(\/?[A-Za-z]:[\\/][^\s()<>"`]*|\/[^\s()<>"`]*)\)/g;
+const fileLink = (m, words, u) => { let p; if (!u) return m; try { p = decodeURIComponent(u.replace(/&amp;/g, '&')).replace(/^\/(?=[A-Za-z]:)/, '').replace(/(?::\d+){1,2}$|#L\d+(?:-L?\d+)?$/, ''); } catch { return m; }
   return peekable(p) && !p.includes('"') ? peekLink(esc(p), words) : m; };
 // a line as a list's item (- or *, indented by its spaces), a rule (---) or a quote (> ): a block of its own, its line's end
 // taken with it (else pre-wrap draws an empty line after it); an item's wrapped lines start under its words, not its dot
@@ -3746,8 +3747,8 @@ function md(t) {
     if (i % 4) return `<div class="pw"><button class="cpy" data-copy title="复制">${svg(I.copy)}</button><pre>${hl(p.replace(/\n$/, ''), /^\s*([\w#+.-]*)/.exec(ps[i - 1])[1].toLowerCase())}</pre></div>`;
     const math = [];
     p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
-    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (peekable(c) ? peekLink(c) : `<code>${c}</code>`))
-      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(FILE_LINK, fileLink).replace(LINK, link)
+    return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(FILE_LINK, fileLink).replace(/`([^`\n]+)`/g, (m, c) => (peekable(c) ? peekLink(c) : `<code>${c}</code>`))
+      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)
       .replace(/\u0000(\d+)\u0000/g, (_, k) => tex(...math[k]));
   }).join('');
 }
