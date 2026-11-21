@@ -38,6 +38,7 @@
 | 用量统计 | 所有账号的 token 用量，按天、按账号统计，并按 API 价格折算成金额。 |
 | 代理额度 | 左边的喜鹊图标：经代理或网关用的那些订阅账号，各窗口用了多少、多久后重置（邮箱打码）。申请接入的账号自动读对方网关给的；自己的代理，在 `profiles.json` 的 `localQuota.source` 里写一个读取脚本的绝对路径（见下面「文件说明」）。两样都没有就不显示。 |
 | GPT | 用 ChatGPT 订阅登录 OpenAI 的 [Codex](https://github.com/openai/codex)，在网页上和 Claude 的对话放在一起用（账号 G1、G2…）。 |
+| API 额度 | 订阅每月送的 Claude API 额度只付 Agent SDK、不付 Claude Code：在网页上开一种由 Agent SDK 跑的 Claude 对话，经网关用 Console 的 API key（见下面「API 额度」）。 |
 | GPT 聊天 | 用你的 OpenAI API key，在网页上直接和 GPT-6 Astra 聊天（不碰电脑上的文件），可以选 Pro 模式（ChatGPT 的 GPT-6 Pro）和思考强度，能联网、看图片和文件。 |
 | Gemini | 用 Google 账号登录 Google 的 [Antigravity 命令行](https://antigravity.google/docs/cli/overview)（`agy`），在网页上和 Claude、GPT 的对话放在一起用（账号 A1、A2…，同一时间一个在线）。 |
 
@@ -231,6 +232,18 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 - 列表里 GPT 聊天单独放在最上面一组。右键可以重命名、删除（移到回收站；正在回答的会先停下）。
 - 管家也能用：你跟它说「问问 GPT …」，它用 `claude-multi chat new --oai <问题>` 开一个 GPT 聊天，用 `chat say`／`chat look` 接着问、看回答，答完网页服务会告诉它。它默认用普通 · medium，你说要 Pro、要想得深才加 `--mode pro --effort max`。管家发的这几轮不推到你手机（它会自己告诉你）。GPT 聊天不能派工单。
 
+**API 额度**（Claude Agent SDK）
+
+- Max、Ultra、Team 订阅每月送一笔 Claude API 额度（在 Console 里领，Max 每月 100 美元）。这笔钱付 Claude API 和 [Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)，**不付 Claude Code**。这种对话由 Agent SDK 来跑，用的是这笔额度。
+- 要一个连着网关的 API 账号（申请接入来的，或者你自己接了网关的），网关里要有一个用 Console 的 API key 的 provider，名字叫 `anthropic`（Magpie 里加「Anthropic」就是它）。「新对话」选 Claude、选这个账号，下面选「API 额度」。
+- 模型名都写成 `anthropic/…`，所以网关只会用那把 API key，不会用到订阅账号；Claude Code 自己挑的模型（子任务的 Sonnet、小活的 Haiku）也一样。输入框旁边的按钮选模型（Opus 5.5、Fable 5.2、Sonnet 5.5、Haiku 5.5，写着每百万 token 的价格），默认 Opus 5.5，按浏览器记住。
+- 跑的是你电脑上的 `claude`，记录就是 Claude Code 的记录，所以列表、「对话」视图、改名、删除、用量统计都和 Claude 对话一样。列表里标着 `API`。没有「终端」视图，也不能换账号。
+- 权限照账号的设置来。它要你确认（比如要不要跑一条命令），或者问你选择题时，「对话」里出一张卡片：点允许、不允许，或者点选项；也可以直接在输入框里写，发出去就是你的回答（不允许时它会照你写的改做法）。
+- 回复时发送按钮变成停止；这时不能再发新消息，先等它答完或者停止。没答完的会写明原因（比如网关说这把 key 没开 API 额度）。
+- 第一次发消息时会自动把 Agent SDK 装进 `.claude-multi\sdk\`（npm，几十秒）。它自带的 Claude Code（390 MB）不装，用的是你电脑上的。
+- 网页服务重启时，正在回答的那一轮会断掉，对话记录还在，可以接着发。
+- 用量在网关那边看（Magpie 记在这把 key 上），也可以在 Console 的「Cost」页看。
+
 **Gemini 对话**（Antigravity 命令行）
 
 - 先装好 Google 的 Antigravity 命令行：在 PowerShell 里运行 `irm https://antigravity.google/cli/install.ps1 | iex`。再运行 `claude-multi new gemini`：它会打开 `agy`，在里面选用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回去）。登录成功就存下来了，之后输入 `/exit` 退出 `agy`，会告诉你存成了哪个账号。账号要能用 Antigravity（Google 会先让新账号验证一下）。
@@ -382,6 +395,7 @@ server {
 | `screen.js` | 从 Claude 的终端画面认出「正在回复」和选择题，网页和管家的命令共用 |
 | `delta.js` | 申请接入的账号经它发请求，只传变了的部分（见上面「申请接入」）；网关那头的接收端用它导出的 `rebuild`、`keep` 拼回请求。`delta.log` 是它的报错，不进 git |
 | `quota-panel.js` | 代理额度的服务端：一分钟缓存、手动刷新 30 秒一次，只把额度字段交给网页（邮箱打码，凭据和原始报错不出去）。数据来源二选一：`profiles.json` 的 `localQuota.source`（你自己的脚本，导出 `read()` 和 `refresh(target)`，各返回 `{ quotas: [...] }`），否则是申请接入的网关的 `/_quota` |
+| `sdk.js` | API 额度的对话（见上面「API 额度」）：第一次用时把 Agent SDK 装进 `sdk\`，每条消息一次 `query()`，模型和 Claude Code 自己挑的模型都放在 `anthropic/` 下；问你的事等网页回答，停止就中断这一轮。`sdk\` 不进 git |
 | `THIRD_PARTY_NOTICES.txt` | 代理额度图标（Magpie 的小喜鹊，MIT 许可）的出处和许可 |
 | `butler\` | 管家的工作文件夹：`CLAUDE.md` 是它的规矩，模型设成 Sonnet |
 | `tickets.json` | 管家的工单（用户的原话、交给了哪个对话、它的汇报和每轮结束的时间），只由网页服务写，不进 git |
@@ -395,11 +409,11 @@ server {
 
 ```bat
 node claude-multi.test.js
-node --test delta.test.js quota-panel.test.js
+node --test delta.test.js quota-panel.test.js sdk.test.js
 node quota-panel.browser.test.js
 ```
 
-每一项通过会打印一行 `… ok`（`delta.test.js`、`quota-panel.test.js` 是 Node 自带的测试格式，只连 127.0.0.1；`quota-panel.browser.test.js` 用无头 Chrome 或 Edge 打开 `web.html`，接的是假的服务，设 `QUOTA_SCREENSHOTS=<文件夹>` 会留截图）。测试在临时目录里另建一个用户目录运行，不读也不改你真正的 `.claude-multi`（账号列表、正在用的对话都不受影响）。
+每一项通过会打印一行 `… ok`（`delta.test.js`、`quota-panel.test.js`、`sdk.test.js` 是 Node 自带的测试格式，只连 127.0.0.1，`sdk.test.js` 用一个假的 `query()`，不起 claude 也不装 SDK；`quota-panel.browser.test.js` 用无头 Chrome 或 Edge 打开 `web.html`，接的是假的服务，设 `QUOTA_SCREENSHOTS=<文件夹>` 会留截图）。测试在临时目录里另建一个用户目录运行，不读也不改你真正的 `.claude-multi`（账号列表、正在用的对话都不受影响）。
 
 主测试还覆盖并发新建的 PID 绑定、快捷交代拒发保留、电脑终端清空记录、跨会话草稿与附件隔离，以及异步管道写入失败。新终端没有返回 PID 时会明确报错，避免工单绑定到附近启动的另一个对话。
 

@@ -725,16 +725,17 @@ function listSessions(reg) {
         .filter((p) => p && !/^(Another Claude session sent a message|<task-notification>)/.test(p)).pop() ?? null;
       let named = null; // /rename's sidecar: holds the name even once its transcript line is out of the tail
       try { named = JSON.parse(fs.readFileSync(path.join(s.file.slice(0, -6), 'custom-title.json'), 'utf8')).customTitle; } catch {}
-      r = { at: s.at, cwd: field(head, 'cwd') ?? field(tail, 'cwd', true), prompt, req: lastReq(tail),
+      // sdk: an API 额度 one, begun by the Agent SDK (claude -p is sdk-cli: Claude Code's own)
+      r = { at: s.at, cwd: field(head, 'cwd') ?? field(tail, 'cwd', true), prompt, req: lastReq(tail), sdk: /^sdk-(ts|py)$/.test(field(head, 'entrypoint') ?? ''),
         title: named || field(tail, 'customTitle', true) || field(tail, 'aiTitle', true) || field(head, 'aiTitle') || prompt };
       readHeads.set(s.file, r);
     }
-    const { cwd, title, prompt, req } = r;
+    const { cwd, title, prompt, req, sdk } = r;
     if (!cwd || !title || (!s.mac && (cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)))) continue; // nothing to go back to (a Mac's folder is there)
     const pid = live.get(s.id)?.pid ?? null, st = live.get(s.id)?.status;
     // busy: answering or running a command (its session file's status), for 换账号继续's 答完再换; wait: on a question for you
     // a Mac one: shown in the folder here its project folder is for (macCwd: where it runs there)
-    out.push({ ...s, cwd: (s.mac && macPcOf(cwd, macBy.get(s.mac), macTo[s.mac])) || cwd, ...(s.mac && { macCwd: cwd }), title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell', wait: st === 'waiting',
+    out.push({ ...s, cwd: (s.mac && macPcOf(cwd, macBy.get(s.mac), macTo[s.mac])) || cwd, ...(s.mac && { macCwd: cwd }), ...(sdk && { sdk }), title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell', wait: st === 'waiting',
       who: s.mac ? macBy.get(s.mac).label : reg.profiles[s.acct].label.split('@')[0] });
   }
   return out.sort((a, b) => b.at - a.at);
@@ -3869,6 +3870,9 @@ async function web() {
   // the quota as the page last got it, kept on disk: after a restart the page shows it at once (read again behind it)
   let usageCache = (() => { try { return JSON.parse(fs.readFileSync(WEB_USAGE, 'utf8')); } catch { return null; } })();
   let usageAt = 0, usageNow = null, sessCache = null, sessAt = 0;
+  // API 额度 (sdk.js): conversations the Agent SDK runs here on an API account; a turn over, the list read again (a new
+  // one's record is there by then)
+  const SDK = require('./sdk'), sdk = SDK.createSdk({ lib: SDK.loader(ROOT), exe: claudeExe, envOf: childEnv, done: () => { sessCache = null; } });
 
   const send = (t, ev, data) => { for (const res of t.clients) res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); };
   const sessions = () => {
@@ -4031,6 +4035,7 @@ async function web() {
   const command = (what, id, ...more) => {
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error('没有这个对话');
     if (resuming(id)) throw new Error('这个对话正在运行，先结束它');
+    if (sdk.busy(id)) throw new Error('这个对话正在回答，先停止它'); // an API 额度 one, its turn going here
     sessCache = null;
     if (!sessions().some((x) => x.id === id)) throw new Error('找不到这个对话，可能已经删了'); // (rename's own words: its usage line)
     const free = hold(id, 'change');
@@ -4524,7 +4529,8 @@ async function web() {
       if (!usageCache) throw new Error('额度读取失败，稍后再试'); // the page can't draw without it
       else if (q.has('fresh')) await Promise.race([usageNow, sleep(3000)]);
       // a running one with what its terminal's status line shows (model, effort, context used), for the page's status bar
-      const all = sessions(), list = all.map(({ file, ...s }) => ({ ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
+      const all = sessions(), list = all.map(({ file, ...s }) => (s.sdk && sdk.busy(s.id) ? { ...s, where: 'web', busy: true, wait: sdk.waits(s.id), line: null } // an API 额度 one answering here
+        : { ...s, where: !s.pid ? null : where(s)?.kind === 'pty' ? 'web' : 'pc', line: s.pid ? readLine(s.id) : null }));
       // and the GPT ones among them, by when they were last written (a GPT one runs here or not at all)
       for (const { home, ...s } of gptSessions()) list.push({ ...s, where: !s.pid ? null : s.web ? 'web' : 'pc', line: s.pid ? { model: s.model, effort: s.effort } : null });
       // and the Gemini ones (running: here), with what agy's status line shows; key: a new one's tab finds its id by it
@@ -4535,7 +4541,7 @@ async function web() {
       list.sort((a, b) => b.at - a.at);
       // the Macs (the Mac mini, more): 新对话 offers them
       const reg = load(), macs = macList(reg).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
-      return { user: reg.user ?? null, usage: usageCache, gpt: gptState(), gemini: geminiAccounts(reg).map((g) => ({ label: g.label, on: g.id === reg.geminiOn, ...gemUsage(g) })), oai: fs.existsSync(OAI_KEY), quota: quotaOn(reg), macs, sessions: list, notes: unreadNotes([...all, ...gemSessions()]).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      return { user: reg.user ?? null, usage: usageCache, sdkModels: SDK.MODELS, gpt: gptState(), gemini: geminiAccounts(reg).map((g) => ({ label: g.label, on: g.id === reg.geminiOn, ...gemUsage(g) })), oai: fs.existsSync(OAI_KEY), quota: quotaOn(reg), macs, sessions: list, notes: unreadNotes([...all, ...gemSessions()]).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions(), ...gemSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects(), win: WIN,
         head, update: upd || updBusy || updErr ? { ...upd, busy: updBusy, err: updErr } : null };
     },
@@ -4730,6 +4736,33 @@ async function web() {
     'GET /api/oai': (q) => { const c = oaiRead(q.get('id')); return { items: oaiItems(c), busy: !!c.pending, since: c.since ?? null, title: c.title, opts: c.opts ?? OAI_OPTS }; },
     'POST /api/oai/send': (q, b) => oaiSend(b),
     'POST /api/oai/stop': (q, b) => oaiStop(String(b.id ?? '')),
+    // API 额度 (sdk.js): one as it stands here (answering, a question waiting, why its last turn failed; the models offered
+    // are /api/state's sdkModels); a message ({id} one to go on with, else {acct, dir} a new one on that API account), its
+    // pictures and files as 附件：path lines Claude reads; 停止; an answer to its question. Its record is read as any Claude
+    // one's (/api/history)
+    'GET /api/sdk': (q) => sdk.view(q.get('id') ?? ''),
+    'POST /api/sdk/send': (q, b) => {
+      const reg = load(), paths = (Array.isArray(b.paths) ? b.paths : []).filter((p) => typeof p === 'string' && p);
+      const text = [String(b.text ?? '').trim(), ...paths.map((p) => `附件：${p}`)].filter(Boolean).join('\n');
+      let p, cwd;
+      if (b.id) { // not while a Claude runs it elsewhere, nor while it's renamed, deleted or switched: one writer on a record
+        sessCache = null;
+        const s = sessions().find((x) => x.id === b.id);
+        if (!s?.sdk) throw new Error('找不到这个对话');
+        if (resuming(s.id) || (s.pid && !sdk.busy(s.id))) throw new Error('它在终端里运行着：先在那里结束它');
+        if (doing.get(s.id)) throw new Error('这个对话正在改名、删除或换账号，稍等一下');
+        p = reg.profiles[s.acct]; cwd = s.cwd;
+      } else {
+        p = reg.profiles[Number(b.acct) - 1];
+        if (!p?.api) throw new Error('API 额度要用 API 账号（申请接入来的，或者连着网关的）');
+        if (!isDir(b.dir)) throw new Error('文件夹不存在');
+        cwd = path.resolve(String(b.dir).trim());
+      }
+      shareMemory([[p.configDir, projectFolder(cwd)]]); shareMcp(p.configDir); // as a Claude started here has them
+      return sdk.send({ id: b.id || null, configDir: p.configDir, cwd, text, model: b.model });
+    },
+    'POST /api/sdk/stop': (q, b) => sdk.stop(String(b.id ?? '')),
+    'POST /api/sdk/answer': (q, b) => sdk.answer({ id: String(b.id ?? ''), allow: !!b.allow, answers: b.answers, text: b.text }),
     // open a conversation's terminal: {id, acct?} continues one (its window here if it runs in one),
     // {dir, acct} starts one. acct is 1-based; the page proposes it like the island does. One started (or starting) here
     // comes back with its Claude's pid, once the pseudo-terminal knows it (a moment): the 管家's chat new and say find
@@ -4804,6 +4837,7 @@ async function web() {
         sessCache = null;
         const s = sessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
+        if (sdk.busy(s.id)) throw new Error('它正在网页上用 API 额度回答，答完再开'); // (idle: continued in a terminal as any Claude one)
         // the Mac's: ours if it runs here; else joined in its tmux there (this service restarted meanwhile) or continued
         // (one in a terminal on the Mac is refused there: it can't be shown)
         if (s.mac) {
@@ -4842,6 +4876,7 @@ async function web() {
       const reg = load(), s = sessions().find((x) => x.id === b.id), p = reg.profiles[b.acct - 1];
       if (!s) throw new Error('找不到这个对话');
       if (s.mac) throw new Error('Mac 上的对话用的是 Mac 自己的账号，换不了');
+      if (sdk.busy(s.id)) throw new Error('它正在网页上用 API 额度回答，答完再换');
       if (!p) throw new Error('没有这个账号');
       const args = ['--resume', s.id];
       if (!s.pid && resuming(s.id)) throw new Error('这个对话还在启动，等它起来再换'); // a second Claude on the record, or the page told it switched

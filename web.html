@@ -356,7 +356,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .send .bset::after { content: ''; width: 5px; height: 5px; margin: -3px 0 0 2px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); opacity: .55; }
   .send .bset.open::after { transform: rotate(225deg); margin-top: 3px; }
   @media (hover: hover) { .send .bset:hover { background: var(--hover); } }
-  @media (max-width: 759px) { #butler .send .bar, .pane.oai .send .bar { flex-wrap: wrap; } #butler .send .bsel, .pane.oai .send .bsel { order: 9; flex-basis: 100%; padding: 2px 0 2px 36px; } }
+  @media (max-width: 759px) { #butler .send .bar, .pane.oai .send .bar, .pane.sdk .send .bar { flex-wrap: wrap; } #butler .send .bsel, .pane.oai .send .bsel, .pane.sdk .send .bsel { order: 9; flex-basis: 100%; padding: 2px 0 2px 36px; } }
   .bPop { position: absolute; bottom: calc(100% - 4px); width: 300px; padding: 6px 14px 14px; border-radius: 16px; background: var(--input); border: 1px solid var(--cardB); box-shadow: 0 12px 32px var(--shadow); z-index: 20; }
   .bPop .h { display: flex; justify-content: space-between; align-items: baseline; margin: 12px 2px 6px; font-size: 12px; font-weight: 600; color: var(--fg2); }
   .bPop .h b { font-size: 13px; color: var(--fgHi); } .bPop .h b small { font-weight: 400; color: var(--fg2); margin-left: 4px; }
@@ -627,6 +627,8 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .ask .pick .box.on { background: var(--ink); border-color: var(--ink); }
   .ask .pick .box.on::after { content: '✓'; color: var(--onInk); font-size: 10px; line-height: 1; }
   .ask .hint2 { font-size: 12px; color: var(--accent); padding: 2px; }
+  .ask pre.sdkWhat { margin: 0; max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px var(--mono); padding: 6px 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); } /* API 额度's: what a tool would do */
+  .apiTag { display: inline-block; margin-right: 5px; padding: 0 4px; border-radius: 4px; font-size: 10px; font-weight: 600; line-height: 14px; vertical-align: 1px; color: var(--fg2); background: var(--tint); } /* an API 额度 one's row */
   @media (hover: hover) { .ask .pick:hover { border-color: var(--fg3); } .ask .pick.own:hover { color: var(--fg); background: var(--hover); } }
   .keys { display: flex; gap: 4px; padding: 6px; overflow-x: auto; border-top: 1px solid var(--border); scrollbar-width: none; flex: none; }
   .keys button { flex: 1 0 auto; min-width: 32px; background: var(--btn); border-radius: 6px; padding: 8px 4px; font-size: 13px; font-weight: 600; }
@@ -1142,6 +1144,7 @@ const AGY_LOGO = `<svg viewBox="0 0 12 10" shape-rendering="crispEdges">${('50f2
   + '974a81f0 a76579e1 186bc7a3 2864b6f6 983886fb a84881f4 0967b9f4 1964b6f6 a93883f9 b93d85fc').split(' ')
   .map((p) => `<rect x="${parseInt(p[0], 36)}" y="${p[1]}" width="1" height="1" fill="#${p.slice(2)}"/>`).join('')}</svg>`;
 const convKind = (x) => (x?.gem ? 'gem' : !!x?.gpt); // a conversation's kind, as ac and mark take it
+const apiTag = (x) => (x?.sdk ? '<span class="apiTag" title="API 额度：Agent SDK，按用量计费">API</span>' : ''); // after its mark
 const mark = (gpt, n, mac) => (mac ? `<i class="mk" style="color:var(--apple)" title="${esc(macName(mac))}">${macMark(mac)}</i>` // a Mac's one: its mark (Apple's, a MacBook's)
   : gpt === 'gem' ? `<i class="mk" title="Gemini">${AGY_LOGO}</i>`
   : `<i class="mk" style="color:${gpt ? 'var(--gpt)' : ACCT[(n - 1) % ACCT.length]}" title="${gpt ? 'GPT' : 'Claude'}">${gpt ? OPENAI : SPARK}</i>`);
@@ -1477,7 +1480,7 @@ const chatEnd = (x) => `${nd(chatMark(x))}${x.busy ? '<span class="spin" title="
 const lead = (x) => (x.mac ? `<i class="ac0" title="${esc(macName(x.mac))}">${macMark(x.mac)}</i>` : ac(x.acct + 1, '', convKind(x)));
 const hint = (x, ...more) => esc([...new Set([x.title, ...more].filter(Boolean))].join('\n')); // a row's card: its title, then what's not the same
 const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.cwd)}">${lead(x)}
-    <div class="main"><div class="t">${x.mac ? '' : mark(convKind(x), x.acct + 1)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
+    <div class="main"><div class="t">${x.mac ? '' : mark(convKind(x), x.acct + 1)}${apiTag(x)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
 // conversations 删除'd (or 归档'd) from here: out of the list at once, not after the server's answer (a Mac's waits on ssh to
 // it, seconds); one that failed comes back
 const deleting = new Set();
@@ -1493,7 +1496,7 @@ function renderChats() {
   const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', SPARK, 'Claude', '#d97757'], state.gpt?.length && ['gpt', OPENAI, 'GPT', 'var(--fgHi)'], state.gemini?.length && ['gem', AGY_LOGO, 'Gemini']].filter(Boolean)
     .map(([k, l, name, c]) => `<button data-kind="${k}"${k === lk ? ' class="on"' : ''}${name ? ` title="${name}" aria-label="${name}"` : ''}${c ? ` style="color:${c}"` : ''}>${l}</button>`).join('')}</div>` : '';
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.prompt, x.cwd)}">${lead(x)}
-    <div class="main t">${x.mac ? '' : mark(convKind(x), x.acct + 1)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
+    <div class="main t">${x.mac ? '' : mark(convKind(x), x.acct + 1)}${apiTag(x)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').html = `<button class="ico${proj ? ' on' : ''}" data-proj title="${proj ? '回到按文件夹' : '按项目'}">${svg(I.grid)}</button><button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
     <button class="ico" data-new title="新对话">${svg(I.plus)}</button><button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
@@ -1534,7 +1537,8 @@ function rowMenu(id, x, y, inProj) {
   // a GPT one: not renamed nor moved to another account here; deleted is archived (Codex's own, undone with codex unarchive).
   // A GPT 聊天 one: renamed and deleted here, at any time (an answer on its way is stopped)
   const items = (s.gem ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['swap', '换账号继续…'], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]
-    : s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
+    : s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']]
+    : s.sdk ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.busy && '正在回答：先停止'], ['del', '删除…', s.busy && '正在回答：先停止']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
     ['del', '归档…', s.pid && '正在运行：先结束对话再归档']] : [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
     ['swap', '换账号继续…', s.mac && `用的是 ${macName(s.mac)} 的账号，换不了`], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean);
   if (menuIn != null) items.splice(-1, 0, ['out', '移出这个项目']); // before 删除
@@ -2196,7 +2200,8 @@ function newSheet(kind) {
   if (!kind) return kindSheet('新对话', newSheet);
   const u = state.usage, dirs = u.projects ?? [], gp = state.gpt ?? [], gm = state.gemini ?? [];
   // under GPT, Codex (its accounts) or 聊天 (with the key: neither account nor folder), whichever there are
-  let gptOn = kind === 'gpt', gemOn = kind === 'gem', chat = !gp.length, acct = kindAcct(kind), dir = dirs[0] ?? '', pick = null, places = null, seq = 0;
+  // under Claude, on an API account: Claude Code, or API 额度 (the Agent SDK, the Console's API credits: sdk)
+  let gptOn = kind === 'gpt', gemOn = kind === 'gem', chat = !gp.length, sdk = false, acct = kindAcct(kind), dir = dirs[0] ?? '', pick = null, places = null, seq = 0;
   // 浏览: a window as Windows' own: the places on its left (最近, the home folder, 桌面 文档 下载, the drives), the
   // folder's folders and, dimmed, its files; a click goes into a folder, 选择 takes the one it's in. It opens on the
   // folder typed or picked; one that isn't there: 此电脑 (the places)
@@ -2232,7 +2237,7 @@ function newSheet(kind) {
     $('#sheet').classList.toggle('wide', !!pick);
     if (pick) return drawPick();
     // the Macs last among Claude's accounts (acct: a Mac's id): its own folder there, no folder to pick here
-    const gpt = gptOn && !chat, oai = gptOn && chat, mac = gptOn || gemOn ? null : macOf(acct) ?? null;
+    const gpt = gptOn && !chat, oai = gptOn && chat, mac = gptOn || gemOn ? null : macOf(acct) ?? null, api = !gptOn && !gemOn && !mac && !!u.accounts[acct - 1]?.api;
     const accts = gemOn ? gm.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">A${i + 1} · ${esc(g.label)}${g.on && gm.length > 1 ? ' · 在线' : ''}</button>`)
       : gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
       : [...u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
@@ -2244,6 +2249,7 @@ function newSheet(kind) {
       ${oai ? `<div class="m" style="margin-top:12px;white-space:normal">直接和 GPT-6 Astra 聊天，能联网、看图片和文件。输入框旁边可以选模式（普通，或 ChatGPT 的 GPT-6 Pro 那种 Pro）和思考强度。
         用你的 OpenAI key 按用量计费，Pro 难的问题一次要想几分钟，答好了会通知你。</div>`
       : `<div class="m" style="margin-top:12px">账号</div><div class="opts">${accts.join('')}</div>
+      ${api ? `<div class="opts">${[['', 'Claude Code'], ['1', 'API 额度：Agent SDK，按用量计费']].map(([v, l]) => `<button class="opt ${!!v === sdk ? 'on' : ''}" data-sdk="${v}">${l}</button>`).join('')}</div>` : ''}
       ${gemOn && gm[acct - 1] && !gm[acct - 1].on ? '<div class="m" style="white-space:normal;margin-bottom:8px">同一时间只有一个 Gemini 账号在线：开始时会先换到这个账号（有 Gemini 对话在运行时换不了）。</div>' : ''}
       <div class="m">文件夹</div><div class="opts">${mac ? `<button class="opt ${dir ? '' : 'on'}" data-d="" title="不对应你电脑上的文件夹">${esc(base(mac.dir))}</button>` : ''}${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
       <div class="dirRow"><input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径"><button class="btn" id="browse">浏览…</button></div>
@@ -2251,6 +2257,7 @@ function newSheet(kind) {
         : `直接在 ${esc(mac.label)} 上的 ${esc(mac.dir)} 里运行，用那边的账号，不对应你电脑上的文件夹。`}</div>` : ''}`}
       <div class="btns" style="margin-top:14px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="start" style="flex:2">开始</button></div>`;
     document.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => { chat = !!b.dataset.chat; acct = 1; draw(); }));
+    document.querySelectorAll('[data-sdk]').forEach((b) => (b.onclick = () => { sdk = !!b.dataset.sdk; draw(); }));
     // a Mac: its own folder there unless one here is picked; back to an account here, a folder here again
     document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => {
       if (macOf(b.dataset.a)) { if (!macOf(acct)) dir = ''; acct = b.dataset.a; } else { acct = +b.dataset.a; dir ||= dirs[0] ?? ''; }
@@ -2264,7 +2271,7 @@ function newSheet(kind) {
     $('#cancel').onclick = sheetOff;
     $('#start').onclick = () => {
       sheetOff();
-      addConv(focusG, oai ? makeOai(null, '新对话') : mac ? makeConv({ mac: mac.id, open: true, dir }, base(dir) || mac.label) : makeConv({ dir, acct, gpt, gem: gemOn }, base(dir) || '新对话'));
+      addConv(focusG, oai ? makeOai(null, '新对话') : api && sdk ? makeSdk({ acct, dir }, base(dir) || '新对话') : mac ? makeConv({ mac: mac.id, open: true, dir }, base(dir) || mac.label) : makeConv({ dir, acct, gpt, gem: gemOn }, base(dir) || '新对话'));
     };
   };
   draw(); $('#sheet').classList.add('on');
@@ -2499,9 +2506,11 @@ async function openSession(id, where) {
   const s = state?.sessions.find((x) => x.id === id), have = convOf(id);
   if (s && s === state.sessions.find(isButler)) return butler ? unpeek() : setButler(true); // the 管家 itself: its mode, not a second pane of it
   if (!s) return toast('这个对话已经不在列表里了');
-  if (butler) { const acct = s.pid || s.oai || s.mac ? s.acct + 1 : await pickAcct(s); if (acct || s.oai || s.mac) peekAt(s, acct); return; } // in 管家 mode it stays: the conversation in the 管家's place
+  // a running one stays where it runs (a GPT 聊天 one, a Mac's: no account here; an API 额度 one: on its own)
+  const fixed = s.pid || s.oai || s.mac || s.sdk;
+  if (butler) { const acct = fixed ? s.acct + 1 : await pickAcct(s); if (acct || s.oai || s.mac) peekAt(s, acct); return; } // in 管家 mode it stays: the conversation in the 管家's place
   if (have) return where && where !== 'aside' && where !== have.g ? moveConv(have, where) : activate(have.g, have); // open already: that tab
-  const acct = s.pid || s.oai || s.mac ? s.acct + 1 : await pickAcct(s); // a running one stays where it runs (a GPT 聊天 one, a Mac's: no account here)
+  const acct = fixed ? s.acct + 1 : await pickAcct(s);
   if ((!acct && !s.oai && !s.mac) || convOf(id)) return;
   const g = where === 'aside' ? sideGroup() : where ?? focusG;
   if (groups.includes(g)) addConv(g, convFor(s, acct));
@@ -2550,7 +2559,7 @@ const SEND_BOX = () => `<div class="send"><button class="toEnd" hidden></button>
 // a listed conversation's pane: a GPT 聊天 one's, or one with a terminal behind it
 // (a Mac's has no account here: open, when you opened it, as an account given means for one of this PC's; a tab back
 // after a reload has none, and only attaches to it if it runs)
-const convFor = (s, acct) => (s.oai ? makeOai(s.id, s.title) : makeConv({ id: s.id, acct: s.mac ? null : acct, gpt: s.gpt, gem: s.gem, mac: s.mac, open: s.mac && acct !== undefined }, s.title));
+const convFor = (s, acct) => (s.oai ? makeOai(s.id, s.title) : s.sdk ? makeSdk({ id: s.id }, s.title) : makeConv({ id: s.id, acct: s.mac ? null : acct, gpt: s.gpt, gem: s.gem, mac: s.mac, open: s.mac && acct !== undefined }, s.title));
 // body: {id, acct?} continues one, {dir, acct} starts one, {id} alone (a tab back after a reload) only attaches to it
 // if it runs. started: /api/open asked; ended: its Claude is gone (or couldn't start).
 function makeConv(body, title) {
@@ -3501,6 +3510,206 @@ function makeOai(id, title) {
   c.say = (t) => send(t);
   c.swap = () => toast('GPT 聊天不用换账号');
   c.where = () => null; c.focus = () => line.focus({ preventScroll: true }); c.back = () => { if (shown) refresh(); }; c.tick = c.claim = () => {};
+  return c;
+}
+// An API 额度 one: Claude Code run here by the Agent SDK on an API account (sdk.js), paid from the API credits. Its record
+// is a Claude one's, read the same way (/api/history: what's new every second while shown, older pieces as you scroll
+// up); how it stands (answering, a question or a permission waiting, why a turn failed) from /api/sdk. A message goes
+// with /api/sdk/send, not while it answers (停止 first), its pictures and files uploaded first and sent as their paths;
+// written while it asks you something, the words are the answer. No terminal. body: {id} a listed one, {acct, dir} a
+// new one, its id from its first message. The model is the button's by the box (kept in this browser), as GPT 聊天's mode.
+function makeSdk(body, title) {
+  const c = { id: body.id ?? null, title, acct: body.acct ?? null, sdk: true, g: null, started: false, ended: false, closed: false, live: '' };
+  const el = c.el = document.createElement('div');
+  el.className = 'pane hist sdk';
+  el.innerHTML = `<div class="crumbs"><span class="path"></span></div>
+    <div class="msgs"><div class="col"><div class="hTop hm note"></div><div class="hOld"></div><div class="hNew"></div><div class="live"></div></div></div>${SEND_BOX()}`;
+  const $p = (s) => el.querySelector(s), hist = $p('.msgs'), line = $p('.send textarea'), go = $p('.go'), attsEl = $p('.atts'), pick = $p('input[type=file]');
+  if (FINE) navOf(el, hist);
+  // st: /api/sdk's last word; end, oldest: where the record read so far ends and begins; sent: a message on its way, shown
+  // till the record has it; picks: AskUserQuestion's answers so far, by question
+  let shown = false, timer = null, st = { busy: false }, sending = false, atts = [], end = null, oldest = null, reading = false, older = false, sent = '', liveHtml = '', picks = {}, askKey = '';
+  const models = state?.sdkModels ?? [['claude-opus-5-5', 'Opus 5.5', '']];
+  let model = models[0][0], picked = false;
+  try { const m = localStorage.getItem('cm-sdk-model'); if (m) { model = m; picked = !c.id; } } catch {}
+  go.insertAdjacentHTML('beforebegin', '<div class="bsel"><button class="bset" data-sset title="模型"></button></div>');
+  const drawModel = () => { $p('.bset').innerHTML = `<span>${esc(models.find((m) => m[0] === model)?.[1] ?? model)}</span>`; };
+  function pickModel(btn) {
+    const pop = popOver(btn);
+    if (!pop) return;
+    pop.innerHTML = `<div class="h">模型 · 每百万 token 输入 / 输出</div><div class="seg">${models.map(([v, l, p]) => `<button class="${v === model ? 'on' : ''}" data-sm="${v}">${esc(l)}<small>${esc(p)}</small></button>`).join('')}</div>`;
+    pop.onclick = (e) => {
+      const b = e.target.closest('[data-sm]');
+      if (!b) return;
+      model = b.dataset.sm; picked = true; try { localStorage.setItem('cm-sdk-model', model); } catch {}
+      drawModel(); pop.querySelectorAll('[data-sm]').forEach((x) => x.classList.toggle('on', x === b));
+    };
+    pop.place();
+  }
+  drawModel();
+  function goMode() { // 停止 while it answers and nothing is written
+    const stop = st.busy && !sending && !line.value.trim() && !atts.length, m = stop ? 'stop' : 'send';
+    if (go.dataset.m !== m) { go.dataset.m = m; go.innerHTML = svg(I[m], 2); }
+    go.title = stop ? '停止' : '发送'; go.classList.toggle('stop', stop);
+  }
+  let going = ''; // a message on its way: kept in the draft till it's through, as a Claude one's
+  const grow = () => {
+    line.style.height = ''; if (line.scrollHeight) line.style.height = Math.min(line.scrollHeight, 200) + 'px';
+    const d = [going, line.value.trim()].filter(Boolean).join('\n');
+    if (c.id) try { if (d) localStorage.setItem('cm-draft:' + c.id, d); else localStorage.removeItem('cm-draft:' + c.id); } catch {}
+  };
+  if (c.id) try { line.value = localStorage.getItem('cm-draft:' + c.id) ?? ''; } catch {}
+  line.addEventListener('input', () => { goMode(); grow(); });
+  line.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim() || atts.length) go.click(); } };
+  c.attach = (files) => { // as GPT 聊天's: each uploaded at once, a big picture made smaller
+    for (const f of files) {
+      const pic = /^image\//.test(f.type);
+      if (!pic && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
+      const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name };
+      a.up = pic ? shrink(f).then(upload) : sendFile(f);
+      a.up.catch((e) => { a.failed = true; toast(`${pic ? '图片' : '文件'}没传上去：${e.message}`, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
+      atts.push(a);
+    }
+    drawAtts();
+  };
+  const drawAtts = () => { attsEl.innerHTML = atts.map((a, i) => `<div class="att${a.file ? ' file' : ''}">${a.file ? `${svg(I.clip)}<span>${esc(a.name)}</span>` : `<img src="${a.url}" alt="">`}<button data-unatt="${i}" title="不发这个">${svg(I.close, 2)}</button></div>`).join(''); goMode(); };
+  $p('.pic').onclick = () => pick.click();
+  pick.onchange = () => { c.attach([...pick.files]); pick.value = ''; };
+  line.addEventListener('paste', (e) => { const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); c.attach(fs); } });
+
+  // its record, as a Claude one's: a picture fetched by where it is in it, a pasted block shown without its wrapper
+  const histGet = async (qs) => {
+    const r = await (await fetch(`/api/history?id=${encodeURIComponent(c.id)}${qs}`, { signal: AbortSignal.timeout(15000) })).json();
+    if (r.err) throw new Error(r.err);
+    for (const m of r.items) { if (m.role === 'img') m.src = `/api/image?key=&id=${encodeURIComponent(c.id)}&ref=${m.text}`; if (m.role === 'user') { m.files = filesOf(m.text); m.text = shownText(m.text); } }
+    return r;
+  };
+  const topNote = () => { $p('.hTop').textContent = oldest > 0 ? '往上划，加载更早的记录' : $p('.hOld').innerHTML || $p('.hNew').innerHTML ? '对话开头' : c.id ? '正在开始…' : '还没有消息，在下面发一条开始'; };
+  async function readHist() { // a new one's isn't listed till its record is there: tried again on the next tick
+    if (!c.id || reading) return;
+    reading = true;
+    try {
+      const r = await histGet(end == null ? '' : `&from=${end}`), first = end == null;
+      const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
+      if (first) oldest = r.start;
+      end = r.end;
+      if (r.items.length) { addItems($p('.hNew'), r.items); if (r.items.some((m) => m.role === 'user')) sent = ''; }
+      topNote(); drawLive();
+      if (atEnd) hist.scrollTop = hist.scrollHeight;
+      if (first && hist.scrollTop < 300) readOlder();
+    } catch {} finally { reading = false; }
+  }
+  async function readOlder() {
+    if (older || !oldest || !shown) return;
+    older = true;
+    try {
+      const r = await histGet(`&end=${oldest}`), h = hist.scrollHeight, tmp = document.createElement('div');
+      addItems(tmp, r.items); $p('.hOld').prepend(...tmp.childNodes);
+      oldest = r.start; topNote();
+      hist.scrollTop += hist.scrollHeight - h; // what you were reading stays where it was
+    } catch {} finally { older = false; }
+  }
+  hist.addEventListener('scroll', () => { if (hist.scrollTop < 300) readOlder(); });
+  async function readState() {
+    if (!c.id) return;
+    let r;
+    try { r = await (await fetch(`/api/sdk?id=${encodeURIComponent(c.id)}`)).json(); } catch { return; }
+    if (!('busy' in r)) return;
+    st = r;
+    if (!picked && r.model) model = r.model; // the conversation's own, unless picked here
+    if (!st.busy && !sending) sent = '';
+    drawModel(); goMode(); drawLive();
+  }
+  // what it asks: a permission (what the tool would do; 允许 or 不允许), or AskUserQuestion's questions (one with one
+  // choice answered at once; else picked, then 提交). Words sent from the box answer it instead.
+  function askCard(a) {
+    if (a.tool !== 'AskUserQuestion') return `<div class="ask">${askHead({ head: `要用 ${a.tool}`, ask: a.why })}<pre class="sdkWhat">${esc(a.what)}</pre>
+      ${askOpts({ opts: [{ n: 1, label: '允许' }, { n: 2, label: '不允许' }] }, (o) => `data-sa="${o.n === 1 ? 1 : 0}"`)}<div class="hint2">也可以在下面写别的做法，发送后它会照着改</div></div>`;
+    const one = a.questions.length === 1 && !a.questions[0].multi, ready = a.questions.every((q, i) => picks[i]?.length);
+    return `<div class="ask">${a.questions.map((q, qi) => askHead({ head: q.header, ask: q.question })
+      + askOpts({ opts: q.options.map((o, i) => ({ n: i + 1, label: o.label, desc: o.desc, ...(q.multi && { check: !!picks[qi]?.includes(o.label) }) })) },
+        (o) => `data-sq="${qi}" data-sn="${o.n - 1}"`, (o) => !q.multi && picks[qi] === q.options[o.n - 1].label)).join('')}
+      <div class="hint2">也可以在下面直接写你的回答</div>
+      <div class="row2"><button data-sx>不回答</button>${one ? '' : `<button data-sgo${ready ? '' : ' disabled'}>提交</button>`}</div></div>`;
+  }
+  function drawLive() {
+    const a = st.ask, key = a ? JSON.stringify(a) : '';
+    if (key !== askKey) { askKey = key; picks = {}; }
+    const h = (sent ? `<div class="hm user pending">${userBody(sent, [], true)}</div>` : '')
+      + (a ? askCard(a) : st.busy ? `<div class="busy"><i></i>${esc(st.note || 'Claude 正在回复')} · ${dur(Date.now() - (st.since ?? Date.now()))}</div>`
+        : !sending && st.err ? `<div class="hm note">没答完：${esc(st.err)}</div>` : '');
+    const s2 = a ? 'ask' : st.busy || sending ? 'busy' : ''; // the tab shows it too
+    if (c.live !== s2) { c.live = s2; if (c.g) drawTabs(c.g); }
+    if (h === liveHtml) return;
+    const atEnd = hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
+    $p('.live').innerHTML = liveHtml = h;
+    if (atEnd) hist.scrollTop = hist.scrollHeight;
+  }
+  async function answer(b) {
+    try { await post('/api/sdk/answer', { id: c.id, ...b }); } catch (e) { toast(e.message, 4000); }
+    await readState();
+  }
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-unatt], [data-sset], [data-sa], [data-sq], [data-sx], [data-sgo]');
+    if (!b) return;
+    const d = b.dataset, a = st.ask;
+    if (d.unatt) { atts.splice(+d.unatt, 1); drawAtts(); } else if (d.sset != null) pickModel(b);
+    else if (d.sa) answer({ allow: d.sa === '1' });
+    else if (d.sx != null) answer({ allow: false });
+    else if (d.sgo != null && a) answer({ allow: true, answers: Object.fromEntries(a.questions.map((q, i) => [q.question, picks[i]])) });
+    else if (d.sq != null && a) {
+      const q = a.questions[+d.sq], label = q.options[+d.sn].label;
+      if (a.questions.length === 1 && !q.multi) return answer({ allow: true, answers: { [q.question]: label } });
+      if (q.multi) { const l = picks[d.sq] ?? []; picks[d.sq] = l.includes(label) ? l.filter((x) => x !== label) : [...l, label]; } else picks[d.sq] = label;
+      liveHtml = ''; askKey = JSON.stringify(a); drawLive();
+    }
+  });
+  // a message: off the box at once (shown as on its way), back in it with its pictures and files if it couldn't go
+  async function send(text) {
+    const v = (text ?? line.value).trim(), files = text == null ? atts : [];
+    if (!v && !files.length) return false;
+    if (sending) { toast('上一条还在发，稍等一下'); return false; }
+    if (st.ask && v && !files.length) { if (text == null) { line.value = ''; grow(); } await answer({ allow: false, text: v }); return true; }
+    if (st.busy) { toast('Claude 还在回答上一条，答完再发（也可以先停止）', 4000); return false; }
+    sending = true;
+    if (text == null) { going = v; line.value = ''; atts = []; grow(); drawAtts(); }
+    sent = [v, ...files.map((a) => `附件：${a.name ?? '图片'}`)].filter(Boolean).join('\n'); drawLive(); hist.scrollTop = hist.scrollHeight;
+    try {
+      const r = await post('/api/sdk/send', { id: c.id, acct: c.acct, dir: body.dir, text: v, paths: await Promise.all(files.map((a) => a.up)), model });
+      if (!c.id) { c.id = r.id; c.title = (v.split('\n')[0] || title || '新对话').slice(0, 40); save(); markRows(); if (c.g) drawTabs(c.g); c.sync(); }
+      st = { busy: true, since: Date.now(), note: '正在启动' }; sending = false;
+      await readState(); load(); // the list and the tab: it's answering
+      return true;
+    } catch (e) {
+      sent = '';
+      if (text == null) { line.value = [v, line.value.trim()].filter(Boolean).join('\n'); atts = [...files.filter((a) => !a.failed), ...atts]; grow(); drawAtts(); }
+      toast(e.message, 5000);
+      return false;
+    } finally { sending = false; if (going) { going = ''; grow(); } goMode(); drawLive(); }
+  }
+  async function stop() { try { await post('/api/sdk/stop', { id: c.id }); } catch (e) { toast(e.message, 4000); } await readState(); load(); }
+  go.onclick = () => (go.classList.contains('stop') ? stop() : send());
+
+  c.sync = () => {
+    const s = c.id && state?.sessions.find((x) => x.id === c.id);
+    if (s) c.title = s.title;
+    const dir = s?.cwd ?? body.dir ?? '';
+    $p('.path').innerHTML = `<b>API 额度</b>${dir ? ` · ${esc(base(dir) || dir)}` : ''}`;
+  };
+  c.wake = () => {
+    shown = true; el.classList.add('on'); readNote(c.id); c.sync(); goMode(); topNote(); readState(); readHist();
+    let ticks = 0; // the record every second (its answer streams into it), how it stands every 2 s, every 10 s when idle
+    clearInterval(timer); timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      readHist(); ticks++;
+      if (st.busy || st.ask || sending || !(ticks % 10)) readState();
+    }, 1000);
+  };
+  c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(timer); readNote(c.id); };
+  c.close = () => { c.closed = true; c.sleep(); el.remove(); };
+  c.say = (t) => send(t);
+  c.swap = () => toast('API 额度的对话不能换账号');
+  c.where = () => null; c.focus = () => line.focus({ preventScroll: true }); c.back = () => { if (shown) { readState(); readHist(); } }; c.tick = c.claim = () => {};
   return c;
 }
 setInterval(() => shownConvs().forEach((c) => c.tick()), 10000);
