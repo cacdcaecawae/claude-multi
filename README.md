@@ -166,7 +166,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 | `chat look\|wait\|say\|pick\|new …` | 管家用的：看一个对话（含它正在问的选择题）、等它答完或等到某个时间、给它发消息、替你选一项、在后台新开对话（`new … --gpt` 开 GPT 对话）。不带参数运行 `chat` 看用法 |
 | `rename ID 名字` | 给没在运行的对话改名 |
 | `delete ID` | 把没在运行的对话移到回收站。GPT 对话是归档（`codex unarchive` 能找回） |
-| `remove N` | 移除账号 N。它的文件夹移到回收站，有对话正在用它时不让移除。`remove G1` 移除 GPT 账号 G1（有 Codex 在它上面运行时同样不让移除） |
+| `remove N` | 移除账号 N。它的文件夹移到回收站，有对话正在用它时不让移除。`remove G1` 移除 GPT 账号 G1（有 Codex 在它上面运行时同样不让移除），`remove A1` 移除 Gemini 账号 A1（只删它保存的登录，`~\.gemini` 里的设置和对话不动） |
 | `tokens [--json]` | token 用量和按 API 价格折算的金额 |
 | `renew N 月-日` / `renew N auto` | 手动记下账号 N 的续费日，或改回自动推算 |
 | `island` | 打开灵动岛（已经开着就不会再开一个） |
@@ -236,7 +236,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 - 先装好 Google 的 Antigravity 命令行：在 PowerShell 里运行 `irm https://antigravity.google/cli/install.ps1 | iex`。再运行 `claude-multi new gemini`：会打开浏览器用 Google 账号登录（没打开就把它给的网址复制到浏览器里，登好把授权码粘回去）。账号要能用 Antigravity（Google 会先让新账号验证一下）。
 - **设置、MCP、插件和对话记录所有 Gemini 账号共用**，都在你自己的 `~\.gemini` 里，claude-multi 不搬也不改它（只在里面设好状态栏）。所以 A1 的额度用完了，换到 A2 可以接着聊同一个对话。
 - **同一时间只有一个 Gemini 账号在线。** `agy` 把登录存在 Windows 凭据管理器里的一条记录里，所有账号共用这一条。claude-multi 替每个账号保管它的登录（加密存在 `accounts\gemini-…` 里，只有这个 Windows 用户能解开），换账号就是把那个账号的登录换进去。用另一个账号开始时会先换过去；有 `agy` 在运行时换不了，先把它结束。列表里的 Gemini 对话显示的是现在在线的账号，接着聊就用它。
-- 第一次运行 `new gemini` 时，如果你已经登录过 `agy`，这个登录就直接成为 A1 的，不用重新登录。
+- 每次运行 `new gemini` 都要登录一次，选哪个 Google 账号由你定。`agy` 之前自己的登录不会被直接拿来用；没登录成功的话，它会原样放回去。
 - 某个账号的登录用不了了：再运行一次 `new gemini`，用同一个 Google 账号登录，它就换上新的登录，不会多出一个账号。
 - 有了 Gemini 账号后，「新对话」上面多一个 Gemini，列表顶部可以只看 Gemini 对话，Gemini 账号的圆环写着 A1、A2。终端里也能用：`claude-multi start A1`。
 - 现在只有「终端」视图（就是 `agy` 的界面本身）。底部状态栏显示账号、模型和上下文用量（来自 `agy` 的状态栏，`new gemini` 时设好）。
