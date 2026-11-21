@@ -1430,8 +1430,9 @@ function gemSettings(home = GEMINI_HOME, script = __filename.replace(/\\/g, '/')
   fs.writeFileSync(f, JSON.stringify({ ...s, statusLine: { type: 'command', command: `node "${script}" statusline` } }, null, 2) + '\n');
 }
 // new gemini: an account, signed in with Google (agy models: it asks for one when there's none; a browser, or its link
-// opened anywhere and the code pasted back). The first one takes a sign-in agy has already as its own. A Google account
-// already here: its sign-in renewed. Not signed in (Ctrl+C there too): its folder gone, the one on before on again.
+// opened anywhere and the code pasted back), each time: a sign-in agy has already is never taken unasked (the first's:
+// kept meanwhile, back if none is made). A Google account already here: its sign-in renewed. Not signed in (Ctrl+C there
+// too): its folder gone, the one on before on again.
 async function newGemini(running = agyRunning) {
   const agy = agyCmd();
   if (!agy) { console.log(`没找到 agy，先装好 Antigravity 的命令行（在 PowerShell 里）：${AGY_GET}`); return null; }
@@ -1446,20 +1447,24 @@ async function newGemini(running = agyRunning) {
     try { fs.mkdirSync(home); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
   }
   update((x) => { x.geminiOn = null; }); // the entry is no account's from here till it's this one's, or the one before's again
+  const before = path.join(home, 'before.dpapi'); // (the first's) agy's own sign-in, from before there were accounts
   const back = async (why) => {
     console.log(why);
+    if (first) await agyCred('load', before); // (none there: fails, nothing to put back)
     if (!geminiAccounts().some((x) => x.id === id)) fs.rmSync(home, { recursive: true, force: true }); // only made now, never listed: a sign-in at most
     if (was && !(await running()) && (await agyCred('load', gemLogin(was.home))).status === 0) update((x) => { x.geminiOn = was.id; });
     log('gemini_failed', { profile_id: id });
     return null;
   };
   try {
-    if (!first) await agyCred('drop'); // so agy asks for this one
+    if (first && ![0, 3].includes((await agyCred('save', before)).status)) return back('agy 现在的登录没能先存下来，没有加账号');
+    await agyCred('drop'); // so agy asks for one
     log('gemini_created', { profile_id: id });
     console.log('正在用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回这里）……');
     process.on('SIGINT', () => {}); // Ctrl+C is agy's (signing in given up): this goes on, and puts back what was
     spawnSync(agy, ['models'], { stdio: 'inherit' });
     if ((await agyCred('save', gemLogin(home))).status !== 0) return back('还没检测到登录成功，没有加上账号');
+    fs.rmSync(before, { force: true });
     const email = await gemWho(), all = geminiAccounts(), d = email ? all.findIndex((x) => x.email === email) : -1;
     if (d >= 0) { // an account here already (its saved sign-in unreadable, say): this its sign-in now, it on; the new folder (only made now) gone
       fs.copyFileSync(gemLogin(home), gemLogin(all[d].home));
