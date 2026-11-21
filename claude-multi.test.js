@@ -1925,7 +1925,7 @@ if (process.platform === 'win32') {
 // Gemini (agy): its conversations from ~/.gemini's conversation_summaries.db and history.jsonl, shared by all accounts;
 // its status line; the account on switched by its sign-in alone (Credential Manager: a test entry here, never agy's own)
 {
-  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemHistory, gemOn, agyCred, gemSettings, statusline, saveLine, readLine, saveGemQuota, gemUsage, gemRename, gemDelete } = require('./claude-multi');
+  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemHistory, gemOn, agyCred, gemSettings, statusline, saveLine, readLine, saveGemQuota, gemUsage, gemRename, gemDelete, gemAgyConvs } = require('./claude-multi');
   const { DatabaseSync } = require('node:sqlite');
   const regFile = path.join(TEST_HOME, '.claude-multi', 'profiles.json'), reg0 = fs.readFileSync(regFile, 'utf8');
   const GEM = path.join(TEST_HOME, '.gemini', 'antigravity-cli');
@@ -2002,6 +2002,15 @@ if (process.platform === 'win32') {
   assert.deepEqual([gone, listGemini().map((s) => s.id), dbTitle('c-new'), 'c-new' in JSON.parse(fs.readFileSync(path.join(TEST_HOME, '.claude-multi', 'gem-titles.json'), 'utf8'))],
     [[path.join('brain', 'c-new'), path.join('conversations', 'c-new.db')], ['c-old'], null, false]);
   assert.throws(() => gemRename('../x', 'y'), /找不到这个对话/);
+  // the conversation each agy running holds, by its log (as agy 1.5 writes it): its pid on the first line, the last one it
+  // names its own; a pid an older agy had too: the newest log's; one with no conversation yet: none
+  const logs = path.join(GEM, 'log'), u = (n) => `${String(n).repeat(8)}-1111-2222-3333-444444444444`;
+  fs.mkdirSync(logs, { recursive: true });
+  const logAt = (name, ...l) => fs.writeFileSync(path.join(logs, name), l.map((x) => `I1120 10:00:00.000000      1 x.go:1] ${x}`).join('\n') + '\n');
+  logAt('cli-20261120_100000.log', 'Starting language server process with pid 111', `Created conversation ${u(1)} (backend=X)`, `Resuming conversation ${u(2)}`, `Streaming conversation ${u(2)}`);
+  logAt('cli-20261119_090000.log', 'Starting language server process with pid 111', `Created conversation ${u(3)} (backend=X)`);
+  logAt('cli-20261120_110000.log', 'Starting language server process with pid 222', 'Language server version: 1.5.13');
+  assert.deepEqual([...gemAgyConvs(new Set([111, 222, 333]))], [[u(2), { pid: 111, since: new Date(2026, 10, 20, 10, 0, 0).getTime() }]]);
   // its status line: ours set in ~/.gemini's settings (what's there kept), a status line of your own left; what it says,
   // by the account on (its email), and kept for the page's status bar (its effort is the model's)
   const sf = path.join(GEM, 'settings.json');

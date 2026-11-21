@@ -1612,6 +1612,41 @@ function gemSum(id) {
   gemSums.set(id, { mt, sum });
   return sum;
 }
+// The Gemini conversations agy runs outside the web service (a terminal window: start An, or agy itself), by agy's own
+// log: one per agy (log\cli-<started>.log), its first line its pid (「…process with pid 9604」), a line naming each
+// conversation it creates, resumes or sends to: the last of them its own now. pids: the agy running to look for. A log's
+// pid read once; its tail only once it changed. → Map id → { pid, since (its start) }
+const gemLogPid = new Map(), gemLogTail = new Map();
+function gemAgyConvs(pids) {
+  const out = new Map(), dir = path.join(GEMINI_HOME, 'antigravity-cli', 'log');
+  if (!pids.size) return out;
+  let files = [];
+  try { files = fs.readdirSync(dir).filter((f) => /^cli-\d{8}_\d{6}\.log$/.test(f)).sort().reverse(); } catch { return out; } // newest first: a pid an older agy had too is the newest log's
+  const seen = new Set();
+  for (const f of files) {
+    let pid = gemLogPid.get(f);
+    if (pid === undefined) {
+      try { const fd = fs.openSync(path.join(dir, f), 'r'); try { pid = +(/process with pid (\d+)/.exec(slice(fd, 0, 400))?.[1] ?? 0); } finally { fs.closeSync(fd); } } catch { pid = 0; }
+      gemLogPid.set(f, pid);
+    }
+    if (!pids.has(pid) || seen.has(pid)) continue;
+    seen.add(pid);
+    let st, id = null;
+    try { st = fs.statSync(path.join(dir, f)); } catch { continue; }
+    const c = gemLogTail.get(f);
+    if (c?.at === st.mtimeMs) id = c.id;
+    else {
+      try {
+        const fd = fs.openSync(path.join(dir, f), 'r');
+        try { id = [...slice(fd, Math.max(0, st.size - 262144), 262144).matchAll(/(?:Created|Resuming|Streaming|Forwarding user message to) conversation ([0-9a-f-]{36})/g)].pop()?.[1] ?? c?.id ?? null; } finally { fs.closeSync(fd); }
+      } catch {}
+      gemLogTail.set(f, { at: st.mtimeMs, id });
+    }
+    const m = /^cli-(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/.exec(f);
+    if (id) out.set(id, { pid, since: new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() });
+  }
+  return out;
+}
 // A Gemini conversation renamed: claude-multi's own name for it (gem-titles.json, what the list shows), and agy's (its
 // list, for its own /resume) when it isn't running here. Deleted: its record and its files to the Recycle Bin, its row
 // out of agy's list (not while it runs here: the web service checks)
@@ -3742,6 +3777,16 @@ async function web() {
   // it for 30 s ends it (it couldn't be found again). shortcut: one in a terminal window isn't listed as running (agy
   // says nowhere which it holds); opened here meanwhile, a second agy goes on with the same conversation
   const gemLive = () => [...terms.values()].filter((t) => t.gem && !t.gone);
+  // the ones an agy runs in a terminal window (not here), by agy's logs: looked for every 10 s (id → { pid, since })
+  let gemPc = new Map();
+  const gemPcScan = async () => {
+    if (!WIN || !geminiAccounts().length) { gemPc = new Map(); return; }
+    const r = await execA('tasklist', ['/fi', 'imagename eq agy.exe', '/fo', 'csv', '/nh']), pids = new Set([...r.stdout.matchAll(/^"agy\.exe","(\d+)"/gim)].map((m) => +m[1]));
+    for (const t of gemLive()) pids.delete(t.pid);
+    gemPc = gemAgyConvs(pids); gemCache = null;
+  };
+  setInterval(() => gemPcScan().catch(() => {}), 10000);
+  setTimeout(() => gemPcScan().catch(() => {}), 2000);
   async function startGem(acct, cwd, resume, cols = 100, rows = 30) {
     const g = geminiAccounts()[acct - 1], agy = agyCmd();
     if (!g) throw new Error('没有这个 Gemini 账号');
@@ -3774,12 +3819,19 @@ async function web() {
   // calling no tool, since this agy began), checked every 2 s; a question to you (its screen, as it comes)
   const gemNote = (t, kind) => dropNote({ kind, project: path.basename(t.cwd), msg: kind === 'done' ? '任务完成，等你下一步指示' : '需要你确认一下',
     title: listGemini().find((x) => x.id === t.gem.id)?.title ?? null, id: t.gem.id, gem: true }, t.pid);
+  const pcWas = new Map(); // a terminal window's: its last state (by its id)
   setInterval(() => {
     for (const t of gemLive()) {
       const s = t.gem.id && gemSum(t.gem.id), now = s && s.lastAt >= t.gem.since - 1000 ? s.going : null;
       if (t.gem.was === 'busy' && s && !now) try { gemNote(t, 'done'); } catch {}
       t.gem.was = now;
     }
+    for (const [id, m] of gemPc) { // one in a terminal window: its turn over too (a question there: its window says so)
+      const s = gemSum(id), now = s && s.lastAt >= m.since - 1000 ? s.going : null;
+      if (pcWas.get(id) === 'busy' && s && !now) try { const x = listGemini().find((g) => g.id === id); if (x) gemNote({ cwd: x.cwd, pid: m.pid, gem: { id } }, 'done'); } catch {}
+      pcWas.set(id, now);
+    }
+    for (const id of pcWas.keys()) if (!gemPc.has(id)) pcWas.delete(id);
   }, 2000);
   const gemIdle = (t) => setTimeout(() => { gemCache = null; gemSessions(); if (!t.clients.size && !t.gem.id && !t.gem.enters.length && !t.gone) t.proc.kill(); }, 30000);
   let gemCache = null, gemAt = 0;
@@ -3794,8 +3846,9 @@ async function web() {
     for (const s of list) {
       const t = live.find((x) => x.gem.id === s.id);
       // what its record says, from steps this agy wrote (one an earlier agy left mid-turn isn't at work now); to the second
-      const now = t && s.lastAt >= t.gem.since - 1000;
-      if (t) { s.pid = t.pid; s.key = t.key; s.busy = now && s.going === 'busy'; s.wait = now && s.going === 'wait'; }
+      const m = !t && gemPc.get(s.id), now = t ? s.lastAt >= t.gem.since - 1000 : m && s.lastAt >= m.since - 1000;
+      if (t) { s.pid = t.pid; s.key = t.key; s.web = true; } else if (m) { s.pid = m.pid; s.web = false; } // (one in a terminal window: not here)
+      if (t || m) { s.busy = !!now && s.going === 'busy'; s.wait = !!now && s.going === 'wait'; }
     }
     gemCache = list; gemAt = Date.now();
     return list;
@@ -4305,7 +4358,7 @@ async function web() {
       // and the GPT ones among them, by when they were last written (a GPT one runs here or not at all)
       for (const { home, ...s } of gptSessions()) list.push({ ...s, where: !s.pid ? null : s.web ? 'web' : 'pc', line: s.pid ? { model: s.model, effort: s.effort } : null });
       // and the Gemini ones (running: here), with what agy's status line shows; key: a new one's tab finds its id by it
-      for (const { made, going, lastAt, ...s } of gemSessions()) list.push({ ...s, where: s.pid ? 'web' : null, line: s.pid ? readLine(s.id) : null });
+      for (const { made, going, lastAt, ...s } of gemSessions()) list.push({ ...s, where: s.pid ? (s.web === false ? 'pc' : 'web') : null, line: s.pid ? readLine(s.id) : null });
       // and the GPT 聊天 ones: no folder, no account, none running anywhere (busy: an answer pending at OpenAI)
       for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
@@ -4485,6 +4538,7 @@ async function web() {
     'POST /api/delete': async (q, b) => {
       if (b.gem) { // a Gemini one: not while its agy runs here
         if (gemLive().some((x) => x.gem.id === b.id)) throw new Error('正在运行：先结束对话再删');
+        if (gemPc.has(b.id)) throw new Error('它在电脑的终端窗口里运行：先在那里结束它再删');
         const r = gemDelete(String(b.id ?? '')); gemCache = null; return r;
       }
       if (!b.oai) return b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''));
@@ -4531,6 +4585,11 @@ async function web() {
           return opened(await startGem(Number(b.acct) || 1, b.dir, null, cols, rows));
         }
         const t = gemLive().find((x) => x.gem.id === b.id), s = gemSessions().find((x) => x.id === b.id), cwd = t?.cwd ?? s?.cwd;
+        if (!t && s?.pid && s.web === false) { // in a terminal window: shown from there, as a Claude is (not a second agy on it)
+          if (b.swap) throw new Error('它在电脑的终端窗口里运行：在那里结束它，再换账号');
+          const w = mirror(s.pid);
+          return { key: w.key, kind: w.kind };
+        }
         // {id, acct, swap}: 换账号继续. Its record is every account's: its agy here ended (an answer on its way cut short),
         // started again on that one; not while another runs (one account on at a time); that switch failing: back on its own
         if (t && b.swap) {
@@ -5297,7 +5356,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { claudeCmd, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { claudeCmd, gemAgyConvs, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
