@@ -183,6 +183,31 @@ assert.equal(t.total, 2); near(t.usd, (1 + 1 * 2) * 4 / 1e6);
   fs.rmSync(path.join(brain, 'g2'), { recursive: true }); // deleted: still counted
   assert.equal(tokenStats(gr, cache, log).total, 9e6);
 }
+// GPT (Codex): its records' responses (input with its cached part in it, output), each at the model its turn named and
+// the tier its settings said (Fast: 2x), at OpenAI's prices; one read on as it grows (the model and tier kept from before);
+// archived (moved: the same responses) counted once, then deleted: still counted
+{
+  const path = require('path'), home = path.join(tmp, 'codex'), cache = path.join(tmp, 'gpt.json'), log = path.join(tmp, 'none.log');
+  const dir = path.join(home, 'sessions', '2026', '11', '21'), f = path.join(dir, 'rollout-a.jsonl'), arch = path.join(home, 'archived_sessions', 'rollout-a.jsonl');
+  fs.mkdirSync(dir, { recursive: true }); fs.mkdirSync(path.dirname(arch), { recursive: true });
+  const L = (type, payload) => JSON.stringify({ timestamp: '2026-11-21T10:00:00Z', type, payload }) + '\n';
+  const tier = (t) => L('event_msg', { type: 'thread_settings_applied', thread_settings: { service_tier: t } });
+  const use = (id, inp, cached, out) => L('token_usage_record', { response_id: id, usage: { input_tokens: inp, cached_input_tokens: cached, cache_write_input_tokens: 0, output_tokens: out } });
+  fs.writeFileSync(f, L('session_meta', { id: 'a' }) + tier('default') + L('turn_context', { model: 'gpt-6.2-astra' })
+    + L('response_item', { type: 'message', content: [{ text: 'a "token_usage_record" in your words' }] }) + use('r1', 3e6, 2e6, 1e6)
+    + tier('priority') + L('turn_context', { model: 'gpt-6-astra' }) + use('r2', 1e6, 0, 0));
+  const gr = [{ id: 'c', label: 'c', dir: path.join(tmp, 'none') }, { id: 'g', label: 'g', gpt: 1, dir: path.join(home, 'sessions'), arch: path.dirname(arch) }];
+  t = tokenStats(gr, cache, log);
+  assert.deepEqual(t.accounts.map((a) => [a.total, a.gpt]), [[0, undefined], [5e6, 1]]);
+  near(t.accounts[1].usd, (8 + 40 + 2 * 0.4) + 10 * 2); // 6.2 Astra: 1M in not cached, 1M out, 2M cached; 6 Astra Fast: 1M in, 2x
+  fs.appendFileSync(f, use('r3', 0, 0, 1e6));
+  t = tokenStats(gr, cache, log);
+  assert.deepEqual([t.accounts[1].total, t.accounts[1].usd.toFixed(2)], [6e6, '168.80']); // 6 Astra Fast still: $50 out, 2x
+  fs.renameSync(f, arch); // 删除: codex archive
+  assert.equal(tokenStats(gr, cache, log).accounts[1].total, 6e6);
+  fs.rmSync(arch);
+  assert.equal(tokenStats(gr, cache, log).accounts[1].total, 6e6);
+}
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('tokens ok');
 
@@ -463,11 +488,11 @@ if (SESSION0) {
   fs.mkdirSync(path.dirname(f));
   const status = (s) => fs.writeFileSync(f, JSON.stringify({ pid: process.pid, status: s }));
   status('busy');
-  let t = Date.now();
-  setTimeout(() => status('shell'), 700); setTimeout(() => status('idle'), 1500);
+  let t, idleAt = null;
+  setTimeout(() => status('shell'), 700); setTimeout(() => { status('idle'); idleAt = Date.now(); }, 1500);
   await untilFree(dir, process.pid, false);
-  const waited = Date.now() - t;
-  assert.ok(waited >= 1400 && waited < 3500, `waited ${waited} ms`);       // through busy and shell, out at idle
+  // timed from idle, not from the start: these timers wait for the rest of this file's tests, all run first (it took 4.4 s)
+  assert.ok(idleAt && Date.now() - idleAt < 2500, `out ${idleAt && Date.now() - idleAt} ms after idle`); // through busy and shell, out at idle (a 1 s poll)
   status('busy'); t = Date.now(); await untilFree(dir, process.pid, true);
   assert.ok(Date.now() - t < 200);                                        // now: at once
   status('waiting'); t = Date.now(); await untilFree(dir, process.pid, false);
@@ -504,6 +529,9 @@ if (SESSION0) {
   fs.rmSync(d, { recursive: true, force: true });
   const roots = tokenRoots({ profiles: [{ id: 'a', label: 'a@x', configDir: 'C:\\A' }], removed: [{ id: 'b', label: 'b@x', configDir: 'C:\\B' }] });
   assert.deepEqual(roots.map((r) => r.label), ['a@x', 'b@x（已移除）']);
+  // a removed GPT account too: its row after the ones there are, its records' (gone with its folder) still counted from the cache
+  const gr = tokenRoots({ profiles: [], gpt: [{ id: 'g1', label: 'o@x', home: 'C:\\G1' }], removedGpt: [{ id: 'g0', label: 'p@x', home: 'C:\\G0' }] });
+  assert.deepEqual(gr.map((r) => [r.label, r.gpt, r.dir]), [['o@x', 1, path.join('C:\\G1', 'sessions')], ['p@x（已移除）', 2, path.join('C:\\G0', 'sessions')]]);
   console.log('remove ok');
 }
 
@@ -796,7 +824,8 @@ if (SESSION0) {
   fs.rmSync(root, { recursive: true, force: true });
 }
 // A Gemini one for the 管家, in a home of its own (its ~/.gemini, one account): listed by sessions --all (gem, A1), read
-// with chat look (where it runs: not here, the service there being another's), a new one on an account there isn't refused
+// with chat look (where it runs: nowhere, no service reached: its fetch fails, and the one on 7788, the one in use, is
+// never asked), a new one on an account there isn't refused
 {
   const fs = require('fs'), path = require('path'), os = require('os'), url = require('url'), { spawnSync } = require('child_process'), { DatabaseSync } = require('node:sqlite');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-home-')), work = path.join(root, 'work'), a = path.join(root, '.gemini', 'antigravity-cli'), id = '9e1f0000-1111-2222-3333-444444444444';
@@ -808,7 +837,8 @@ if (SESSION0) {
   fs.writeFileSync(path.join(a, 'brain', id, '.system_generated', 'logs', 'transcript.jsonl'), [
     { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-20T09:59:00Z', content: '<USER_REQUEST>\n把登录改好\n</USER_REQUEST>' },
     { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-11-20T09:59:30Z', content: '改好了。' }].map((x) => JSON.stringify(x)).join('\n') + '\n');
-  const cli = (...x) => spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), ...x], { env: { ...process.env, USERPROFILE: root, HOME: root }, encoding: 'utf8' }).stdout.trim();
+  const noFetch = 'data:text/javascript,globalThis.fetch=()=>Promise.reject(new Error("no service in tests"))';
+  const cli = (...x) => spawnSync(process.execPath, ['--import', noFetch, path.join(__dirname, 'claude-multi.js'), ...x], { env: { ...process.env, USERPROFILE: root, HOME: root }, encoding: 'utf8' }).stdout.trim();
   assert.deepEqual(JSON.parse(cli('sessions', '--json', '--all')).filter((s) => s.gem).map((s) => [s.id, s.title, s.who, s.cwd]), [[id, '修复登录', 'A1', work]]);
   assert.equal(cli('chat', 'look', '登录'), `「修复登录」 ${id}\nGemini 账号 A1 · ${work} · 没在运行\n\n最后的回答：\n改好了。`);
   assert.equal(cli('chat', 'new', work, '你好', '--gemini', '--acct', 'A3'), '没有 Gemini 账号 A3（用户要先运行 claude-multi new gemini 加一个）');
@@ -954,6 +984,16 @@ if (SESSION0) {
     'Keyboard: ↑/↓ Navigate  ←/→ Page  ctrl+f Grouped View  enter Select  f2 Rename  f4 Delete  tab Switch Tab', '  esc Go back / Clear search']);
   assert.deepEqual([res.menu.cur, res.menu.ask, res.menu.opts.map((o) => o.label)], [1, 'Conversations', ['Fix login · proj · 107 steps · 3h ago', 'Tidy notes · 5 steps · 4h ago']]);
   console.log('agy screen ok');
+}
+// Codex's screen (0.171, as it drew them): at work, its status row (either dot); its answer streaming (a • row of its
+// own, no esc to interrupt) and idle: not
+{
+  const { parseCodexScreen } = require('./screen.js'), foot = ['', '› Ask Codex to do anything', '', '  GPT-6.2 high · ~\\work · 写短文', '  ← for agents · ? for shortcuts'];
+  const work = (dot) => parseCodexScreen(['› 再写一篇，讲苹果的历史', '', `${dot} Working (35s • esc to interrupt)`, '  └ Tip: Switch models or reasoning effort quickly with /model.', ...foot]).busy;
+  assert.deepEqual([work('•')?.[1], work('◦')?.[1], work('•')?.[2]], ['Working', 'Working', '']); // (how long: the page's count, as agy's)
+  assert.equal(parseCodexScreen(['› 再写一篇，讲苹果的历史', '', '• # 苹果的历史：从天山果林到现代果园', '', '  ### 一、天山脚下的野果', ...foot]).busy, null);
+  assert.deepEqual(parseCodexScreen(foot), { busy: null, menu: null });
+  console.log('codex screen ok');
 }
 // What's on Claude's screen (screen.js, the page's and the 管家's): a question's options, the trust question, and
 // "❯ 4. …" in the input box (your words, not a menu)

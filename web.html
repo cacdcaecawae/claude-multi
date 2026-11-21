@@ -955,7 +955,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 <script src="/screen.js"></script>
 <script src="/ext.js"></script>
 <script>
-/* global parseScreen, parseAgyScreen */ // screen.js
+/* global parseScreen, parseAgyScreen, parseCodexScreen */ // screen.js
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 // 代理额度 (quota-panel.js): the quotas behind a proxy, shown when the service has a source for them (state.quota: your
@@ -2156,9 +2156,11 @@ async function renderTokens() {
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
   // each account in its ring's color, the same every day (a whole bar in one color hid who used it).
   // shortcut: a 9th account takes the first's color again; fold the oldest into one 其他 if it comes to that
-  // the Mac mini's: Apple's (more Macs: a color of their own each); a Gemini account's: Gemini's (shortcut: two of them share it)
-  const col = (i) => (t.accounts[i]?.mac === 'mac' ? 'var(--apple)' : t.accounts[i]?.gem ? 'var(--gem)' : ACCT[i % ACCT.length]);
-  const name = (a, i) => (a?.mac ? esc(a.label) : a?.gem ? `Gemini A${a.gem}` : `账号 ${i + 1}`), ring = (a, i) => (a.mac ? mark(false, 0, a.mac) : a.gem ? ac(a.gem, '', 'gem') : ac(i + 1));
+  // the Mac mini's: Apple's (more Macs: a color of their own each); a Gemini account's: Gemini's, a GPT one's: GPT's
+  // (shortcut: two of a kind share it)
+  const col = (i) => (t.accounts[i]?.mac === 'mac' ? 'var(--apple)' : t.accounts[i]?.gem ? 'var(--gem)' : t.accounts[i]?.gpt ? 'var(--gpt)' : ACCT[i % ACCT.length]);
+  const name = (a, i) => (a?.mac ? esc(a.label) : a?.gem ? `Gemini A${a.gem}` : a?.gpt ? `GPT G${a.gpt}` : `账号 ${i + 1}`);
+  const ring = (a, i) => (a.mac ? mark(false, 0, a.mac) : a.gem ? ac(a.gem, '', 'gem') : a.gpt ? ac(a.gpt, '', true) : ac(i + 1));
   $('#view').html = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
     <div class="tiles">
       <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">${about(t.usd)}</div></div>
@@ -2556,7 +2558,7 @@ function makeConv(body, title) {
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let gotAt = 0, waitAns = 0, waitT = 0; // when the record last brought messages; since when an answer the screen finished is waited for
-  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, busyFrom = 0, menuNow = false, typeNow = false, typeTick = false, writeNow = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
+  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, busyFrom = 0, workAt = 0, stopAt = 0, menuNow = false, typeNow = false, typeTick = false, writeNow = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
   let queued = []; // what waits in Claude's queue, as the record says (sent from here, its window, the 管家): { text, at }
   let past = false, quiet = 0; // a (re)connection's first output is everything so far: its copies were made before, not again
   let switching = 0, conversationGen = 0; // a session change cancels writes still queued for the previous one
@@ -2706,8 +2708,10 @@ function makeConv(body, title) {
   let stops = 0, lastSent = null;
   async function stop() {
     const me = ++stops;
-    input('\x1b');
-    if (c.gem) return void setTimeout(load, 1500); // (agy: Esc interrupts it, nothing of Claude's box to take back; the service sees it in agy's log)
+    input('\x1b'); workAt = 0; stopAt = Date.now();
+    // (agy, Codex: Esc interrupts it, nothing of Claude's box to take back; the service sees it in agy's log, in Codex's
+    // record: asked again then, a GPT one's past the 3 s the service keeps it)
+    if (c.gem || c.gpt) return void setTimeout(load, c.gpt ? 3500 : 1500);
     for (const end = Date.now() + 3000; me === stops && term && !c.closed && Date.now() < end;) {
       await new Promise((ok) => setTimeout(ok, 300));
       const t = me === stops && typed();
@@ -2975,27 +2979,33 @@ function makeConv(body, title) {
   function screen() {
     const b = term.buffer.active, rows = [];
     for (let i = 0; i < term.rows; i++) rows.push(b.getLine(b.baseY + i)?.translateToString(true) ?? '');
-    return c.gem ? parseAgyScreen(rows) : parseScreen(rows);
+    return c.gem ? parseAgyScreen(rows) : c.gpt ? parseCodexScreen(rows) : parseScreen(rows);
   }
   function drawLive(toEnd) {
     const live = $p('.live');
     if (!live) return;
     sent = sent.filter((s) => Date.now() - s.at < 600000); // ponytail: one the record never shows (some slash commands) goes after 10 min
-    // a GPT one's: as the service has it; a Gemini one's: its screen, or the service's (its record: at a tool, say)
+    // a Gemini one's: its screen, or the service's (its record: at a tool, say). A GPT one's: Codex's status row at once
+    // (the service's word comes 5–8 s later, its record read every few seconds), else the service's; the row is gone
+    // while the answer streams, so it holds 8 s, the service caught up by then (none once 停止 is pressed: the row still
+    // there a moment after it doesn't hold it again; nor once it has ended)
     const told = !c.ended && state?.sessions.find((x) => x.id === c.id)?.busy ? [] : null;
-    const sc = c.gem && term && !c.ended ? screen() : null;
+    const sc = (c.gem || c.gpt) && term && !c.ended ? screen() : null;
     if (c.gem) queued = (sc?.queue ?? []).map((text) => ({ text, at: 0, cut: true })); // (its row may be cut short: one of yours that starts so)
-    const { busy, menu } = c.gpt ? { busy: told, menu: null } : c.gem ? { busy: sc?.busy || (sc?.writing ? null : told), menu: sc?.menu ?? null } : term && !c.ended ? screen() : {};
+    if (c.gpt && sc?.busy && Date.now() - stopAt > 3000) workAt = Date.now();
+    const { busy, menu } = c.gpt ? { busy: sc?.busy || told || (!c.ended && Date.now() - workAt < 8000 ? [] : null), menu: null }
+      : c.gem ? { busy: sc?.busy || (sc?.writing ? null : told), menu: sc?.menu ?? null } : term && !c.ended ? screen() : {};
     const here = menu?.opts.find((o) => o.n === menu.cur);
     // 「Type something」: which option it is, per question, kept from when it still said so (written in, it shows the words)
     const blank = menu?.opts.find((o) => /^Type something/i.test(o.label));
     if (blank) typeOpt.set(menu.ask, blank.n);
     typeNow = !!here && ((typing?.ask === menu.ask && typing.n === menu.cur) || typeOpt.get(menu.ask) === menu.cur); // picked on this question
     typeTick = typeNow && here.check != null; // a multi-select's: what you write ticks it, no Enter after
-    // how long it's been at it, as its screen says (Claude's, Codex's); agy's says none: since this page saw it start
+    // how long it's been at it, as its screen says (Claude's); agy's says none, Codex's not while its answer streams: since
+    // this page saw it start
     busyFrom = busy ? busyFrom || Date.now() : 0;
     const secs = Math.floor((Date.now() - busyFrom) / 1000);
-    const took = busy && (/(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0] ?? (c.gem ? (secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`) : undefined));
+    const took = busy && (/(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0] ?? (c.gem || c.gpt ? (secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`) : undefined));
     // its screen done with an answer the record hasn't brought yet (a Mac's comes a second or two later): the record read
     // at once, then every 0.3 s till it's in, 10 s at most (not when the record brought something just now: likely in)
     if (busyNow && !busy && !menu && view === 'hist' && Date.now() - gotAt > 2000) { waitAns = Date.now(); loadHist(); }

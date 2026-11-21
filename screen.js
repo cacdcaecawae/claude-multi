@@ -79,5 +79,11 @@
       writing: foot < 0 && rows.some((r) => /enter Submit · esc Back/.test(r)),
       queue: rows.map((r) => /^\s*▸\s+(.*?)\s*\(alt\+m to send immediately\)\s*$/.exec(r)?.[1]?.replace(/…$/, '')).filter(Boolean) };
   }
-  if (typeof module !== 'undefined') module.exports = { parseScreen, parseAgyScreen }; else Object.assign(root, { parseScreen, parseAgyScreen });
+  // Codex's screen (OpenAI's Codex CLI, 0.171): at work, its status row over its box (「• Working (35s • esc to
+  // interrupt)」: its dot • or ◦, its words what it's at). Gone while its answer streams: what's said then is the service's
+  function parseCodexScreen(rows) {
+    const row = rows.map((r) => /^\s*[•◦]\s+(\S.*?)\s+\(.*esc to interrupt\)/.exec(r)).filter(Boolean).pop();
+    return { busy: row ? [row[0], row[1], ''] : null, menu: null };
+  }
+  if (typeof module !== 'undefined') module.exports = { parseScreen, parseAgyScreen, parseCodexScreen }; else Object.assign(root, { parseScreen, parseAgyScreen, parseCodexScreen });
 })(this);

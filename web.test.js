@@ -16,7 +16,10 @@ let termGem = '', gemRes = null; // one whose screen shows agy's (these rows), a
 const inputs = []; // what was typed into the terminals (/api/input), in order
 const openBodies = []; // what each open asked for
 let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
-let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
+// set: the record, each read given what's past its from (as the service's: a read thrown away, or a closed one's still on
+// its way, took the messages away when each read took them, and the next test's conversation never got them); else the
+// long answer every time
+let histFeed = null;
 let histQueue = null; // set: what the record says waits in Claude's queue, with every read
 const histReads = []; // when each history read came
 const histUrls = []; // what each asked (the last 50)
@@ -66,7 +69,7 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/tokens' ? tokens
       : url.pathname === '/api/open' ? { key: 'fixture', pid: 123, kind: 'pty' }
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
-      : url.pathname === '/api/history' ? { id: historyId, start: 0, end: 1, items: histFeed ? histFeed.splice(0) : [{ role: 'claude', text: long }], ...(histQueue && { queue: histQueue }) }
+      : url.pathname === '/api/history' ? { id: historyId, start: 0, end: histFeed?.length ?? 1, items: histFeed ? histFeed.slice(Number(url.searchParams.get('from') ?? 0)) : [{ role: 'claude', text: long }], ...(histQueue && { queue: histQueue }) }
       : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' }
       : url.pathname === '/api/commands' ? (cmdAsks.push(url.searchParams.get('id') ?? url.searchParams.get('dir') ?? url.searchParams.get('mac')), url.searchParams.get('id') === 'M' ? { commands: [{ name: 'clear', desc: 'Start anew', hint: '[name]', also: ['reset'], builtin: true }, { name: 'maintain-formal-verification-skill', desc: 'a Mac skill', hint: '', also: [], builtin: false }] } : { commands: CMDS })
       : url.pathname.startsWith('/api/peek') ? { type: /\.exe$/.test(url.searchParams.get('path')) ? 'application/octet-stream' : /\.pptx$/.test(url.searchParams.get('path')) ? 'application/pdf' : 'image/png' }
@@ -350,12 +353,13 @@ const press = async (key, shift = false) => {
     await evaluate('sheetOff()');
     console.log('browser 新对话 folder window ok');
   }
-  // 用量: each Mac's records (listed last) under its name and its mark (Apple's; the old rainbow one for the MacBook), not as one more 账号 n
+  // 用量: each Mac's records (listed last) under its name and its mark (Apple's; the old rainbow one for the MacBook), not
+  // as one more 账号 n; a Gemini account's and a GPT one's under theirs (A1, G1)
   assert.equal(await evaluate(`(() => {
-    tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }, { label: 'g@x', total: 1, usd: 0, gem: 1 }], days: [], total: 4, usd: 0, today: '2000-01-02' }; renderTokens();
+    tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }, { label: 'g@x', total: 1, usd: 0, gem: 1 }, { label: 'o@x', total: 1, usd: 0, gpt: 1 }], days: [], total: 5, usd: 0, today: '2000-01-02' }; renderTokens();
     const h = [...document.querySelectorAll('#view .cardHead')];
-    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg linearGradient stop[stop-color="#61BB46"]') ? '+rainbow' : x.querySelector('.mk svg') ? '+apple' : x.querySelector('.ac')?.textContent === 'A1' ? '+A1' : '')).join(' | '); })()`),
-    '账号 1 | Mac mini+apple | Mac a1+rainbow | Gemini A1+A1');
+    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg linearGradient stop[stop-color="#61BB46"]') ? '+rainbow' : x.querySelector('.mk svg') ? '+apple' : /^[AG]1$/.test(x.querySelector('.ac')?.textContent) ? '+' + x.querySelector('.ac').textContent : '')).join(' | '); })()`),
+    '账号 1 | Mac mini+apple | Mac a1+rainbow | Gemini A1+A1 | GPT G1+G1');
   console.log('browser 用量 Mac mini, a MacBook and a Gemini account ok');
   // 换账号继续 on a Mac's: off in the list's menu, saying whose account it runs on; asked for anyway, a note, no card
   assert.equal(await evaluate(`(() => { const id = '0f1e2d3c-4b5a-4968-8776-000000000001';
@@ -531,8 +535,11 @@ const press = async (key, shift = false) => {
   // terminal (no 对话 view), the service asked for it as a Gemini one on its own account; a new one, on the account
   // picked, takes its id once the list has it by its terminal's key, its account in the status bar
   const opened = async () => { for (let i = 0; i < 100 && !openBodies.length; i++) await new Promise((r) => setTimeout(r, 50)); return openBodies.shift(); };
+  // a change to the list made in the page and in the fake service's state alike: the page's load every 5 s takes the
+  // service's, and one made in the page alone was gone with it (GEM1 not found, now and then)
+  const both = (change, then = '') => { new Function('state', change)(state); return evaluate(`${change}; ${then}`); };
   openBodies.length = 0;
-  await evaluate("state.gemini = [{ label: 'g@example.com', on: true }]; state.sessions.push({ id: 'GEM1', gem: true, title: 'Gemini 对话', acct: 0, cwd: 'C:/test', at: Date.now(), pid: null }); listKind = 'all'; renderChats()");
+  await both("state.gemini = [{ label: 'g@example.com', on: true }]; state.sessions.push({ id: 'GEM1', gem: true, title: 'Gemini 对话', acct: 0, cwd: 'C:/test', at: Date.now(), pid: null })", "listKind = 'all'; renderChats()");
   assert.deepEqual(await evaluate(`(() => { const r = document.querySelector('#view [data-open="GEM1"]');
     return [r.querySelector('.ac').textContent, r.querySelector('.mk').dataset.tip ?? r.querySelector('.mk').title, [...document.querySelectorAll('.kinds button')].map((b) => (b.querySelector('svg') ? 'mark:' : '') + (b.getAttribute('aria-label') ?? b.textContent)).join()]; })()`), ['A1', 'Gemini', '全部,mark:Claude,mark:Gemini']);
   await evaluate("document.querySelector('[data-kind=\"gem\"]').click()");
@@ -586,16 +593,16 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate("!!focusG.active.el.querySelector('.live .hm.user.pending')"), false); // an answer, not a message waiting for the record
   // 换账号继续 on another Gemini account (its quota on the card): the service asked to end it here and go on there
   openBodies.length = 0;
-  await evaluate("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false, windows: [{ k: 'five_hour', pct: 30, reset: '1小时' }] }]; focusG.active.acct = 1; focusG.active.swap()");
+  await both("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false, windows: [{ k: 'five_hour', pct: 30, reset: '1小时' }] }]", 'focusG.active.acct = 1; focusG.active.swap()');
   await until("document.querySelector('#sheetIn [data-a=\"2\"]')");
   assert.match(await evaluate("document.querySelector('#sheetIn [data-a=\"2\"]').textContent"), /A2 · g2@example\.com\s*额度用了 30%/);
   await evaluate("document.querySelector('#sheetIn [data-a=\"2\"]').click(); document.querySelector('#swapGo').click()");
   const sw = await opened();
   assert.deepEqual([sw?.id, sw?.gem, sw?.swap, sw?.acct], ['GEM1', true, true, 2]);
   await until("/已换到 Gemini 账号 A2/.test(document.querySelector('#toast').textContent)");
-  await evaluate("Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 1, pid: 123 }); focusG.active.sync()"); // the list: running here, on A2 now (the one on)
+  await both("Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 1, pid: 123 })", 'focusG.active.sync()'); // the list: running here, on A2 now (the one on)
   await until('focusG.active.acct === 2');
-  await evaluate("state.gemini = [{ label: 'g@example.com', on: true }]; Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 0, pid: null })");
+  await both("state.gemini = [{ label: 'g@example.com', on: true }]; Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 0, pid: null })");
   historyId = 'A'; histFeed = null; termGem = ''; gemRes = null;
   await evaluate('closeConv(focusG.active)');
   assert.ok(openBodies.every((b) => b.live && b.gem), JSON.stringify(openBodies)); // any more: reconnects to it, never a second agy
@@ -617,10 +624,35 @@ const press = async (key, shift = false) => {
   const nb = await opened();
   assert.deepEqual([nb.dir, nb.acct, nb.gem, nb.id], ['C:/test', 1, true, undefined]);
   await until("focusG.active?.where() === 'pty'");
-  await evaluate("state.sessions.push({ id: 'GEM2', gem: true, key: 'fixture', title: '新的', acct: 0, cwd: 'C:/test', at: Date.now(), pid: 123, where: 'web' }); focusG.active.sync(); drawHere()");
+  await both("state.sessions.push({ id: 'GEM2', gem: true, key: 'fixture', title: '新的', acct: 0, cwd: 'C:/test', at: Date.now(), pid: 123, where: 'web' })", 'focusG.active.sync(); drawHere()');
   assert.deepEqual(await evaluate("[focusG.active.id, document.querySelector('#here').textContent.includes('Gemini 账号 A1')]"), ['GEM2', true]);
-  await evaluate("closeConv(focusG.active); state.sessions = state.sessions.filter((x) => !x.gem); state.gemini = []; renderChats()");
+  await evaluate('closeConv(focusG.active)');
+  await both('state.sessions = state.sessions.filter((x) => !x.gem); state.gemini = []', 'renderChats()');
   console.log('browser Gemini ok');
+  // GPT (Codex): its status row on its screen, 正在回复 at once (the service's word comes seconds later, none here); the
+  // row gone while its answer streams: held still; 停止: not
+  const codex = (row) => `\x1b[2J\x1b[H› 写一篇短文\r\n\r\n${row}\r\n\r\n› Ask Codex to do anything\r\n`;
+  historyId = 'GPT1'; histFeed = []; termGem = codex('• Working (3s • esc to interrupt)');
+  await both("state.sessions.push({ id: 'GPT1', gpt: true, title: 'GPT', acct: 0, cwd: 'C:/test', at: Date.now(), pid: 123 })"); // running (its busy not said yet)
+  await evaluate("window.hg = makeConv({ id: 'GPT1', gpt: true }, 'GPT'); addConv(focusG, hg)");
+  await until("hg.live === 'busy'");
+  assert.match(await evaluate("hg.el.querySelector('.live .busy')?.textContent"), /^GPT 正在回复 · \d+s$/);
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex('• # 短文'))}\n\n`);
+  await new Promise((ok) => setTimeout(ok, 700)); // (its redraw: 200 ms after the screen changes)
+  assert.deepEqual(await evaluate("[hg.live, hg.el.querySelector('.go').classList.contains('stop')]"), ['busy', true]);
+  await evaluate("hg.el.querySelector('.go').click()");
+  await until("hg.live === ''");
+  // 停止 with its row still up a moment (Codex not out of it yet): gone, not held again (the hold's 8 s, past until's 5)
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex('• Working (9s • esc to interrupt)'))}\n\n`);
+  await until("hg.live === 'busy'");
+  await evaluate("hg.el.querySelector('.go').click()");
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex('• Working (10s • esc to interrupt)'))}\n\n`);
+  await new Promise((ok) => setTimeout(ok, 500)); // (drawn with the row after 停止)
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex(''))}\n\n`);
+  await until("hg.live === ''");
+  await evaluate('closeConv(hg)'); await both("state.sessions = state.sessions.filter((x) => x.id !== 'GPT1')");
+  historyId = 'A'; histFeed = null; termGem = ''; gemRes = null;
+  console.log('browser GPT 正在回复 ok');
   // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
   assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
     a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);
