@@ -1524,8 +1524,7 @@ function rowMenu(id, x, y, inProj) {
   menuFor = s; menuAt = Date.now(); menuIn = inProj ?? null;
   // a GPT one: not renamed nor moved to another account here; deleted is archived (Codex's own, undone with codex unarchive).
   // A GPT 聊天 one: renamed and deleted here, at any time (an answer on its way is stopped)
-  const no = 'Gemini 对话暂时不能在这里';
-  const items = (s.gem ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', `${no}改名`], ['swap', '换账号继续…'], ['del', '删除…', `${no}删除`]]
+  const items = (s.gem ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['swap', '换账号继续…'], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]
     : s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
     ['del', '归档…', s.pid && '正在运行：先结束对话再归档']] : [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
     ['swap', '换账号继续…', s.mac && `用的是 ${macName(s.mac)} 的账号，换不了`], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean);
@@ -1573,13 +1572,13 @@ async function menuPick(e) {
   if (k === 'rename') {
     const name = prompt('新名字', s.title)?.trim();
     if (!name || name === s.title) return;
-    try { toast((await post('/api/rename', { id: s.id, name, oai: s.oai })).said); } catch (er) { toast(er.message, 4000); }
+    try { toast((await post('/api/rename', { id: s.id, name, oai: s.oai, gem: s.gem })).said); } catch (er) { toast(er.message, 4000); }
   } else if (k === 'del') {
     if (!confirm(s.gpt && !s.oai ? `归档「${s.title}」？\n归档后不在列表里显示，在 Codex 里用 codex unarchive 能找回。`
       : `删除「${s.title}」？\n${s.oai && s.busy ? '正在回答的那一条会停下。' : ''}对话记录会移到电脑的${win() ? '回收站' : '废纸篓'}，可以找回。`)) return;
     deleting.add(s.id); drawSide(); toast(`正在${s.gpt && !s.oai ? '归档' : '删除'}「${s.title}」…`, 120000);
     try {
-      toast((await post('/api/delete', { id: s.id, gpt: s.gpt, oai: s.oai })).said);
+      toast((await post('/api/delete', { id: s.id, gpt: s.gpt, oai: s.oai, gem: s.gem })).said);
       const c = convOf(s.id); if (c) closeConv(c);
       try { localStorage.removeItem('cm-draft:' + s.id); } catch {}
     } catch (er) { deleting.delete(s.id); toast(er.message, 4000); }

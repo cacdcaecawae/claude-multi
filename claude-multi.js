@@ -1612,6 +1612,36 @@ function gemSum(id) {
   gemSums.set(id, { mt, sum });
   return sum;
 }
+// A Gemini conversation renamed: claude-multi's own name for it (gem-titles.json, what the list shows), and agy's (its
+// list, for its own /resume) when it isn't running here. Deleted: its record and its files to the Recycle Bin, its row
+// out of agy's list (not while it runs here: the web service checks)
+const GEM_TITLES = path.join(ROOT, 'gem-titles.json');
+const gemTitles = () => { try { return JSON.parse(fs.readFileSync(GEM_TITLES, 'utf8')); } catch { return {}; } };
+const gemTitlesSave = (t) => { fs.writeFileSync(`${GEM_TITLES}.tmp`, JSON.stringify(t)); fs.renameSync(`${GEM_TITLES}.tmp`, GEM_TITLES); };
+function gemDb(sql, ...args) { // agy's list written (it waits a moment for an agy writing it too)
+  const { DatabaseSync } = require('node:sqlite'), d = new DatabaseSync(path.join(GEMINI_HOME, 'antigravity-cli', 'conversation_summaries.db'));
+  try { d.exec('PRAGMA busy_timeout = 3000'); return d.prepare(sql).run(...args); } finally { d.close(); }
+}
+function gemRename(id, name, running = false) {
+  if (!/^[\w-]{1,80}$/.test(id)) throw new Error('找不到这个对话');
+  gemTitlesSave({ ...gemTitles(), [id]: name });
+  if (!running) try { gemDb('update conversation_summaries set title = ? where conversation_id = ?', name, id); } catch {}
+  gemHead = null;
+  return { said: `已改名：${name}` };
+}
+function gemDelete(id, bin = recycle) {
+  if (!/^[\w-]{1,80}$/.test(id)) throw new Error('找不到这个对话');
+  const a = path.join(GEMINI_HOME, 'antigravity-cli'), title = listGemini().find((x) => x.id === id)?.title ?? '这个对话';
+  const files = [path.join(a, 'brain', id), ...['', '-wal', '-shm'].map((x) => path.join(a, 'conversations', `${id}.db${x}`))].filter((p) => fs.existsSync(p));
+  const r = files.length ? bin(files) : { status: 0 };
+  if (r.status !== 0 || files.some((p) => fs.existsSync(p))) throw new Error(`删除失败：${(r.stderr || '').trim().split('\n')[0] || '可能有 agy 开着它的文件'}`);
+  try { gemDb('delete from conversation_summaries where conversation_id = ?', id); } catch {}
+  const t = gemTitles();
+  if (t[id]) { delete t[id]; gemTitlesSave(t); }
+  gemHead = null; gemReads.delete(id); gemSums.delete(id);
+  log('gemini_deleted', { session_id: id });
+  return { said: `已删除「${title}」，可以在回收站里找回。` };
+}
 // The Gemini conversations, once there's an account: ~/.gemini's (its conversation_summaries.db) with something you said
 // in it (its record: the first is its title till agy gives one), not a helper agent's, their folder still there; newest
 // first; each on the account on (any goes on with it). The list read again only once the db changed; a read that fails
@@ -1627,6 +1657,7 @@ function listGemini(reg = load()) {
       const d = codexDb(dir, 'conversation_summaries.db');
       try { gemHead = { at, rows: d.prepare('select conversation_id id, title, last_modified_time up, workspace_uris ws, parent_conversation_id parent from conversation_summaries').all() }; } finally { d.close(); }
     } catch {}
+    const named = gemTitles();
     for (const t of gemHead?.rows ?? []) {
       if (t.parent) continue;
       let cwd = '';
@@ -1634,7 +1665,7 @@ function listGemini(reg = load()) {
       if (!cwd || !fs.existsSync(cwd)) continue;
       const s = gemSum(t.id);
       if (!s) continue;
-      const title = String(t.title || s.first).split('\n')[0].trim().slice(0, 100);
+      const title = String(named[t.id] || t.title || s.first).split('\n')[0].trim().slice(0, 100);
       out.push({ id: t.id, gem: true, acct, cwd, title, prompt: s.first && s.first !== title ? s.first.slice(0, 200) : null,
         at: Math.max(gemTime(t.up), s.lastAt), made: s.made, pid: null, busy: false, wait: false, going: s.going, lastAt: s.lastAt });
     }
@@ -4042,7 +4073,8 @@ async function web() {
   function saveRun() {
     try {
       const pids = new Set([...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid).map((t) => t.pid));
-      const now = JSON.stringify(sessions().filter((s) => s.pid && pids.has(s.pid)).map((s) => s.id));
+      const now = JSON.stringify([...sessions().filter((s) => s.pid && pids.has(s.pid)).map((s) => s.id), // (a Gemini one's: gem:<id>)
+        ...gemLive().filter((t) => t.gem.id).map((t) => `gem:${t.gem.id}`)]);
       if (now !== ranHere) { fs.writeFileSync(WEB_RUN, now); ranHere = now; }
     } catch {}
   }
@@ -4445,11 +4477,16 @@ async function web() {
       const id = String(b.id ?? ''), name = String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 100);
       if (!name) throw new Error('名字不能是空的');
       if (b.oai) { const c = oaiRead(id); c.title = name; oaiSave(c); return { said: `已改名：${name}` }; }
+      if (b.gem) { const r = gemRename(id, name, gemLive().some((x) => x.gem.id === id)); gemCache = null; return r; }
       if (b.gpt) throw new Error('GPT 对话暂时不能在这里改名');
       if (sessions().find((x) => x.id === id)?.mac) throw new Error('Mac 上的对话暂时不能在这里改名'); // its record there, not here
       return command('rename', id, name);
     },
     'POST /api/delete': async (q, b) => {
+      if (b.gem) { // a Gemini one: not while its agy runs here
+        if (gemLive().some((x) => x.gem.id === b.id)) throw new Error('正在运行：先结束对话再删');
+        const r = gemDelete(String(b.id ?? '')); gemCache = null; return r;
+      }
       if (!b.oai) return b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''));
       const c = oaiRead(String(b.id ?? '')); // a GPT 聊天 one: an answer on its way stopped (not paid for), then its files to the Recycle Bin
       if (c.pending) await oaiApi(`responses/${c.pending}/cancel`, {}).catch(() => {});
@@ -4820,6 +4857,12 @@ async function web() {
       // a Mac's still running in its tmux there is joined again (startMac finds it)
       const s = all.find((x) => x.id === id), p = s && s !== me && (s.mac || (!s.pid && reg.profiles[s.acct]));
       if (p) try { if (s.mac) startMac(s.mac, { resume: s.id, cwd: s.macCwd }); else startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
+    }
+    // a Gemini one (gem:<id>): on the account on (its record is every account's: nothing to switch)
+    const on = geminiAccounts(reg).findIndex((g) => g.id === reg.geminiOn) + 1, gl = ranBefore.some((x) => String(x).startsWith('gem:')) ? listGemini(reg) : [];
+    for (const x of ranBefore.filter((y) => String(y).startsWith('gem:'))) {
+      const s = gl.find((g) => g.id === x.slice(4));
+      if (s && on) try { await startGem(on, s.cwd, s.id); log('web_resumed', { session_id: s.id, gem: true }); } catch (e) { log('web_resume_fail', { session_id: s.id, gem: true, err: e.message }); }
     }
     const open = readTickets().some((x) => !x.end), p = butlerOn() && me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
     if (!p) return;
@@ -5254,7 +5297,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { claudeCmd, agySlash, saveGemQuota, gemUsage, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { claudeCmd, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

@@ -1925,7 +1925,7 @@ if (process.platform === 'win32') {
 // Gemini (agy): its conversations from ~/.gemini's conversation_summaries.db and history.jsonl, shared by all accounts;
 // its status line; the account on switched by its sign-in alone (Credential Manager: a test entry here, never agy's own)
 {
-  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemHistory, gemOn, agyCred, gemSettings, statusline, saveLine, readLine, saveGemQuota, gemUsage } = require('./claude-multi');
+  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemHistory, gemOn, agyCred, gemSettings, statusline, saveLine, readLine, saveGemQuota, gemUsage, gemRename, gemDelete } = require('./claude-multi');
   const { DatabaseSync } = require('node:sqlite');
   const regFile = path.join(TEST_HOME, '.claude-multi', 'profiles.json'), reg0 = fs.readFileSync(regFile, 'utf8');
   const GEM = path.join(TEST_HOME, '.gemini', 'antigravity-cli');
@@ -1992,6 +1992,16 @@ if (process.platform === 'win32') {
   fs.writeFileSync(regFile, reg0);
   assert.deepEqual(listGemini(), []);
   fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, a2], geminiOn: a1.id }));
+  // renamed: the list by its new name, agy's list too (one running here: its name in claude-multi only); deleted: its
+  // record and files gone (to the Recycle Bin: here, just removed), its row out of agy's list, its name forgotten
+  const dbTitle = (id) => { const x = new DatabaseSync(path.join(GEM, 'conversation_summaries.db')); try { return x.prepare('select title from conversation_summaries where conversation_id = ?').get(id)?.title ?? null; } finally { x.close(); } };
+  gemRename('c-old', '登录的事'); gemRename('c-new', '跑测试', true);
+  assert.deepEqual([listGemini().map((s) => [s.id, s.title]), dbTitle('c-old'), dbTitle('c-new')], [[['c-new', '跑测试'], ['c-old', '登录的事']], '登录的事', '']);
+  const conv = path.join(GEM, 'conversations'); fs.mkdirSync(conv, { recursive: true }); fs.writeFileSync(path.join(conv, 'c-new.db'), 'x');
+  const gone = []; gemDelete('c-new', (p) => { gone.push(...p.map((x) => path.relative(GEM, x))); p.forEach((x) => fs.rmSync(x, { recursive: true })); return { status: 0 }; });
+  assert.deepEqual([gone, listGemini().map((s) => s.id), dbTitle('c-new'), 'c-new' in JSON.parse(fs.readFileSync(path.join(TEST_HOME, '.claude-multi', 'gem-titles.json'), 'utf8'))],
+    [[path.join('brain', 'c-new'), path.join('conversations', 'c-new.db')], ['c-old'], null, false]);
+  assert.throws(() => gemRename('../x', 'y'), /找不到这个对话/);
   // its status line: ours set in ~/.gemini's settings (what's there kept), a status line of your own left; what it says,
   // by the account on (its email), and kept for the page's status bar (its effort is the model's)
   const sf = path.join(GEM, 'settings.json');
