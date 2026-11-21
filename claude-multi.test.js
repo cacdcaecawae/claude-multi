@@ -2038,10 +2038,12 @@ if (process.platform === 'win32') {
   const dbTitle = (id) => { const x = new DatabaseSync(path.join(GEM, 'conversation_summaries.db')); try { return x.prepare('select title from conversation_summaries where conversation_id = ?').get(id)?.title ?? null; } finally { x.close(); } };
   gemRename('c-old', '登录的事'); gemRename('c-new', '跑测试', true);
   assert.deepEqual([listGemini().map((s) => [s.id, s.title]), dbTitle('c-old'), dbTitle('c-new')], [[['c-new', '跑测试'], ['c-old', '登录的事']], '登录的事', '']);
-  const conv = path.join(GEM, 'conversations'); fs.mkdirSync(conv, { recursive: true }); fs.writeFileSync(path.join(conv, 'c-new.db'), 'x');
+  for (const [d, f] of [['conversations', 'c-new.db'], ['annotations', 'c-new.pbtxt'], ['presence', 'c-new.lock'], ['presence', 'c-old.lock']]) {
+    fs.mkdirSync(path.join(GEM, d), { recursive: true }); fs.writeFileSync(path.join(GEM, d, f), 'x');
+  }
   const gone = []; gemDelete('c-new', (p) => { gone.push(...p.map((x) => path.relative(GEM, x))); p.forEach((x) => fs.rmSync(x, { recursive: true })); return { status: 0 }; });
   assert.deepEqual([gone, listGemini().map((s) => s.id), dbTitle('c-new'), 'c-new' in JSON.parse(fs.readFileSync(path.join(TEST_HOME, '.claude-multi', 'gem-titles.json'), 'utf8'))],
-    [[path.join('brain', 'c-new'), path.join('conversations', 'c-new.db')], ['c-old'], null, false]);
+    [[path.join('brain', 'c-new'), path.join('conversations', 'c-new.db'), path.join('annotations', 'c-new.pbtxt'), path.join('presence', 'c-new.lock')], ['c-old'], null, false]);
   assert.throws(() => gemRename('../x', 'y'), /找不到这个对话/);
   // the conversation each agy running holds, by its log (as agy 1.5 writes it): its pid on the first line, the last one it
   // names its own; a pid an older agy had too: the newest log's; one with no conversation yet: none

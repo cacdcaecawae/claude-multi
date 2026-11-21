@@ -1667,7 +1667,8 @@ function gemRename(id, name, running = false) {
 function gemDelete(id, bin = recycle) {
   if (!/^[\w-]{1,80}$/.test(id)) throw new Error('找不到这个对话');
   const a = path.join(GEMINI_HOME, 'antigravity-cli'), title = listGemini().find((x) => x.id === id)?.title ?? '这个对话';
-  const files = [path.join(a, 'brain', id), ...['', '-wal', '-shm'].map((x) => path.join(a, 'conversations', `${id}.db${x}`))].filter((p) => fs.existsSync(p));
+  const files = [path.join(a, 'brain', id), ...['', '-wal', '-shm'].map((x) => path.join(a, 'conversations', `${id}.db${x}`)),
+    path.join(a, 'annotations', `${id}.pbtxt`), path.join(a, 'presence', `${id}.lock`)].filter((p) => fs.existsSync(p));
   const r = files.length ? bin(files) : { status: 0 };
   if (r.status !== 0 || files.some((p) => fs.existsSync(p))) throw new Error(`删除失败：${(r.stderr || '').trim().split('\n')[0] || '可能有 agy 开着它的文件'}`);
   try { gemDb('delete from conversation_summaries where conversation_id = ?', id); } catch {}
