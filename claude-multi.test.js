@@ -523,7 +523,7 @@ if (SESSION0) {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'web.html'), 'utf8');
   const part = (re) => src.match(re)[0];
   const md = new Function('katex', `${part(/^const esc = .*$/m)}\n${part(/^const svg = .*$/m)}\n${part(/^const I = [\s\S]*?\};$/m)}\n${part(/^const table = [\s\S]*?^};$/m)}
-    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^const PEEKABLE = .*$/m)}\n${part(/^const peekLink = [\s\S]*?\};$/m)}\n${part(/^const BLOCKS = .*$/m)}\n${part(/^const block = [\s\S]*?'<hr>';$/m)}\n${part(/^const PV_LANG = .*$/m)}\n${part(/^const hl = [\s\S]*?^};$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
+    ${part(/^const LINK = [\s\S]*?^};$/m)}\n${part(/^const MATH = .*$/m)}\n${part(/^const tex = .*$/m)}\n${part(/^const PEEKABLE = .*$/m)}\n${part(/^const peekLink = [\s\S]*?\};$/m)}\n${part(/^const FILE_LINK = .*$/m)}\n${part(/^const fileLink = [\s\S]*?\};$/m)}\n${part(/^const BLOCKS = .*$/m)}\n${part(/^const block = [\s\S]*?'<hr>';$/m)}\n${part(/^const PV_LANG = .*$/m)}\n${part(/^const hl = [\s\S]*?^};$/m)}\n${part(/^function md\(t\) \{[\s\S]*?^\}$/m)}\nreturn md;`)(require('katex'));
   // a list's items, a rule and a quote: blocks, each line's end taken with it; a - inside a line, or in code, stays
   const h = md('看\n- 一\n  - 二\n---\n> 引\n正文 - 不是\n```\n- 代码\n```');
   assert.ok(h.startsWith('看\n<span class="li" style="margin-left:0em">一</span><span class="li" style="margin-left:1em">二</span><hr><span class="bq">引</span>正文 - 不是\n'), h);
@@ -534,6 +534,11 @@ if (SESSION0) {
   const lk = /^<a class="peek" data-peek="D:\\论文 04\\图7\.pptx" title="D:\\论文 04\\图7\.pptx">(<svg.*?<\/svg>)图7\.pptx<\/a> <a class="peek" data-peek="D:\/a\/" title="D:\/a\/">(<svg.*?<\/svg>)a<\/a> <code>npm i<\/code> <code>\/Users\/me\/x<\/code>$/.exec(pk);
   assert.ok(lk && lk[1] !== lk[2], pk); // a file's mark, a folder's
   assert.equal(md('`C:/x/runs/<id>` `D:\\a "b"`'), '<code>C:/x/runs/&lt;id&gt;</code> <code>D:\\a &quot;b&quot;</code>'); // a stand-in (runs/<id>), a ": no path
+  // a file linked as Gemini writes one: its words, opened by 预览 (file:///, %-escapes, a line number dropped; a plain
+  // path too, a folder's mark for a folder); a relative one, or a Mac's here, as written
+  const fl = md('[当前进展.md](file:///D:/paper/%E8%AE%BA%E6%96%87%2004/当前进展.md) 和 [a.js](D:\\x\\a.js:12) 和 [稿件](file:///D:/paper/稿件/) 和 [b](docs/b.md) [c](file:///Users/me/c.md)');
+  const fk = /^<a class="peek" data-peek="D:\/paper\/论文 04\/当前进展\.md" title="[^"]+">(<svg.*?<\/svg>)当前进展\.md<\/a> 和 <a class="peek" data-peek="D:\\x\\a\.js" [^>]+>(<svg.*?<\/svg>)a\.js<\/a> 和 <a class="peek" data-peek="D:\/paper\/稿件\/" [^>]+>(<svg.*?<\/svg>)稿件<\/a> 和 \[b\]\(docs\/b\.md\) \[c\]\(file:\/\/\/Users\/me\/c\.md\)$/.exec(fl);
+  assert.ok(fk && fk[1] === fk[2] && fk[1] !== fk[3], fl);
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
   assert.ok(t.includes('<tr><td><b>A. 离线</b></td><td><code>x</code> 快</td></tr>'), t);

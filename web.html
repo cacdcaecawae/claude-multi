@@ -3706,8 +3706,13 @@ const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: 
 // (/Users/…; under its usual tops, not a /command); on Windows one of those is a Mac's, out of reach
 const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, MAC_PEEKABLE = /^\/(?:Users|Volumes|private|tmp|Applications|Library|opt)\/(?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, peekable = (c) => PEEKABLE.test(c) || (typeof state !== 'undefined' && state?.win === false && MAC_PEEKABLE.test(c));
 // as Codex shows one: its kind's mark and its name (a folder's: one ending in \ or /, or with no .ext), the whole path on hover
-const peekLink = (c) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || c, dir = /[\\/]$/.test(c) || !/\.\w{1,8}$/.test(n);
-  return `<a class="peek" data-peek="${c}" title="${c}">${svg(dir ? I.folder : I.file)}${n}</a>`; };
+const peekLink = (c, words) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || c, dir = /[\\/]$/.test(c) || !/\.\w{1,8}$/.test(n);
+  return `<a class="peek" data-peek="${c}" title="${c}">${svg(dir ? I.folder : I.file)}${words ?? n}</a>`; };
+// a file of this PC linked as Gemini writes one, [名字](file:///D:/…) (or [名字](D:\…)): its words as such a link, its
+// %-escapes read, a line number after it dropped; one that isn't a path of this PC (relative, a Mac's here) as written
+const FILE_LINK = /\[([^\]\n]+)\]\((?:file:\/\/)?(\/?[A-Za-z]:[\\/][^\s()<>"`]*|\/[^\s()<>"`]*)\)/g;
+const fileLink = (m, words, u) => { let p; try { p = decodeURIComponent(u.replace(/&amp;/g, '&')).replace(/^\/(?=[A-Za-z]:)/, '').replace(/(?::\d+){1,2}$|#L\d+(?:-L?\d+)?$/, ''); } catch { return m; }
+  return peekable(p) && !p.includes('"') ? peekLink(esc(p), words) : m; };
 // a line as a list's item (- or *, indented by its spaces), a rule (---) or a quote (> ): a block of its own, its line's end
 // taken with it (else pre-wrap draws an empty line after it); an item's wrapped lines start under its words, not its dot
 const BLOCKS = /^( *)[-*] (.*)\n?|^ *(?:-{3,}|\*{3,}) *(?:\n|$)|^&gt; ?(.*)\n?/gm;
@@ -3742,7 +3747,7 @@ function md(t) {
     const math = [];
     p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
     return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(/`([^`\n]+)`/g, (m, c) => (peekable(c) ? peekLink(c) : `<code>${c}</code>`))
-      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)
+      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(FILE_LINK, fileLink).replace(LINK, link)
       .replace(/\u0000(\d+)\u0000/g, (_, k) => tex(...math[k]));
   }).join('');
 }
@@ -3752,7 +3757,10 @@ function md(t) {
 // opened in turn (← one up). Esc, ✕ or a click outside closes it
 const OFFICE = /\.(pptx?|docx?|xlsx?|rtf)$/i, warmed = new Set();
 const peekWarm = (text) => {
-  for (const [, p] of String(text).matchAll(/`([A-Za-z]:[\\/][^`\n<>|?*"]*)`/g)) if (OFFICE.test(p) && !warmed.has(p)) { warmed.add(p); fetch('/api/peek?' + new URLSearchParams({ path: p, warm: 1 })).catch(() => {}); }
+  for (const [, c, l] of String(text).matchAll(/`([A-Za-z]:[\\/][^`\n<>|?*"]*)`|\]\((?:file:\/\/\/?)?([A-Za-z]:[\\/][^\s()<>"`]*)\)/g)) { // (in `code`, or linked as Gemini does)
+    let p = c; if (l) try { p = decodeURIComponent(l); } catch { continue; }
+    if (OFFICE.test(p) && !warmed.has(p)) { warmed.add(p); fetch('/api/peek?' + new URLSearchParams({ path: p, warm: 1 })).catch(() => {}); }
+  }
 };
 const pv = { tabs: [], on: null, el: document.createElement('aside') }; // the tabs, each { p, body, dir, q }: a file's or a folder's
 const pvName = (p) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
