@@ -12,6 +12,7 @@ const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
+let termGem = false; // one whose screen shows agy at work (its spinner line over its box)
 const openBodies = []; // what each open asked for
 let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
 let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
@@ -54,6 +55,7 @@ const server = http.createServer((req, res) => {
     const osc = (t) => `event: data\ndata: ${JSON.stringify(`x\x1b]52;c;${Buffer.from(t).toString('base64')}\x07y`)}\n\n`;
     res.write(osc('旧的复制'));
     if (termBusy) res.write(`event: data\ndata: ${JSON.stringify('\r\n✻ Thinking… (3s · esc to interrupt)\r\n')}\n\n`);
+    if (termGem) res.write(`event: data\ndata: ${JSON.stringify('\r\n> 你是什么模型\r\n⣟  Generating...\r\n────────\r\n')}\n\n`);
     setTimeout(() => res.write(osc('终端里复制的中文')), 300);
     return;
   }
@@ -531,7 +533,7 @@ const press = async (key, shift = false) => {
   await evaluate("document.querySelector('[data-kind=\"gem\"]').click()");
   assert.deepEqual(await evaluate("[...document.querySelectorAll('#view [data-open]')].map((r) => r.dataset.open)"), ['GEM1']);
   await evaluate("document.querySelector('[data-kind=\"all\"]').click()");
-  historyId = 'GEM1'; histFeed = [{ role: 'user', text: 'hi', at: 1 }, { role: 'claude', text: 'Hi! How can I help you today?' }];
+  historyId = 'GEM1'; histFeed = [{ role: 'user', text: 'hi', at: 1 }, { role: 'claude', text: 'Hi! How can I help you today?' }]; termGem = true;
   await evaluate("document.querySelector('#view [data-open=\"GEM1\"]').click()"); // (one not running: started, as a Claude one)
   const rb = await opened();
   assert.deepEqual([rb.id, rb.acct, rb.gem], ['GEM1', 1, true]);
@@ -539,7 +541,10 @@ const press = async (key, shift = false) => {
   await until("focusG.active.el.querySelector('.who')");
   assert.deepEqual(await evaluate("[focusG.active.id, !!focusG.active.el.querySelector('.seg'), focusG.active.el.querySelector('.seg .on').dataset.v, focusG.active.el.querySelector('.who').textContent]"), ['GEM1', true, 'hist', 'Gemini']);
   assert.ok(histUrls.some((u) => /[?&]gem=1/.test(u) && /id=GEM1/.test(u)), histUrls.join(' '));
-  historyId = 'A'; histFeed = null;
+  // agy at work on its screen: 正在回复 at once (the list's word comes seconds later), its tab turning too
+  await until("focusG.active.live === 'busy'");
+  assert.equal(await evaluate("focusG.active.el.querySelector('.live .busy')?.textContent"), 'Gemini 正在回复');
+  historyId = 'A'; histFeed = null; termGem = false;
   await evaluate('closeConv(focusG.active)');
   assert.ok(openBodies.every((b) => b.live && b.gem), JSON.stringify(openBodies)); // any more: reconnects to it, never a second agy
   openBodies.length = 0;
