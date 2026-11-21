@@ -191,7 +191,13 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .kinds button.on { background: var(--sel); color: var(--fgHi); font-weight: 500; }
   .kinds button svg { width: 15px; height: 15px; margin: 2px auto; } /* a kind's mark (Claude's, OpenAI's, Antigravity's), in the middle as the words were */
   @media (hover: hover) { .kinds button:not(.on):hover { color: var(--fgHi); } }
-  .sheet .seg.kind { display: inline-flex; margin-top: 12px; } .sheet .seg.kind button { padding: 3px 16px; font-size: 13px; } /* 新对话: Claude or GPT */
+  /* 新对话's first step: Claude, GPT or Gemini, their marks big in the middle of the screen */
+  .kindPick { display: flex; gap: 10px; margin-top: 6px; }
+  .kindPick button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 6px 14px; border: 1px solid var(--popB); border-radius: 12px; font-size: 14px; color: var(--fg); }
+  .kindPick button:hover:not(:disabled), .kindPick button:focus-visible { background: var(--sel); }
+  .kindPick button:disabled { opacity: .4; cursor: default; }
+  .kindPick i { display: block; width: 40px; height: 40px; } .kindPick i svg { display: block; width: 100%; height: 100%; }
+  .kindPick small { font-size: 11px; color: var(--fg3); margin-top: -4px; }
   /* 搜索对话: the box, the conversations found under it, the one Enter opens marked */
   #findList { max-height: min(55dvh, 480px); overflow-y: auto; margin: 8px -8px 0; }
   .empty { color: var(--fg3); text-align: center; padding: 20px 12px; }
@@ -1513,7 +1519,7 @@ function renderChats() {
         <button class="ico fnew" data-newoai title="新的 GPT 聊天">${svg(I.plus)}</button>`, oai.map(line).join(''), 'dir') : '')
       + (dirs.size ? [...dirs].map(([cwd, list]) => sec('d:' + cwd,
       `<i class="fc">${svg(I.folder)}</i><i class="fo">${svg(I.folderOpen)}</i><span class="t" title="${esc(cwd)}">${esc(base(cwd) || cwd)}</span>${groupDot(list)}
-        <button class="ico fnew" data-newin="${esc(cwd)}" title="在这里开新对话（用推荐的账号）">${svg(I.plus)}</button>`,
+        <button class="ico fnew" data-newin="${esc(cwd)}" title="在这里开新对话">${svg(I.plus)}</button>`,
       list.map(line).join(''), 'dir')).join('') : oai.length ? '' : '<div class="empty">还没有对话</div>');
   }
   markRows();
@@ -1547,7 +1553,7 @@ function popMenu(title, list, x, y) {
 function paneMenu(c, b) {
   const mac = c.mac || state?.sessions.find((x) => x.id === c.id)?.mac, cwd = c.dir(), r = b.getBoundingClientRect();
   const off = isButler({ cwd }) ? '管家的文件夹里不开新对话' : !c.g ? '在管家里看的对话：回到对话列表再开' : !cwd && !mac ? '不知道它的文件夹' : '';
-  const where = !mac ? `在 ${base(cwd)} 里，用${c.gem ? ' A' : c.gpt ? ' G' : '账号 '}${c.acct ?? '?'}` : cwd && !cwd.startsWith('/') ? `在 ${base(cwd)} 里，用 ${macName(mac)} 的账号` : `在 ${macName(mac)} 的工作文件夹里`;
+  const where = !mac ? `在 ${base(cwd)} 里` : cwd && !cwd.startsWith('/') ? `在 ${base(cwd)} 里，用 ${macName(mac)} 的账号` : `在 ${macName(mac)} 的工作文件夹里`;
   menuFor = { pane: c };
   popMenu(c.title, [
     ['fresh', '新对话', off || where, !off],
@@ -1627,13 +1633,14 @@ $('#side').onclick = (e) => {
   if (b.matches('[data-new]')) return newSheet();
   if (b.matches('[data-find]')) return findSheet();
   if (b.matches('[data-kind]')) { listKind = b.dataset.kind; save(); return renderChats(); }
-  if (b.matches('[data-newin]')) { // a folder's ＋ (not its fold): started there at once, on the recommended account
+  if (b.matches('[data-newin]')) { // a folder's ＋ (not its fold): which of them, then started there at once, on that kind's first account
     e.preventDefault();
-    if (b.dataset.newin.startsWith('/')) { // a Mac's folder: one there, on the Mac its conversations here are on
-      const mac = state.sessions.find((x) => x.mac && x.cwd === b.dataset.newin)?.mac ?? 'mac';
+    const dir = b.dataset.newin;
+    if (dir.startsWith('/')) { // a Mac's folder: one there, on the Mac its conversations here are on
+      const mac = state.sessions.find((x) => x.mac && x.cwd === dir)?.mac ?? 'mac';
       return addConv(focusG, makeConv({ mac, open: true }, macName(mac)));
     }
-    return addConv(focusG, makeConv({ dir: b.dataset.newin, acct: (state.usage.rec ?? 0) + 1 }, base(b.dataset.newin) || '新对话'));
+    return kindSheet(`在「${base(dir) || dir}」开新对话`, (k) => addConv(focusG, makeConv({ dir, acct: kindAcct(k), gpt: k === 'gpt', gem: k === 'gem' }, base(dir) || '新对话')), true);
   }
   if (b.matches('[data-newoai]')) { e.preventDefault(); return addConv(focusG, makeOai(null, '新对话')); }
   if (b.matches('[data-bell]')) { listMode = listMode === 'run' ? 'dirs' : 'run'; save(); return renderChats(); }
@@ -2165,12 +2172,27 @@ async function renderTokens() {
       ${a.mac ? '' : `<div class="m">${esc(a.label)}</div>`}</div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">${about(a.usd)}${a.plus != null ? `<span title="这台 Mac 上其他文件夹的 Claude Code 用量，不算进上面的任何合计"> + ${usd(a.plus)}</span>` : ''}</div></div></div>`).join('')}</div>`;
 }
 
-function newSheet() {
+// 新对话, wherever it's asked for (the ＋ over the list, a folder's ＋, a conversation's ⋯): first which of them, Claude,
+// GPT or Gemini, by their marks in the middle of the screen; one with no account can't be picked (GPT in a folder: a
+// Codex account; else the OpenAI key does too). Only Claude there: at once. then(kind): 'claude', 'gpt' or 'gem'
+const KINDS = [['claude', SPARK, 'Claude', '#d97757'], ['gpt', OPENAI, 'GPT', 'var(--fgHi)'], ['gem', AGY_LOGO, 'Gemini', '']];
+function kindSheet(title, then, folder = false) {
   if (!state) return toast('还在加载，稍等');
+  const ok = { claude: true, gpt: !!(state.gpt?.length || (!folder && state.oai)), gem: !!state.gemini?.length };
+  if (!ok.gpt && !ok.gem) return then('claude');
+  $('#sheetIn').innerHTML = `<div class="stitle">${esc(title)}</div><div class="kindPick">${KINDS.map(([k, logo, name, c]) =>
+    `<button data-k="${k}"${ok[k] ? '' : ' disabled'}><i${c ? ` style="color:${c}"` : ''}>${logo}</i>${name}${ok[k] ? '' : '<small>没有账号</small>'}</button>`).join('')}</div>`;
+  $('#sheetIn').onclick = (e) => { const b = e.target.closest('[data-k]'); if (b && !b.disabled) { sheetOff(); then(b.dataset.k); } };
+  $('#sheet').classList.add('on', 'mid');
+}
+// the account a new one of that kind starts on: Claude's recommended, GPT's first, Gemini's the one on
+const kindAcct = (k) => (k === 'gpt' ? 1 : k === 'gem' ? (state.gemini ?? []).findIndex((g) => g.on) + 1 || 1 : (state.usage.rec ?? 0) + 1);
+function newSheet(kind) {
+  if (!state) return toast('还在加载，稍等');
+  if (!kind) return kindSheet('新对话', newSheet);
   const u = state.usage, dirs = u.projects ?? [], gp = state.gpt ?? [], gm = state.gemini ?? [];
-  // with a GPT account or an OpenAI key: Claude or GPT (with a Gemini account: Gemini too); under GPT, Codex (its accounts) or 聊天 (with the key: neither
-  // account nor folder), whichever there are
-  let gptOn = false, gemOn = false, chat = !gp.length, acct = (u.rec ?? 0) + 1, dir = dirs[0] ?? '', pick = null, places = null, seq = 0;
+  // under GPT, Codex (its accounts) or 聊天 (with the key: neither account nor folder), whichever there are
+  let gptOn = kind === 'gpt', gemOn = kind === 'gem', chat = !gp.length, acct = kindAcct(kind), dir = dirs[0] ?? '', pick = null, places = null, seq = 0;
   // 浏览: a window as Windows' own: the places on its left (最近, the home folder, 桌面 文档 下载, the drives), the
   // folder's folders and, dimmed, its files; a click goes into a folder, 选择 takes the one it's in. It opens on the
   // folder typed or picked; one that isn't there: 此电脑 (the places)
@@ -2212,9 +2234,7 @@ function newSheet() {
       : [...u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
         账号 ${i + 1}${u.rec === i ? ' · 推荐' : ''}${a.api ? ' · 按用量计费' : a.runway != null ? ` · 可用 ${a.runway}h` : ''}</button>`),
         ...(state.macs ?? []).map((m) => `<button class="opt ${mac?.id === m.id ? 'on' : ''}" data-a="${esc(m.id)}">${esc(m.label)}</button>`)];
-    $('#sheetIn').innerHTML = `<div class="stitle">新对话</div>
-      ${gp.length || state.oai || gm.length ? `<div class="seg kind">${[['', 'Claude'], (gp.length || state.oai) && ['1', 'GPT'], gm.length && ['m', 'Gemini']].filter(Boolean)
-        .map(([v, l]) => `<button data-g="${v}"${v === (gemOn ? 'm' : gptOn ? '1' : '') ? ' class="on"' : ''}>${l}</button>`).join('')}</div>` : ''}
+    $('#sheetIn').innerHTML = `<div class="stitle">新的 ${gemOn ? 'Gemini' : gptOn ? 'GPT' : 'Claude'} 对话</div>
       ${gptOn && gp.length && state.oai ? `<div class="opts" style="margin-top:12px">${[['', 'Codex：在文件夹里写代码'], ['1', '聊天：用 API key，按量计费']]
         .map(([v, l]) => `<button class="opt ${!!v === chat ? 'on' : ''}" data-chat="${v}">${l}</button>`).join('')}</div>` : ''}
       ${oai ? `<div class="m" style="margin-top:12px;white-space:normal">直接和 GPT-6 Astra 聊天，能联网、看图片和文件。输入框旁边可以选模式（普通，或 ChatGPT 的 GPT-6 Pro 那种 Pro）和思考强度。
@@ -2226,10 +2246,7 @@ function newSheet() {
       ${mac ? `<div class="m" style="margin-top:8px;white-space:normal">${dir ? `在 ${esc(mac.label)} 上的 ${esc(mac.dir)}/${esc(base(dir))} 里运行，用那边的账号，通过 ssh 改你电脑上这个文件夹里的文件。`
         : `直接在 ${esc(mac.label)} 上的 ${esc(mac.dir)} 里运行，用那边的账号，不对应你电脑上的文件夹。`}</div>` : ''}`}
       <div class="btns" style="margin-top:14px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="start" style="flex:2">开始</button></div>`;
-    // the first account of the kind picked (Gemini's: the one on)
-    const kindTo = () => { acct = gptOn && !chat ? 1 : gemOn ? gm.findIndex((g) => g.on) + 1 || 1 : (u.rec ?? 0) + 1; draw(); };
-    document.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { gptOn = b.dataset.g === '1'; gemOn = b.dataset.g === 'm'; kindTo(); }));
-    document.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => { chat = !!b.dataset.chat; kindTo(); }));
+    document.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => { chat = !!b.dataset.chat; acct = 1; draw(); }));
     // a Mac: its own folder there unless one here is picked; back to an account here, a folder here again
     document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => {
       if (macOf(b.dataset.a)) { if (!macOf(acct)) dir = ''; acct = b.dataset.a; } else { acct = +b.dataset.a; dir ||= dirs[0] ?? ''; }
@@ -2304,7 +2321,7 @@ function makeGroup(ref, left) { // after ref (or before it: left), or last
   g.el.querySelector('.list').onclick = () => { sideOn = !sideOn; drawSide(); save(); };
   g.el.querySelector('.split').onclick = () => split(g);
   g.el.querySelector('.fold').onclick = () => fold(g, !g.min);
-  g.el.querySelector('[data-new]').onclick = newSheet;
+  g.el.querySelector('[data-new]').onclick = () => newSheet();
   g.el.querySelector('[data-shut]').onclick = () => dropGroup(g);
   g.strip.onclick = (e) => {
     const x = e.target.closest('[data-x]'), t = e.target.closest('[data-i]');
@@ -3322,12 +3339,15 @@ function makeConv(body, title) {
   c.say = (text) => send(text);
   c.close = () => { c.closed = true; c.sleep(); ro.disconnect(); clearTimeout(liveT); clearTimeout(fitT); term?.dispose(); term = null; key = null; switching = 0; el.remove(); };
   c.claim = claim; c.swap = swap; c.end = endIt;
-  // ⋯'s 新对话: another one beside it, in its folder, on its account (a Mac's: that Mac, its folder here if it has one)
+  // ⋯'s 新对话: another one beside it, in its folder: which of them first, then on its account if it's the same kind, else
+  // that kind's first (a Mac's: that Mac, its folder here if it has one, Claude only)
   c.dir = () => (c.id && state?.sessions.find((x) => x.id === c.id)?.cwd) || body.dir || '';
-  c.fresh = () => {
+  c.fresh = (k) => {
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null, cwd = c.dir(), mac = c.mac || s?.mac, here = cwd && !cwd.startsWith('/');
+    if (!mac && !k) return kindSheet(`在「${base(cwd) || cwd}」开新对话`, c.fresh, true);
+    const same = k === (c.gem ? 'gem' : c.gpt ? 'gpt' : 'claude');
     const n = mac ? makeConv({ mac, open: true, ...(here && { dir: cwd }) }, here ? base(cwd) : macName(mac)) // not for a folder here: the Mac's own folder
-      : makeConv({ dir: cwd, acct: c.acct ?? (s ? s.acct + 1 : 1), gpt: c.gpt, gem: c.gem }, base(cwd) || '新对话');
+      : makeConv({ dir: cwd, acct: same ? c.acct ?? (s ? s.acct + 1 : 1) : kindAcct(k), gpt: k === 'gpt', gem: k === 'gem' }, base(cwd) || '新对话');
     n.joins = (state?.projects ?? []).filter((p) => c.id && p.ids.includes(c.id)).map((p) => p.id); // added once it has a record
     addConv(c.g, n);
   };

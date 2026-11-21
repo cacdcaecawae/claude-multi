@@ -223,8 +223,11 @@ const press = async (key, shift = false) => {
   // under OpenAI's mark with how long it took
   const until = async (expr) => { for (let i = 0; i < 100 && !(await evaluate(expr)); i++) await new Promise((r) => setTimeout(r, 50)); assert.ok(await evaluate(expr), expr); };
   await evaluate("document.querySelector('[data-new]').click()");
-  await evaluate("document.querySelector('[data-g=\"1\"]').click()");
-  assert.deepEqual(await evaluate("[!!document.querySelector('#dirIn'), !!document.querySelector('[data-chat]')]"), [false, false]);
+  // (first which of them, in the middle: Claude, and GPT by the key; Gemini with no account can't be picked)
+  assert.deepEqual(await evaluate("[document.querySelector('#sheet').classList.contains('mid'), ...[...document.querySelectorAll('#sheetIn [data-k]')].map((b) => `${b.dataset.k}:${b.disabled}:${b.textContent}`)]"),
+    [true, 'claude:false:Claude', 'gpt:false:GPT', 'gem:true:Gemini没有账号']);
+  await evaluate("document.querySelector('[data-k=\"gpt\"]').click()");
+  assert.deepEqual(await evaluate("[!!document.querySelector('#dirIn'), !!document.querySelector('[data-chat]'), document.querySelector('#sheet').classList.contains('mid')]"), [false, false, false]);
   await evaluate("document.querySelector('#start').click()");
   assert.equal(await evaluate("document.querySelector('.pane.on .bset').textContent"), '普通 · 中');
   await evaluate("document.querySelector('.pane.on .bset').click()");
@@ -306,7 +309,7 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate(`(() => { state.macs = [{ id: 'mac', label: 'Mac mini', dir: '~/Desktop/mine', host: 'mini' },
       { id: 'la-a1', label: 'Mac a1', dir: '~/work', host: 'mymac', icon: 'rainbow' }]; state.usage.projects = ['F:/proj'];
     const on = () => document.querySelector('#sheetIn [data-d].on')?.dataset.d ?? 'none', text = () => document.querySelector('#sheetIn').textContent;
-    newSheet(); const a = on(); document.querySelector('#sheetIn [data-a="mac"]').click(); const b = on();
+    newSheet('claude'); const a = on(); document.querySelector('#sheetIn [data-a="mac"]').click(); const b = on();
     const said = text().includes('直接在 Mac mini 上的 ~/Desktop/mine 里运行');
     document.querySelector('#sheetIn [data-a="la-a1"]').click(); const la = on() + '/' + text().includes('直接在 Mac a1 上的 ~/work 里运行');
     document.querySelector('#sheetIn [data-a="1"]').click(); const c = on(); sheetOff(); state.usage.projects = [];
@@ -320,7 +323,7 @@ const press = async (key, shift = false) => {
     const names = () => evaluate("[...document.querySelectorAll('.pkList .pkRow')].map((b) => (b.tagName === 'BUTTON' ? '' : '-') + b.textContent).join(' | ')");
     const pkPath = () => evaluate("document.querySelector('#pkPath').value");
     const into = (p) => evaluate(`document.querySelector('.pkList [data-in="${p}"]').click()`);
-    await evaluate("{ newSheet(); const i = document.querySelector('#dirIn'); i.value = 'Z:/nope'; i.dispatchEvent(new Event('input')); document.querySelector('#browse').click() }");
+    await evaluate("{ newSheet('claude'); const i = document.querySelector('#dirIn'); i.value = 'Z:/nope'; i.dispatchEvent(new Event('input')); document.querySelector('#browse').click() }");
     await until("!!document.querySelector('.pkList')");
     assert.deepEqual([await names(), await pkPath(), await evaluate("document.querySelector('#pkOk').disabled"), await evaluate("document.querySelector('#sheet').classList.contains('wide')")],
       ['ly | 桌面 | D:', '', true, true]);
@@ -392,7 +395,7 @@ const press = async (key, shift = false) => {
     findSheet(projOf(1)); out.push([...document.querySelectorAll('#findList [data-open]')].map((r) => r.dataset.open).join());
     document.querySelector('#findList [data-open="C"]').click(); await wait(400); sheetOff(); out.push(projOf(1).ids.join());
     menuAt = 0; rowMenu('A', 10, 10, '1'); pick('out').click(); await wait(400); out.push(projOf(1).ids.join()); $('#cmenu').hidden = true; sheetOff();
-    const c = makeConv({ id: 'C' }, 'other folder'); addConv(focusG, c); c.fresh(); const n = focusG.active; out.push(n.joins.join());
+    const c = makeConv({ id: 'C' }, 'other folder'); addConv(focusG, c); c.fresh('claude'); const n = focusG.active; out.push(n.joins.join());
     closeConv(n); closeConv(c); await projPost({ op: 'drop', id: 1 }); listMode = 'dirs'; await load(); out.push($('#sideTitle').textContent);
     return out.join(' | '); })()`), 'proj,true,true,项目,true,A | C | A,gone-1,C | gone-1,C | 1 | 对话');
   console.log('browser 项目 ok');
@@ -596,8 +599,18 @@ const press = async (key, shift = false) => {
   await evaluate('closeConv(focusG.active)');
   assert.ok(openBodies.every((b) => b.live && b.gem), JSON.stringify(openBodies)); // any more: reconnects to it, never a second agy
   openBodies.length = 0;
+  // a folder's ＋ asks which first too (GPT there: a Codex account only, the key isn't one); Gemini picked: started at
+  // once in that folder, on the account on
+  await evaluate("menuAt = 0; listMode = 'dirs'; renderChats(); document.querySelector('#view [data-newin=\"C:/test\"]').click()");
+  assert.deepEqual(await evaluate("[document.querySelector('#sheetIn .stitle').textContent, ...[...document.querySelectorAll('#sheetIn [data-k]')].map((b) => `${b.dataset.k}:${b.disabled}`)]"),
+    ['在「test」开新对话', 'claude:false', 'gpt:true', 'gem:false']);
+  await evaluate("document.querySelector('#sheetIn [data-k=\"gem\"]').click()");
+  const fb = await opened();
+  assert.deepEqual([fb.dir, fb.acct, fb.gem, await evaluate("document.querySelector('#sheet').classList.contains('on')")], ['C:/test', 1, true, false]);
+  await evaluate('closeConv(focusG.active)');
+  openBodies.length = 0;
   await evaluate("document.querySelector('[data-new]').click()");
-  await evaluate("document.querySelector('[data-g=\"m\"]').click()");
+  await evaluate("document.querySelector('[data-k=\"gem\"]').click()");
   assert.equal(await evaluate("[...document.querySelectorAll('#sheetIn [data-a]')].map((b) => b.textContent).join()"), 'A1 · g@example.com');
   await evaluate("{ const i = document.querySelector('#dirIn'); i.value = 'C:/test'; i.dispatchEvent(new Event('input')); document.querySelector('#start').click(); }");
   const nb = await opened();
