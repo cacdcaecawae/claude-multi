@@ -949,7 +949,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
 <script src="/screen.js"></script>
 <script src="/ext.js"></script>
 <script>
-/* global parseScreen */ // screen.js
+/* global parseScreen, parseAgyScreen */ // screen.js
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 // 代理额度 (quota-panel.js): the quotas behind a proxy, shown when the service has a source for them (state.quota: your
@@ -2949,21 +2949,12 @@ function makeConv(body, title) {
   hist.addEventListener('load', () => { if (pinned) hist.scrollTop = hist.scrollHeight; }, true); // a picture came in under you
   hist.addEventListener('scroll', () => { pinned = hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80; endBtn(); if (hist.scrollTop < 300) loadOlder(); });
   new ResizeObserver(() => { if (pinned) hist.scrollTop = hist.scrollHeight; }).observe(hist);
-  // Off the terminal's screen (screen.js, shared with the 管家's commands): Claude at work, a menu up. agy's: at work, its
-  // spinner row over its box (「⣟  Generating...」), there the moment it starts; a question (Run this command?), numbered
-  // options over 「↑/↓ Navigate · …」 with > at the current one, read as Claude's with that > as ❯ (your messages above
-  // and its box start > too: the last numbered one only); what waits in its queue, 「▸ … (alt+m to send immediately)」
+  // Off the terminal's screen (screen.js, shared with the 管家's commands): Claude at work, a menu up; agy's (at work, a
+  // question, its Write-in open, its queue)
   function screen() {
     const b = term.buffer.active, rows = [];
     for (let i = 0; i < term.rows; i++) rows.push(b.getLine(b.baseY + i)?.translateToString(true) ?? '');
-    if (!c.gem) return parseScreen(rows);
-    const spin = rows.map((r) => /^\s*[⠀-⣿]\s+(\S.*?)\s*$/.exec(r)).find(Boolean), foot = rows.findLastIndex((r) => /↑\/↓ Navigate/.test(r));
-    const up = rows.slice(0, Math.max(0, foot)), cur = up.findLastIndex((r) => /^\s*>\s*\d+\.\s/.test(r));
-    if (cur >= 0) up[cur] = up[cur].replace('>', '❯');
-    // its own question's 「Write-in...」 open (Your answer:, 「enter Submit · esc Back」): what's sent from here is the answer
-    const writing = foot < 0 && rows.some((r) => /enter Submit · esc Back/.test(r));
-    return { busy: spin ? [spin[0], spin[1], ''] : null, menu: cur >= 0 ? parseScreen(up).menu : null, writing,
-      queue: rows.map((r) => /^\s*▸\s+(.*?)\s*\(alt\+m to send immediately\)\s*$/.exec(r)?.[1]?.replace(/…$/, '')).filter(Boolean) };
+    return c.gem ? parseAgyScreen(rows) : parseScreen(rows);
   }
   function drawLive(toEnd) {
     const live = $p('.live');

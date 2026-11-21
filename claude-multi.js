@@ -2102,8 +2102,8 @@ const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLo
 const realDir = (d) => { try { return fs.realpathSync.native(path.resolve(d)); } catch { return path.resolve(d); } };
 const inLive = (d) => { const r = path.relative(realDir(__dirname), realDir(d)); return r === '' || (r !== '..' && !r.startsWith('..' + path.sep) && !path.isAbsolute(r)); };
 const LIVE_NO = `这是正在用的 claude-multi 代码，不能在这里改：在单独的副本（${__dirname}-dev 这类 git worktree）里新开对话，交代里写明建分支、发 PR`;
-function findChat(ref) { // a Claude conversation, a GPT one (gpt: true) or a GPT 聊天 one (oai: true), by its id or words of its title
-  const reg = load(), all = [...listSessions(reg), ...listGpt(reg), ...oaiList()], byId = all.find((s) => s.id === ref), hit = byId ? [byId] : all.filter((s) => ref && s.title.includes(ref));
+function findChat(ref) { // a Claude conversation, a GPT one (gpt: true), a Gemini one (gem: true) or a GPT 聊天 one (oai: true), by its id or words of its title
+  const reg = load(), all = [...listSessions(reg), ...listGpt(reg), ...listGemini(reg), ...oaiList()], byId = all.find((s) => s.id === ref), hit = byId ? [byId] : all.filter((s) => ref && s.title.includes(ref));
   if (hit.length === 1) return hit[0];
   if (!hit.length) throw new Error(`找不到「${ref ?? ''}」这个对话`);
   throw new Error(`「${ref}」对上了好几个对话，用编号指定：\n${hit.slice(0, 8).map((s) => `  ${s.id}  ${s.title}`).join('\n')}`);
@@ -2119,9 +2119,9 @@ const statusOf = (live) => { try { return alive(live.pid) ? JSON.parse(fs.readFi
 // A conversation's screen as its terminal shows it now (the question it waits on is only there: its record gets it once
 // answered): its stream, which the service begins with what's on it, written into a terminal of the same size here and
 // read once quiet; what's on it as the page reads it (screen.js). Live: one that ended since is not started again
-async function screenOf(id) {
-  const rows = await screenRows((await webPost('/api/open', { id, live: true })).key);
-  return rows && require('./screen.js').parseScreen(rows);
+async function screenOf(id, gem = false) { // (gem: a Gemini one's, its agy's screen)
+  const rows = await screenRows((await webPost('/api/open', { id, live: true, gem })).key), sc = require('./screen.js');
+  return rows && (gem ? sc.parseAgyScreen(rows) : sc.parseScreen(rows));
 }
 // a terminal's screen as its rows, once quiet (nothing new for `still` ms; `max` ms at most); null if nothing came. A GPT
 // conversation's too, for its Codex up before it's typed to
@@ -2196,13 +2196,42 @@ async function gptUntilReady(s, ms = 120000) { // as the web service tells it: a
   for (const end = Date.now() + ms; (await webPost(`/api/gpt?id=${encodeURIComponent(s.id)}`, null, 'GET')).busy; await sleep(2000))
     if (Date.now() >= end) throw new Error('它一直在忙，或者在等人确认（GPT 的确认还认不出来），没有发。用 chat look 看看，或让用户在网页上打开它');
 }
+// A Gemini one for the 管家's commands: done with its turn (its screen and its record) and asking nothing (a question:
+// told, not typed into); 2 minutes at most. Taken in: what it was sent is its last message from you (within 20 s)
+async function gemUntilReady(s, key, ms = 120000) {
+  for (const end = Date.now() + ms; ; await sleep(2000)) {
+    const sc = require('./screen.js').parseAgyScreen((await screenRows(key, { max: 6000, still: 800 })) ?? []);
+    if (sc.menu || sc.writing) throw new Error('它在等人回答问题，先用 chat look 看它在问什么');
+    const run = await webPost(`/api/gem?id=${encodeURIComponent(s.id)}`, null, 'GET');
+    if (!sc.busy && !run.busy) return;
+    if (Date.now() >= end) throw new Error('它一直在忙，没有发。用 chat look 看看');
+  }
+}
+async function gemWent(id, text) {
+  const flat = (t) => String(t ?? '').replace(/\s+/g, ' ').trim(), want = flat(text).slice(0, 40);
+  for (let k = 0; k < 20; k++, await sleep(1000)) if (flat(gemLast(id, true)).startsWith(want)) return true;
+  return false;
+}
 async function gptWent(home, id, text) {
   const flat = (t) => String(t ?? '').replace(/\s+/g, ' ').trim(), want = flat(text).slice(0, 40);
   for (let k = 0; k < 20; k++, await sleep(1000)) if (flat(gptLast(home, id, 'userMessage')).startsWith(want)) return true;
   return false;
 }
+// a question on its screen as the 管家 reads it: what it asks, its options (the cursor's marked), how to answer
+const menuSaid = (menu, id) => `\n\n它在问${menu.tabs ? `（一次好几题：${menu.tabs}）` : ''}：\n${menu.ask}\n`
+  + menu.opts.map((o) => `  ${o.n}. ${o.check == null ? '' : o.check ? '[✔] ' : '[ ] '}${o.label}${o.desc ? ' — ' + o.desc : ''}${o.n === menu.cur ? '  ← 光标在这' : ''}`).join('\n')
+  + `\n（用户交代过怎么选的，用 claude-multi chat pick ${id} <选项号> 回答；没交代就转告用户）`;
 async function chatLook(ref) {
   const s = findChat(ref);
+  if (s.gem) { // a Gemini one: where it runs (the web service, or a terminal window), at work or asking (its screen), its last answer
+    let run = null, sc = null;
+    try { run = await webPost(`/api/gem?id=${encodeURIComponent(s.id)}`, null, 'GET'); } catch {}
+    if (run?.pid) try { sc = await screenOf(s.id, true); } catch {}
+    const ans = gemLast(s.id) || '（还没有回答）', menu = sc?.menu;
+    const st = !run?.pid ? '没在运行' : menu ? '在等人回答' : sc?.writing ? '在等人填写回答' : sc?.busy || run.busy ? '正在回复' : '空闲';
+    return console.log(`「${s.title}」 ${s.id}\nGemini 账号 A${s.acct + 1} · ${s.cwd} · ${run?.pid ? (run.web ? '网页上 · ' : '电脑窗口里 · ') : ''}${st}\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}`
+      + (menu ? menuSaid(menu, s.id) : sc?.writing ? '\n\n它在等人填写一个回答（自己输入的那一项），让用户在网页上回答。' : ''));
+  }
   if (s.oai) { // a GPT 聊天 one: its mode and effort as last sent, its answer pending or not, its last answer (and what came after it)
     const c = oaiRead(s.id), ans = oaiLast(c) || '（还没有回答）', end = c.msgs.at(-1)?.role === 'note' ? c.msgs.at(-1).text : '';
     return console.log(`「${s.title}」 ${s.id}\nGPT 聊天 · ${oaiHow(c.opts ?? OAI_OPTS)} · ${c.pending ? `正在回答（已经 ${Math.max(1, Math.round((Date.now() - c.since) / 60000))} 分钟）` : '空闲'}`
@@ -2220,9 +2249,7 @@ async function chatLook(ref) {
   const ans = history(s.file).items.filter((m) => m.role === 'claude').pop()?.text ?? '（还没有回答）';
   const where = !s.pid ? '没在运行' : { busy: '正在回复', shell: '正在执行命令', waiting: '在等人回答', idle: '空闲' }[st] ?? '在运行';
   let out = `「${s.title}」 ${s.id}\n${s.mac ? s.who : `账号 ${s.acct + 1}`} · ${s.cwd} ·${s.pid ? (s.web ? '网页上 · ' : '电脑窗口里 · ') : ''}${where}\n\n最后的回答：\n${ans.length > 2000 ? '…' + ans.slice(-2000) : ans}`;
-  if (menu) out += `\n\n它在问${menu.tabs ? `（一次好几题：${menu.tabs}）` : ''}：\n${menu.ask}\n`
-    + menu.opts.map((o) => `  ${o.n}. ${o.check == null ? '' : o.check ? '[✔] ' : '[ ] '}${o.label}${o.desc ? ' — ' + o.desc : ''}${o.n === menu.cur ? '  ← 光标在这' : ''}`).join('\n')
-    + `\n（用户交代过怎么选的，用 claude-multi chat pick ${s.id} <选项号> 回答；没交代就转告用户）`;
+  if (menu) out += menuSaid(menu, s.id);
   else if (st === 'waiting') out += '\n\n它在等人处理，但屏幕上没认出选择题，让用户在网页上打开它看一下。';
   console.log(out);
 }
@@ -2244,6 +2271,16 @@ async function chatSay(ref, text, before, ask) { // ask: a GPT 聊天 one's mode
   if (s.oai) return oaiSay(s, text, ask);
   // its Claude runs there: one started for it here would never be found (waitLive reads this PC's accounts)
   if (s.mac) throw new Error('Mac 上的对话管家还发不了消息，请用户在网页上打开它');
+  if (s.gem) { // a Gemini one: its agy in the web service (continued there if it isn't; one in a terminal window: typed there), ready first
+    const { key } = await webPost('/api/open', { id: s.id, gem: true, cols: 120, rows: 40 });
+    await gemUntilReady(s, key);
+    await before?.(s.id);
+    await pasteEnter(key, text);
+    const went = await gemWent(s.id, text);
+    blog(`给「${s.title}」发了消息：${text.length > 40 ? text.slice(0, 40) + '…' : text}`, s.id);
+    console.log(went ? `已发给「${s.title}」，它开始干活了。` : `已发给「${s.title}」，但还没看到它收下，稍后用 chat look 看看。`);
+    return { id: s.id, title: s.title };
+  }
   if (s.gpt) { // a GPT one: its Codex in the web service (continued there if it isn't), up, and done with its turn first
     const { key } = await webPost('/api/open', { id: s.id, gpt: true, cols: 120, rows: 40 });
     const stuck = codexBlocked(await screenRows(key, { max: 20000, still: 1500 }));
@@ -2271,16 +2308,16 @@ async function chatSay(ref, text, before, ask) { // ask: a GPT 聊天 one's mode
 // ask: the question it was picked on; another one up by now (the first answered) isn't answered with it.
 // a tool's permission (Claude Code's "Do you want to proceed?", "…make this edit…?", "…allow this connection?"), not a
 // plan's "Would you like to proceed?": yours to answer, never the 管家's
-const asksPermission = (ask) => /\bDo you want to\b/i.test(ask ?? '');
-async function pickOn(id, n, ask, by = 'butler') {
-  const menu = (await screenOf(id))?.menu, o = menu?.opts.find((x) => x.n === Number(n));
+const asksPermission = (ask) => /\bDo you want to\b|Requesting permission for|Run this command\?/i.test(ask ?? ''); // (agy's too)
+async function pickOn(id, n, ask, by = 'butler', gem = false) {
+  const menu = (await screenOf(id, gem))?.menu, o = menu?.opts.find((x) => x.n === Number(n));
   if (!menu) throw new Error('它现在没在问选择题');
   if (by === 'butler' && asksPermission(menu.ask)) throw new Error('这是工具权限确认，要用户自己在网页上回答');
   if (ask != null && menu.ask !== ask) throw new Error('它问的已经变了，再看一下');
   if (menu.tabs || menu.opts.some((x) => x.check != null)) throw new Error('这是多选题，或者一次问了好几题，请用户在网页上点卡片回答');
   if (!o) throw new Error(`选项号要在 1 到 ${menu.opts.length} 之间`);
-  if (/^Type something/i.test(o.label)) throw new Error('「自己输入」这一项请用户在网页上回答');
-  const { key } = await webPost('/api/open', { id, live: true });
+  if (/^(Type something|Write-in)/i.test(o.label)) throw new Error('「自己输入」这一项请用户在网页上回答');
+  const { key } = await webPost('/api/open', { id, live: true, gem });
   for (let i = 0; i < Math.abs(o.n - menu.cur); i++) await webPost('/api/input', { key, by, data: o.n > menu.cur ? '\x1b[B' : '\x1b[A' });
   await webPost('/api/input', { key, by, data: '\r' });
   return o.label;
@@ -2289,17 +2326,46 @@ async function chatPick(ref, n) {
   const s = findChat(ref);
   if (s.oai) throw new Error('GPT 聊天不会问选择题');
   if (s.gpt) throw new Error('GPT 对话的选择题这里还选不了，请用户在网页上打开它回答');
-  if (!s.pid) throw new Error('它现在没在问选择题');
-  const label = await pickOn(s.id, n);
+  if (s.gem ? !(await webPost(`/api/gem?id=${encodeURIComponent(s.id)}`, null, 'GET')).pid : !s.pid) throw new Error('它现在没在问选择题');
+  const label = await pickOn(s.id, n, undefined, 'butler', !!s.gem);
   blog(`替你给「${s.title}」选了「${label}」`, s.id);
   console.log(`已替用户选了「${label}」。`);
 }
-async function chatNew(dir, text, n, before, gpt = false) {
+// a folder agy trusts from now on (in its own list, ~/.gemini's settings: no question to stop at in one started there)
+function gemTrust(dir, home = GEMINI_HOME) {
+  const f = path.join(home, 'antigravity-cli', 'settings.json');
+  let s = {};
+  try { const t = fs.readFileSync(f, 'utf8').trim(); s = t ? JSON.parse(t) : {}; } catch (e) { if (e.code !== 'ENOENT') return; }
+  const have = Array.isArray(s.trustedWorkspaces) ? s.trustedWorkspaces : [];
+  if (have.some((x) => sameDir(String(x), dir))) return;
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ ...s, trustedWorkspaces: [...have, path.resolve(dir)] }, null, 2) + '\n');
+}
+async function chatNew(dir, text, n, before, gpt = false, gem = false) {
   dir = path.resolve(dir ?? '');
   if (!isDir(dir)) throw new Error(`没有这个文件夹：${dir}`);
   if (sameDir(dir, HOME)) throw new Error('主文件夹 Claude 每次都要问是否信任，换一个具体的文件夹');
   if (inLive(dir)) throw new Error(LIVE_NO);
   if (!text) throw new Error('要给它第一句话');
+  if (gem) { // a Gemini one, on Gemini account n (the one on when none given), in the web service: its agy up, the first words typed
+    const all = geminiAccounts(), on = all.findIndex((g) => g.id === load().geminiOn) + 1;
+    n = n || on || 1;
+    if (!all[n - 1]) throw new Error(`没有 Gemini 账号 A${n}（用户要先运行 claude-multi new gemini 加一个）`);
+    gemTrust(dir);
+    const { key } = await webPost('/api/open', { dir, acct: n, gem: true, cols: 120, rows: 40 });
+    let up = false; // its box (a rule, > under it): it's ready
+    for (let k = 0; k < 10 && !up; k++) { const r = (await screenRows(key, { max: 4000, still: 1000 })) ?? []; up = r.some((x, i) => /^─{20}/.test(x) && /^>/.test(r[i + 1] ?? '')); if (!up) await sleep(1000); }
+    if (!up) throw new Error(`Gemini 账号 A${n} 的 agy 没能准备好，请用户在网页上新开一个 Gemini 对话看看`);
+    await webPost('/api/input', { key, by: 'butler', data: '\x1b' }); await sleep(600); // (its notice at the start away)
+    await pasteEnter(key, text);
+    let id = null; // its conversation once agy made it with the first message (the service finds it a few seconds on)
+    for (let k = 0; k < 30 && !id; k++, await sleep(1000)) id = (await webPost(`/api/history?key=${encodeURIComponent(key)}`, null, 'GET')).id ?? null;
+    if (!id) throw new Error('第一句已发出，但没找到它的对话编号：稍后用 chat look 按标题找它');
+    await before?.(id);
+    blog(`新开了对话（${path.basename(dir)}，Gemini 账号 A${n}）：${text.length > 40 ? text.slice(0, 40) + '…' : text}`, id);
+    console.log(`已在 Gemini 账号 A${n} 新建对话，编号 ${id}（文件夹 ${dir}）。第一句已发出。`);
+    return { id, title: '' };
+  }
   if (gpt) { // a GPT one, on GPT account n (G1 when none given), in the web service: its Codex up, the first words typed
     n = n || 1;
     if (!gptAccounts()[n - 1]) throw new Error(`没有 GPT 账号 G${n}（用户要先运行 claude-multi new gpt 加一个）`);
@@ -2346,9 +2412,9 @@ async function chat([sub, ...a]) {
     else if (sub === 'say') await chatSay(a[0], a.slice(1).join(' '), undefined, ask);
     else if (sub === 'pick') await chatPick(a[0], a[1]);
     else if (sub === 'new' && flag('--oai')) await oaiSay(null, a.join(' '), ask); // a GPT 聊天 one: no folder, all of it the first words
-    else if (sub === 'new') { const n = Number(String(opt('--acct') ?? '').replace(/^g/i, '')) || 0, gpt = flag('--gpt'); await chatNew(a[0], a.slice(1).join(' '), n, undefined, gpt); }
+    else if (sub === 'new') { const n = Number(String(opt('--acct') ?? '').replace(/^[ga]/i, '')) || 0, gpt = flag('--gpt'), gem = flag('--gemini'); await chatNew(a[0], a.slice(1).join(' '), n, undefined, gpt, gem); }
     else if (sub === 'tell') { if (!a.join(' ').trim()) throw new Error('要告诉用户什么？'); await webPost('/api/tell', { text: a.join(' ') }); console.log('已发到用户手机。'); }
-    else console.log('claude-multi chat look <对话> | wait [<对话>] --until 15:40 [--note 备注] | say <对话> <消息> [--mode pro --effort max（GPT 聊天）] | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N] [--gpt（GPT 对话，--acct 是 G 几）] | new --oai <第一句话> [--mode standard|pro] [--effort low|medium|high|xhigh|max]（GPT 聊天） | tell <要告诉用户的话>');
+    else console.log('claude-multi chat look <对话> | wait [<对话>] --until 15:40 [--note 备注] | say <对话> <消息> [--mode pro --effort max（GPT 聊天）] | pick <对话> <选项号> | new <文件夹> <第一句话> [--acct N] [--gpt（GPT 对话，--acct 是 G 几）] [--gemini（Gemini 对话，--acct 是 A 几，不写就是在线的那个）] | new --oai <第一句话> [--mode standard|pro] [--effort low|medium|high|xhigh|max]（GPT 聊天） | tell <要告诉用户的话>');
   } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
 }
 // claude-multi ticket …: the 管家's tickets, which the web service keeps. give: to a new conversation (a folder given)
@@ -2363,7 +2429,7 @@ async function ticket([sub, ...a]) {
       blog(`${inferred ? '提了个建议' : '新工单'} #${t.id}「${t.name}」`);
       console.log(`已建工单 #${t.id}「${t.name}」。${inferred ? '这是你自己提的：用户同意了再 ticket give。' : '接着用 ticket give 派给一个对话。'}`);
     } else if (sub === 'give') {
-      const n = Number(String(opt('--acct') ?? '').replace(/^g/i, '')) || 0, gpt = flag('--gpt'), [id, where, ...rest] = a, text = rest.join(' ');
+      const n = Number(String(opt('--acct') ?? '').replace(/^[ga]/i, '')) || 0, gpt = flag('--gpt'), gem = flag('--gemini'), [id, where, ...rest] = a, text = rest.join(' ');
       const t = (await webPost('/api/tickets', null, 'GET')).find((x) => x.id === Number(id));
       if (!t) throw new Error(`没有工单 #${id}`);
       if (t.end) throw new Error(`工单 #${t.id} 已经结束了`);
@@ -2377,7 +2443,7 @@ async function ticket([sub, ...a]) {
       if (!dir && findChat(where).oai) throw new Error('GPT 聊天只能问问题，不能在电脑上干活，不派工单：要问它就用 chat say');
       if (inLive(dir ? where : findChat(where).cwd)) throw new Error(LIVE_NO);
       const bind = (conv) => webPost('/api/ticket', { op: 'give', id: t.id, n: (t.n ?? 0) + 1, conv, title: dir ? path.basename(path.resolve(where)) : findChat(conv).title });
-      const c = dir ? await chatNew(where, brief, n, bind, gpt) : await chatSay(where, brief, bind); // to a GPT one going already: it is one
+      const c = dir ? await chatNew(where, brief, n, bind, gpt, gem) : await chatSay(where, brief, bind); // to a GPT or Gemini one going already: it is one
       console.log(`工单 #${t.id} 已交给${dir ? '新开的对话' : `「${c.title}」`}（编号 ${c.id}）。它停下时你会收到通知。`);
     } else if (sub === 'end') {
       const [id, how, ...rest] = a, text = rest.join(' ');
@@ -2389,7 +2455,7 @@ async function ticket([sub, ...a]) {
       const all = await webPost('/api/tickets', null, 'GET');
       if (!all.length) return console.log('还没有工单。');
       for (const t of all) console.log(`#${t.id} ${t.name} · ${st(t)}${t.end ? '' : `\n   对话：${t.conv ? `${t.convTitle || '（还没标题）'}（编号 ${t.conv}）` : '还没派'}\n   原话：${t.ask}${t.done ? `\n   做到什么算完：${t.done}` : ''}${t.limits ? `\n   约束：${t.limits}` : ''}`}\n`);
-    } else console.log('claude-multi ticket [list] | new <名字> --ask <用户原话> [--done <做到什么算完>] [--limits <约束>] [--inferred] | give <工单号> <文件夹 或 对话> <交代> [--acct N] [--gpt] | end <工单号> done|stop [一句话]');
+    } else console.log('claude-multi ticket [list] | new <名字> --ask <用户原话> [--done <做到什么算完>] [--limits <约束>] [--inferred] | give <工单号> <文件夹 或 对话> <交代> [--acct N] [--gpt] [--gemini] | end <工单号> done|stop [一句话]');
   } catch (e) { process.exitCode = 1; console.log(e.message === 'fetch failed' ? '连不上网页服务，它在运行吗？' : e.message); }
 }
 // claude-multi report N <word> <一句话> / ask N <问题>: a worker telling the 管家 how its ticket stands
@@ -4464,6 +4530,8 @@ async function web() {
     // which conversation it is), until then none.
     // a GPT conversation as the 管家's chat look asks: running here (its Codex is nowhere else), and at work
     'GET /api/gpt': (q) => { const s = gptSessions().find((x) => x.id === q.get('id')); return { pid: s?.pid ?? null, web: !!s?.web, busy: !!s?.busy }; },
+    // a Gemini one as the 管家's chat look asks: running (here, or in a terminal window), at work, asking (its record)
+    'GET /api/gem': (q) => { const s = gemSessions().find((x) => x.id === q.get('id')); return { pid: s?.pid ?? null, web: s?.web !== false, busy: !!s?.busy, wait: !!s?.wait }; },
     'GET /api/history': (q) => {
       const gt = terms.get(q.get('key') ?? '');
       if (gt?.gem || q.has('gem')) { // a Gemini one's: its record. Started here and not found yet (nothing said): nothing
@@ -5395,7 +5463,8 @@ if (require.main === module) {
     console.log(v === 'auto' ? `账号 ${n} 改回按订阅开始时间推算` : `已记下：账号 ${n} 每月 ${+m[3]} 号续费（取消续订的，这天到期）`);
   }
   else if (cmd === 'sessions') { // --all: the GPT ones too (gpt: true, acct its G number from 0) and the GPT 聊天 ones (oai: true), for the 管家; the island's reads Claude's only
-    const reg = load(), all = process.argv.includes('--all') ? [...listSessions(reg), ...listGpt(reg).map(({ home, ...s }) => ({ ...s, who: `G${s.acct + 1}` })), ...oaiList()].sort((a, b) => b.at - a.at) : listSessions(reg);
+    const reg = load(), all = process.argv.includes('--all') ? [...listSessions(reg), ...listGpt(reg).map(({ home, ...s }) => ({ ...s, who: `G${s.acct + 1}` })),
+      ...listGemini(reg).map(({ made, going, lastAt, ...s }) => ({ ...s, who: `A${s.acct + 1}` })), ...oaiList()].sort((a, b) => b.at - a.at) : listSessions(reg); // (a Gemini one's pid: chat look asks the service)
     if (process.argv.includes('--json')) console.log(JSON.stringify(all));
     else for (const s of all) console.log(`${s.pid ? '●' : ' '} ${new Date(s.at).toLocaleString('zh-CN', { hour12: false })}  ${pad(s.who, 16)} ${s.id}  ${path.basename(s.cwd)} · ${s.title}`);
   }

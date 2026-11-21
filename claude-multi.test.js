@@ -762,6 +762,26 @@ if (SESSION0) {
   assert.match(cli('chat', 'look', 'oai-1'), /^「量子纠缠」 oai-1\nGPT 聊天 · 普通 · medium · 正在回答（已经 2 分钟）/);
   assert.equal(cli('chat', 'say', 'oai-1', '再说说'), '「量子纠缠」还在回答上一条：它答完网页服务会告诉你，之后再发');
   fs.rmSync(root, { recursive: true, force: true });
+}
+// A Gemini one for the 管家, in a home of its own (its ~/.gemini, one account): listed by sessions --all (gem, A1), read
+// with chat look (where it runs: not here, the service there being another's), a new one on an account there isn't refused
+{
+  const fs = require('fs'), path = require('path'), os = require('os'), url = require('url'), { spawnSync } = require('child_process'), { DatabaseSync } = require('node:sqlite');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-home-')), work = path.join(root, 'work'), a = path.join(root, '.gemini', 'antigravity-cli'), id = '9e1f0000-1111-2222-3333-444444444444';
+  fs.mkdirSync(path.join(root, '.claude-multi'), { recursive: true }); fs.mkdirSync(work); fs.mkdirSync(path.join(a, 'brain', id, '.system_generated', 'logs'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude-multi', 'profiles.json'), JSON.stringify({ profiles: [], gemini: [{ id: 'gemini-1', label: 'g@example.com', email: 'g@example.com', home: path.join(root, 'g1') }], geminiOn: 'gemini-1' }));
+  const d = new DatabaseSync(path.join(a, 'conversation_summaries.db'));
+  d.exec("create table conversation_summaries (conversation_id text, title text, last_modified_time text, workspace_uris text, parent_conversation_id text)");
+  d.prepare('insert into conversation_summaries values (?, ?, ?, ?, ?)').run(id, '修复登录', '2026-11-20 10:00:00+00:00', JSON.stringify([url.pathToFileURL(work).href]), ''); d.close();
+  fs.writeFileSync(path.join(a, 'brain', id, '.system_generated', 'logs', 'transcript.jsonl'), [
+    { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-20T09:59:00Z', content: '<USER_REQUEST>\n把登录改好\n</USER_REQUEST>' },
+    { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-11-20T09:59:30Z', content: '改好了。' }].map((x) => JSON.stringify(x)).join('\n') + '\n');
+  const cli = (...x) => spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), ...x], { env: { ...process.env, USERPROFILE: root, HOME: root }, encoding: 'utf8' }).stdout.trim();
+  assert.deepEqual(JSON.parse(cli('sessions', '--json', '--all')).filter((s) => s.gem).map((s) => [s.id, s.title, s.who, s.cwd]), [[id, '修复登录', 'A1', work]]);
+  assert.equal(cli('chat', 'look', '登录'), `「修复登录」 ${id}\nGemini 账号 A1 · ${work} · 没在运行\n\n最后的回答：\n改好了。`);
+  assert.equal(cli('chat', 'new', work, '你好', '--gemini', '--acct', 'A3'), '没有 Gemini 账号 A3（用户要先运行 claude-multi new gemini 加一个）');
+  fs.rmSync(root, { recursive: true, force: true });
+  console.log('butler gemini ok');
   console.log('gpt chat for the 管家 ok');
 }
 
@@ -868,6 +888,27 @@ if (SESSION0) {
   console.log('chat ok');
 }
 
+// What's on agy's screen (screen.js: Gemini ones, the page's and the 管家's), on screens a real agy 1.5 showed: its
+// question to run a command, its own question, its Write-in open, at work with a message queued (its thought's ▸ row
+// none), its / menu (no question), a numbered message of yours (no question)
+{
+  const { parseAgyScreen } = require('./screen.js'), R = '─'.repeat(110);
+  const run = parseAgyScreen([R, '> 用命令行删除 junk.txt', '● Ran (Remove-Item .\\junk.txt) (ctrl+o to expand)', 'Command', R, 'Requesting permission for:', '   Remove-Item .\\junk.txt', 'Run this command?',
+    '> 1. Yes, run command', "  2. Yes, and always allow in this conversation for commands that start with 'Remove-Item", ".\\junk.txt'", '  3. Yes, and always allow (Persist to settings.json)', '  4. No, cancel',
+    '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command', 'Gemini 账号 A1  │  Gemini 4 Neon (High)']);
+  assert.deepEqual([run.busy, run.menu.cur, run.menu.ask, run.menu.opts.map((o) => o.label.slice(0, 16)), run.menu.opts[1].desc], [null, 1, 'Requesting permission for:\nRemove-Item .\\junk.txt\nRun this command?',
+    ['Yes, run command', 'Yes, and always ', 'Yes, and always ', 'No, cancel'], ".\\junk.txt'"]);
+  const own = parseAgyScreen(['? 你最喜欢哪种颜色？', 'Question', R, 'Question 1/1: 你最喜欢哪种颜色？', '> 1. 红', '  2. 绿', '  3. 蓝', '  4. Write-in...', '  ↑/↓ Navigate · enter Select · esc Skip']);
+  assert.deepEqual([own.menu.ask, own.menu.opts.map((o) => o.label)], ['Question 1/1: 你最喜欢哪种颜色？', ['红', '绿', '蓝', 'Write-in...']]);
+  const write = parseAgyScreen([R, 'Question 1/1: 你最喜欢哪种颜色？', '  1. 红', '> 4. Write-in...', '  Your answer:', '  enter Submit · esc Back']);
+  assert.deepEqual([write.menu, write.writing], [null, true]);
+  const q = parseAgyScreen([R, '> 写一首诗', '▸ Thought for 5s, 203 tokens', '⣟  Generating...', '└ Tip: Press ctrl+r to review pending artifacts.', '▸ 再写一首，关于冬天 (alt+m to send immediately)', R, '>', R]);
+  assert.deepEqual([q.busy?.[1], q.menu, q.writing, q.queue], ['Generating...', null, false, ['再写一首，关于冬天']]);
+  const slash = parseAgyScreen([R, '> /', R, '> /add-dir             Add a directory to the workspace', '  /agents              List available custom agents', '  ↑/↓ Navigate · enter Select · tab Complete']);
+  const mine = parseAgyScreen([R, '> 1. 先改登录', '  2. 再加测试', '⣟  Generating...', R, '>', R]);
+  assert.deepEqual([slash.menu, mine.menu, mine.queue], [null, null, []]);
+  console.log('agy screen ok');
+}
 // What's on Claude's screen (screen.js, the page's and the 管家's): a question's options, the trust question, and
 // "❯ 4. …" in the input box (your words, not a menu)
 {
