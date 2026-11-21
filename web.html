@@ -1424,13 +1424,13 @@ function drawHere() {
   if (!c || !state) return void (el.innerHTML = '');
   const tone = (p) => (p >= 80 ? 'bad' : p >= 50 ? 'warn' : 'ok'), w = c.where(), line = s?.line;
   const a = c.gpt || c.gem ? null : state.usage.accounts?.[c.acct - 1], five = a?.windows?.find((x) => x.k === 'five_hour')?.pct;
-  const g = c.gpt ? state.gpt?.[c.acct - 1] : null, gw = g?.windows?.length ? g.windows.reduce((x, y) => (y.pct > x.pct ? y : x)) : null; // a GPT one's: its most used window
+  const g = c.gpt ? state.gpt?.[c.acct - 1] : c.gem ? state.gemini?.[c.acct - 1] : null, gw = g?.windows?.length ? g.windows.reduce((x, y) => (y.pct > x.pct ? y : x)) : null; // a GPT or Gemini one's: its most used window
   const left = s?.req ? s.req + HOUR - Date.now() : null, min = Math.ceil(left / 60000);
   el.innerHTML = [
     w && `<span class="where ${w}" title="这个对话的 ${c.gem ? 'agy' : c.gpt ? 'Codex' : 'Claude'} 在哪里运行">${w === 'pc' ? (c.mac ? 'Mac 的终端' : '电脑窗口') : '网页服务'}</span>`,
     c.mac && `<span title="在 ${esc(macName(c.mac))} 上的 ${esc(macOf(c.mac)?.dir ?? '')} 里运行，用那边的账号">${mark(false, 0, c.mac)}${esc(macName(c.mac))}</span>`,
     c.acct && c.gpt && `<span title="${esc(g?.label ?? '')}"><i style="background:var(--gpt)"></i>GPT 账号 G${c.acct}${gw ? ` · ${winName(gw.k)} <b class="${tone(gw.pct)}">${gw.pct}%</b>` : ''}</span>`,
-    c.acct && c.gem && `<span title="${esc(state.gemini?.[c.acct - 1]?.label ?? '')}"><i style="background:var(--gem)"></i>Gemini 账号 A${c.acct}</span>`,
+    c.acct && c.gem && `<span title="${esc(g?.label ?? '')}"><i style="background:var(--gem)"></i>Gemini 账号 A${c.acct}${gw ? ` · ${winName(gw.k)} <b class="${tone(gw.pct)}">${gw.pct}%</b>` : ''}</span>`,
     c.acct && !c.gpt && !c.gem && `<span title="${esc(a?.label ?? '')}"><i style="background:${ACCT[(c.acct - 1) % ACCT.length]}"></i>账号 ${c.acct}${five != null ? ` · 5 小时 <b class="${tone(five)}">${five}%</b>` : ''}</span>`,
     line?.model && `<span title="模型 · 思考强度">${esc([line.model, line.effort].filter(Boolean).join(' · '))}</span>`,
     line?.ctx != null && `<span title="上下文已用">上下文 <b class="${tone(line.ctx)}">${Math.round(line.ctx)}%</b></span>`,
@@ -2051,7 +2051,7 @@ const winRow = (w) => `<div class="win"><span class="tag ${w.k === 'five_hour' ?
   <div class="meter"><i style="width:${Math.min(100, w.pct)}%;background:${w.pct >= 80 ? 'var(--red)' : w.pct >= 50 ? 'var(--orange)' : 'var(--ink)'}"></i></div>
   <b>${w.pct}%</b><span>${esc(w.reset)}后</span></div>`;
 function renderUsage() {
-  const u = state.usage, gp = state.gpt ?? [];
+  const u = state.usage, gp = state.gpt ?? [], gm = state.gemini ?? [];
   $('#sideActs').html = `<button class="ico" data-refresh title="刷新">${svg(I.refresh)}</button>`;
   $('#view').html = `<div class="panel"><div class="sub">${u.open ? '推荐账号 ' + (u.rec + 1) : esc(shut(u))}</div>
     ${win() ? `<div data-machine="here">${machineRows('here')}</div>` : ''}
@@ -2070,7 +2070,9 @@ function renderUsage() {
     ${!win() ? '' : `<div class="m" style="margin-top:8px;white-space:normal">预热：给还没开始计时的账号发一条很小的消息，让 5 小时窗口开始计时。</div>
     <h3>GPT 账号</h3>${gp.length ? gp.map((g, i) => `<div class="card"><div class="cardHead">${ac(i + 1, '', true)}<b>G${i + 1}</b><span class="m grow">${esc(g.label)}</span>${g.plan ? `<span class="m">${esc(g.plan)}</span>` : ''}</div>
       ${g.windows?.length ? g.windows.map(winRow).join('') : '<div class="m" style="margin-top:4px;white-space:normal">额度还没读到：在它上面回复过一次后才有</div>'}</div>`).join('')
-      : '<div class="m" style="white-space:normal">还没有。在电脑上运行 claude-multi new gpt，用 ChatGPT 登录后，就能在这里新开 GPT 对话。</div>'}`}</div>`;
+      : '<div class="m" style="white-space:normal">还没有。在电脑上运行 claude-multi new gpt，用 ChatGPT 登录后，就能在这里新开 GPT 对话。</div>'}
+    ${gm.length ? `<h3>Gemini 账号</h3>${gm.map((g, i) => `<div class="card"><div class="cardHead">${ac(i + 1, '', 'gem')}<b>A${i + 1}</b><span class="m grow">${esc(g.label)}</span>${g.on && gm.length > 1 ? '<span class="rec">在线</span>' : ''}${g.plan ? `<span class="m">${esc(g.plan)}</span>` : ''}</div>
+      ${g.windows?.length ? g.windows.map(winRow).join('') : '<div class="m" style="margin-top:4px;white-space:normal">额度还没读到：在它上面用过一次 Gemini 后才有</div>'}</div>`).join('')}` : ''}`}</div>`;
 }
 // a Windows computer's service (an older one doesn't say: Windows too). A Mac's: no CPU and memory rows, 预热 or GPT
 const win = () => state?.win !== false;
@@ -2829,8 +2831,10 @@ function makeConv(body, title) {
       if (!m) return;
       const n = +d.pick - m.cur;
       for (let i = 0; i < Math.abs(n); i++) input(n > 0 ? '\x1b[B' : '\x1b[A');
-      // 「Type something」 takes typing where it is: what you write below is pasted into it, then Enter
-      if (typeOpt.get(m.ask) === +d.pick || /^Type something/i.test(m.opts.find((o) => o.n === +d.pick)?.label ?? '')) { typing = { ask: m.ask, n: +d.pick }; drawLive(); line.focus(); }
+      // 「Type something」 takes typing where it is: what you write below is pasted into it, then Enter. agy's 「Write-in...」
+      // opens with Enter (its box: what's sent from here then is the answer)
+      if (c.gem && /^Write-in/i.test(m.opts.find((o) => o.n === +d.pick)?.label ?? '')) { input('\r'); line.focus(); }
+      else if (typeOpt.get(m.ask) === +d.pick || /^Type something/i.test(m.opts.find((o) => o.n === +d.pick)?.label ?? '')) { typing = { ask: m.ask, n: +d.pick }; drawLive(); line.focus(); }
       else input('\r');
     } else if (d.key === 'term') setView('term'); else input('\x1b');
   });
@@ -2954,7 +2958,9 @@ function makeConv(body, title) {
     const spin = rows.map((r) => /^\s*[⠀-⣿]\s+(\S.*?)\s*$/.exec(r)).find(Boolean), foot = rows.findLastIndex((r) => /↑\/↓ Navigate/.test(r));
     const up = rows.slice(0, Math.max(0, foot)), cur = up.findLastIndex((r) => /^\s*>\s*\d+\.\s/.test(r));
     if (cur >= 0) up[cur] = up[cur].replace('>', '❯');
-    return { busy: spin ? [spin[0], spin[1], ''] : null, menu: cur >= 0 ? parseScreen(up).menu : null,
+    // its own question's 「Write-in...」 open (Your answer:, 「enter Submit · esc Back」): what's sent from here is the answer
+    const writing = foot < 0 && rows.some((r) => /enter Submit · esc Back/.test(r));
+    return { busy: spin ? [spin[0], spin[1], ''] : null, menu: cur >= 0 ? parseScreen(up).menu : null, writing,
       queue: rows.map((r) => /^\s*▸\s+(.*?)\s*\(alt\+m to send immediately\)\s*$/.exec(r)?.[1]?.replace(/…$/, '')).filter(Boolean) };
   }
   function drawLive(toEnd) {
@@ -2965,7 +2971,7 @@ function makeConv(body, title) {
     const told = !c.ended && state?.sessions.find((x) => x.id === c.id)?.busy ? [] : null;
     const sc = c.gem && term && !c.ended ? screen() : null;
     if (c.gem) queued = (sc?.queue ?? []).map((text) => ({ text, at: 0, cut: true })); // (its row may be cut short: one of yours that starts so)
-    const { busy, menu } = c.gpt ? { busy: told, menu: null } : c.gem ? { busy: sc?.busy || told, menu: sc?.menu ?? null } : term && !c.ended ? screen() : {};
+    const { busy, menu } = c.gpt ? { busy: told, menu: null } : c.gem ? { busy: sc?.busy || (sc?.writing ? null : told), menu: sc?.menu ?? null } : term && !c.ended ? screen() : {};
     const here = menu?.opts.find((o) => o.n === menu.cur);
     // 「Type something」: which option it is, per question, kept from when it still said so (written in, it shows the words)
     const blank = menu?.opts.find((o) => /^Type something/i.test(o.label));
@@ -2991,7 +2997,8 @@ function makeConv(body, title) {
       ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${askHead(menu)}${askOpts(menu, (o) => `data-pick="${o.n}"`, (o) => typeNow && o.n === menu.cur)}
         ${typeNow ? '<div class="hint2">在下面的输入框里写你的回答，发送后填进这一项</div>' : ''}
         <div class="row2">${menu.tabs ? '<button data-key="prev">← 上一题</button><button data-key="next" class="push">下一题 →</button>' : ''}<button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
-      : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : `${c.gem ? 'Gemini' : c.gpt ? 'GPT' : 'Claude'} 正在回复`}${took ? ' · ' + took : ''}</div>` : '');
+      : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : `${c.gem ? 'Gemini' : c.gpt ? 'GPT' : 'Claude'} 正在回复`}${took ? ' · ' + took : ''}</div>`
+      : sc?.writing ? '<div class="ask"><div class="hint2">在下面的输入框里写你的回答，发送后就是你的答案</div><div class="row2"><button data-key="esc">回到选项</button><button data-key="term">去终端里操作</button></div></div>' : '');
     if (!menu) typing = null;
     busyNow = !!busy && !menu; menuNow = !!menu; goMode();
     const st = menuNow ? 'ask' : busyNow ? 'busy' : ''; // the tab shows it too

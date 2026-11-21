@@ -1925,7 +1925,7 @@ if (process.platform === 'win32') {
 // Gemini (agy): its conversations from ~/.gemini's conversation_summaries.db and history.jsonl, shared by all accounts;
 // its status line; the account on switched by its sign-in alone (Credential Manager: a test entry here, never agy's own)
 {
-  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemHistory, gemOn, agyCred, gemSettings, statusline, saveLine, readLine } = require('./claude-multi');
+  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemHistory, gemOn, agyCred, gemSettings, statusline, saveLine, readLine, saveGemQuota, gemUsage } = require('./claude-multi');
   const { DatabaseSync } = require('node:sqlite');
   const regFile = path.join(TEST_HOME, '.claude-multi', 'profiles.json'), reg0 = fs.readFileSync(regFile, 'utf8');
   const GEM = path.join(TEST_HOME, '.gemini', 'antigravity-cli');
@@ -1953,10 +1953,12 @@ if (process.platform === 'win32') {
   const rec = (id, steps) => { const f = path.join(GEM, 'brain', id, '.system_generated', 'logs'); fs.mkdirSync(f, { recursive: true });
     fs.writeFileSync(path.join(f, 'transcript.jsonl'), steps.map((s, i) => JSON.stringify({ step_index: i, status: 'DONE', ...s })).join('\n') + '\n{"step_index":9'); };
   const U = (t, at) => ({ source: 'USER_EXPLICIT', type: 'USER_INPUT', created_at: at, content: say(t) }), M = (t, at, calls) => ({ source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: at, content: t, ...(calls && { tool_calls: calls }) });
-  const G = (at, status = 'DONE') => ({ source: 'MODEL', type: 'GENERIC', status, created_at: at }), q = JSON.stringify;
-  // one cut short by your next message (its end by that), the next answered
-  rec('c-old', [U('把登录改好', '2026-11-19T07:59:00Z'), M('改一半', '2026-11-19T07:59:10Z', [{ name: 'edit_file', args: { toolSummary: q('Edit a.js'), TargetFile: q('/p/a.js') } }]),
-    G('2026-11-19T07:59:12Z'), U('算了', '2026-11-19T07:59:30Z'), M('好了', '2026-11-19T07:59:40Z')]);
+  const G = (at, status = 'DONE', content) => ({ source: 'MODEL', type: 'GENERIC', status, created_at: at, ...(content && { content }) }), q = JSON.stringify;
+  // one cut short by your next message (its end by that; its edit: as its result says), the next a file written and
+  // answered (its lines counted off the call: its result says none)
+  rec('c-old', [U('把登录改好', '2026-11-19T07:59:00Z'), M('改一半', '2026-11-19T07:59:10Z', [{ name: 'edit_file', args: { toolSummary: q('Edit a.js'), Path: q('/p/a.js'), Target: q('a\nb'), Replacement: q('c') } }]),
+    G('2026-11-19T07:59:12Z', 'DONE', 'Made 1 replacement in /p/a.js starting at line 2 (+5/-4 lines).'), U('算了', '2026-11-19T07:59:30Z'),
+    M('', '2026-11-19T07:59:40Z', [{ name: 'write_file', args: { Path: q('/p/b.js'), Content: q('x\ny\n') } }]), G('2026-11-19T07:59:41Z', 'DONE', 'Created file.'), M('写好了', '2026-11-19T07:59:45Z')]);
   // two commands, one a server left running (its result RUNNING for good); then on at work: a command called, its result not in
   rec('c-new', [U('加一个测试\n第二行', '2026-11-20T10:00:00Z'), M('', '2026-11-20T10:00:02Z', [{ name: 'run_command', args: { CommandLine: q('npm test\n--watch'), Cwd: q(work) } }, { name: 'run_command', args: { CommandLine: q('npm run dev') } }]),
     G('2026-11-20T10:00:05Z'), G('2026-11-20T10:00:05Z', 'RUNNING'), { source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'x', created_at: '2026-11-20T10:00:06Z' },
@@ -1968,7 +1970,7 @@ if (process.platform === 'win32') {
   const L = listGemini();
   assert.deepEqual(L.map((s) => [s.id, s.title, s.prompt, s.cwd, s.acct, s.gem, s.going]), [['c-new', '加一个测试', null, work, 0, true, 'busy'], ['c-old', '修复登录', '把登录改好', work, 0, true, null]]);
   assert.deepEqual(L.map((s) => [s.at, s.made, s.lastAt]), [[Date.parse('2026-11-20T10:05:01Z'), Date.parse('2026-11-20T10:00:00Z'), Date.parse('2026-11-20T10:05:01Z')],
-    [Date.parse('2026-11-19T08:00:00.123Z'), Date.parse('2026-11-19T07:59:00Z'), Date.parse('2026-11-19T07:59:40Z')]]);
+    [Date.parse('2026-11-19T08:00:00.123Z'), Date.parse('2026-11-19T07:59:00Z'), Date.parse('2026-11-19T07:59:45Z')]]);
   // its record as the page's messages: yours (without what agy adds), its replies, each tool it called as Claude's are
   // named (its results not shown), a turn's end with about how long, a model error as a note; nothing held back for a
   // step still running (a server); in pieces
@@ -1977,9 +1979,11 @@ if (process.platform === 'win32') {
   assert.deepEqual(hd('c-new', { live: true }), [['user', '加一个测试\n第二行'], ['tool', 'Bash  npm test'], ['tool', 'Bash  npm run dev'], ['claude', '测试加好了'], ['done', '9000'], ...tail]);
   assert.deepEqual([gemHistory('c-new', { live: true }).end, gemHistory('c-new').end, hd('c-new', { from: 6, live: true })], [9, 9, tail]);
   assert.deepEqual(hd('c-new').slice(-1), [['done', '1000']]); // cut short (no agy on it any more): its end too
-  assert.deepEqual(hd('c-old'), [['user', '把登录改好'], ['claude', '改一半'], ['tool', 'Edit  /p/a.js'], ['done', '10000'], ['user', '算了'], ['claude', '好了'], ['done', '10000']]);
+  assert.deepEqual(hd('c-old'), [['user', '把登录改好'], ['claude', '改一半'], ['tool', 'Edit  /p/a.js'], ['edit', '/p/a.js'], ['done', '10000'],
+    ['user', '算了'], ['tool', 'Edit  /p/b.js'], ['edit', '/p/b.js'], ['claude', '写好了'], ['done', '15000']]);
+  assert.deepEqual(gemHistory('c-old').items.filter((m) => m.role === 'edit').map((m) => [m.text, m.add, m.del]), [['/p/a.js', 5, 4], ['/p/b.js', 2, 0]]);
   const k3 = gemHistory('c-old', { keep: 3 }); // the newest piece from your last message, the end of the turn it cut short with it; the rest before
-  assert.deepEqual([k3.start, k3.items.map((m) => m.role), hd('c-old', { end: k3.start }).map((m) => m[0])], [3, ['done', 'user', 'claude', 'done'], ['user', 'claude', 'tool']]);
+  assert.deepEqual([k3.start, k3.items.map((m) => m.role), hd('c-old', { end: k3.start }).map((m) => m[0])], [3, ['done', 'user', 'tool', 'edit', 'claude', 'done'], ['user', 'claude', 'tool', 'edit']]);
   assert.deepEqual(hd('c-gone'), [['user', 'gone'], ['note', '出错了：quota'], ['done', '1000']]);
   assert.deepEqual([hd('../c-old'), hd('nope')], [[], []]);
   // the same ones with A2 on (they go on with it); none before there's an account
@@ -2005,6 +2009,14 @@ if (process.platform === 'win32') {
   const gin = { product: 'antigravity', email: 'g2@example.com', session_id: 'c-gem', model: { display_name: 'Gemini 4 Neon', effort: 'high' }, context_window: { used_percentage: 12 } };
   assert.equal(statusline(gin), 'Gemini 账号 A2  │  Gemini 4 Neon · high  │  context 12%');
   assert.equal(statusline({ ...gin, email: 'other@example.com' }).split('  │  ')[0], 'Gemini');
+  // its account's quota, kept as agy hands it over (whose: by its email), its Gemini windows as the page shows them (one
+  // past its reset: 0)
+  const qd = path.join(TEST_HOME, 'gem-quota'), soon = new Date(Date.now() + 3 * 3600e3 + 90e3).toISOString();
+  saveGemQuota({ ...gin, plan_tier: 'Google AI Pro', quota: { 'gemini-5h': { remaining_fraction: 0.75, reset_time: soon, reset_in_seconds: 1 }, 'gemini-weekly': { remaining_fraction: 0.5, reset_time: '2000-01-01T00:00:00Z' }, '3p-5h': { remaining_fraction: 1 } } }, qd);
+  const gu = gemUsage(a2, qd);
+  assert.deepEqual([fs.readdirSync(qd), gu.plan, gu.windows.map((w) => [w.k, w.pct, w.reset ? 'set' : ''])], [[`${a2.id}.json`], 'Google AI Pro', [['five_hour', 25, 'set'], ['seven_day', 0, '']]]);
+  assert.match(gu.windows[0].reset, /^3小时0[12]分$/);
+  assert.deepEqual(gemUsage(a1, qd), { windows: null }); // none read for it yet
   fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, { ...a2, email: null }], geminiOn: a2.id })); // its email never found: by being on
   assert.equal(statusline({ ...gin, email: 'other@example.com' }).split('  │  ')[0], 'Gemini 账号 A2');
   const ld = path.join(TEST_HOME, 'gem-status'); saveLine(gin, ld);

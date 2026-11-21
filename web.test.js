@@ -562,6 +562,21 @@ const press = async (key, shift = false) => {
   await evaluate("focusG.active.el.querySelector('.live .ask [data-pick=\"4\"]').click()");
   for (let i = 0; i < 60 && inputs.length < 4; i++) await new Promise((r) => setTimeout(r, 50)); // (the keys on their way)
   assert.deepEqual(inputs, ['\x1b[B', '\x1b[B', '\x1b[B', '\r']);
+  // its own question (as agy 1.5 asks it): 「Write-in...」 picked, opened with Enter; its box open, 对话 says to write the
+  // answer below (no 正在回复), and what's sent is the answer: pasted, then Enter
+  gemShow([R, '? 你最喜欢哪种颜色？', 'Question', R, 'Question 1/1: 你最喜欢哪种颜色？', '> 1. 红', '  2. 绿', '  3. 蓝', '  4. Write-in...', '  ↑/↓ Navigate · enter Select · esc Skip', 'Gemini 账号 A1']);
+  await until("focusG.active.el.querySelectorAll('.live .ask [data-pick]').length === 4");
+  inputs.length = 0;
+  await evaluate("focusG.active.el.querySelector('.live .ask [data-pick=\"4\"]').click()");
+  for (let i = 0; i < 60 && inputs.length < 4; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(inputs, ['\x1b[B', '\x1b[B', '\x1b[B', '\r']);
+  gemShow([R, 'Question 1/1: 你最喜欢哪种颜色？', '  1. 红', '  2. 绿', '  3. 蓝', '> 4. Write-in...', '  Your answer:', '  enter Submit · esc Back', 'Gemini 账号 A1']);
+  await until("/写你的回答/.test(focusG.active.el.querySelector('.live')?.textContent ?? '')");
+  assert.deepEqual(await evaluate("[focusG.active.live, !!focusG.active.el.querySelector('.live .busy')]"), ['', false]);
+  inputs.length = 0;
+  await evaluate("{ const c = focusG.active, t = c.el.querySelector('.send textarea'); t.value = '紫色'; t.dispatchEvent(new Event('input')); c.el.querySelector('.go').click(); }");
+  for (let i = 0; i < 60 && inputs.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(inputs.slice(0, 2), ['\x1b[200~紫色\x1b[201~', '\r']);
   historyId = 'A'; histFeed = null; termGem = ''; gemRes = null;
   await evaluate('closeConv(focusG.active)');
   assert.ok(openBodies.every((b) => b.live && b.gem), JSON.stringify(openBodies)); // any more: reconnects to it, never a second agy

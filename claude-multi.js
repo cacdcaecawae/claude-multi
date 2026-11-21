@@ -1592,6 +1592,11 @@ function gemSteps(id) {
   if (gemReads.size > 30) gemReads.delete(gemReads.keys().next().value);
   return steps;
 }
+// a Gemini conversation's last words of yours (mine) or its last reply: a note's gist, the 管家's look; '' for none
+function gemLast(id, mine = false) {
+  const s = gemSteps(id).findLast((x) => (mine ? x.type === 'USER_INPUT' && x.source === 'USER_EXPLICIT' : x.type === 'PLANNER_RESPONSE' && String(x.content ?? '').trim()));
+  return s ? (mine ? gemSaid(s.content) : String(s.content).trim()) : '';
+}
 // what the list needs of one (its record read only once it changed): your first message and when, its last step's
 // time, and what it's at by that step: 'busy' (a turn not over: yours just in, a tool called or its result, the model
 // on it again) or 'wait' (a step waiting on you, if agy logs one so) or null
@@ -1650,9 +1655,18 @@ function gemTool(c) {
     ?? Object.values(a).map(gemArg).find(Boolean) ?? '';
   return `${GEM_TOOL.find(([re]) => re.test(name))?.[1] ?? name}  ${what.split('\n')[0].slice(0, 160)}`.trim();
 }
+// a file one of its tools changed (written whole, or a part replaced): its path, the lines added and taken out (as
+// agy's result says, 「(+1/-1 lines)」, else counted off the call), for the turn's 改动 card as a GPT one's
+const GEM_EDIT = /write_file|edit_file|replace|create_file/i;
+function gemEdit(c, r) {
+  const a = c?.args && typeof c.args === 'object' ? c.args : {}, file = gemArg(a.Path ?? a.TargetFile ?? a.AbsolutePath);
+  if (!GEM_EDIT.test(c?.name ?? '') || !file) return null;
+  const lines = (v) => { const s = gemArg(v); return s ? s.replace(/\n$/, '').split('\n').length : 0; }, said = /\(\+(\d+)\/-(\d+) lines?\)/.exec(String(r?.content ?? ''));
+  return { text: file, add: said ? +said[1] : lines(a.Content ?? a.Replacement ?? a.CodeContent), del: said ? +said[2] : lines(a.Target) };
+}
 function gemHistory(id, { from, end, keep = 120, live = false } = {}) {
   const got = gemSteps(id);
-  let items = [], turn = null; // the turn going: when it began, its last step's time
+  let items = [], turn = null, calls = []; // the turn going (when it began, its last step's time); the calls of the last reply not answered yet
   const over = (o) => { if (turn) items.push({ role: 'done', text: String(Math.max(1000, turn.last - turn.at)), o }); turn = null; };
   for (const s of got) {
     const o = s.step_index, at = gemTime(s.created_at);
@@ -1666,7 +1680,11 @@ function gemHistory(id, { from, end, keep = 120, live = false } = {}) {
       if (s.type === 'ERROR_MESSAGE') { items.push({ role: 'note', text: `出错了：${String(s.error ?? s.content ?? '').split('\n')[0].slice(0, 200)}`, at, o }); over(o); continue; }
       if (String(s.content ?? '').trim()) items.push({ role: 'claude', text: String(s.content).trim(), at, o });
       for (const c of gemCalls(s)) items.push({ role: 'tool', text: gemTool(c), at, o });
-      if (!gemCalls(s).length) over(o);
+      calls = [...gemCalls(s)];
+      if (!calls.length) over(o);
+    } else if (s.type === 'GENERIC') { // a call's result (in the order called): a file changed, on the turn's card
+      const c = calls.shift(), e = s.status === 'DONE' && gemEdit(c, s);
+      if (e) items.push({ role: 'edit', ...e, at, o });
     }
   }
   if (!live) over((got[got.length - 1]?.step_index ?? 0) + 0.5);
@@ -3704,7 +3722,15 @@ async function web() {
     const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`;
     const proc = pty.spawn(agy, resume ? ['--conversation', resume] : [], { name: 'xterm-256color', cols, rows, cwd, env: { ...process.env, TERM: 'xterm-256color' } });
     const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, gem: { id: resume ?? null, since: Date.now(), enters: [] } };
-    proc.onData((d) => { keepOut(t, d); send(t, 'data', d); });
+    proc.onData((d) => {
+      keepOut(t, d); send(t, 'data', d);
+      // a question to you on its screen (Run this command?, or its own: 「Question 1/1: …」): a note, once each (its record a
+      // step on by the next)
+      if (t.gem.id && /Requesting permission for|Question \d+\/\d+:/.test(d.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, ''))) {
+        const n = gemSteps(t.gem.id).length;
+        if (t.gem.asked !== n) { t.gem.asked = n; try { gemNote(t, 'ask'); } catch {} }
+      }
+    });
     proc.onExit(() => { t.gone = true; gemCache = null; send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t); gemCache = null;
     if (!resume) gemIdle(t); // (a page that never connects: its tab closed while this started)
@@ -3713,6 +3739,17 @@ async function web() {
   }
   // a new one nothing was ever sent to, unwatched 30 s on: ended (the list couldn't find it again, and it would hold up
   // every switch)
+  // A Gemini one run here, a note as a Claude one's (the page, the island, the phones): its turn over (its record: a reply
+  // calling no tool, since this agy began), checked every 2 s; a question to you (its screen, as it comes)
+  const gemNote = (t, kind) => dropNote({ kind, project: path.basename(t.cwd), msg: kind === 'done' ? '任务完成，等你下一步指示' : '需要你确认一下',
+    title: listGemini().find((x) => x.id === t.gem.id)?.title ?? null, id: t.gem.id, gem: true }, t.pid);
+  setInterval(() => {
+    for (const t of gemLive()) {
+      const s = t.gem.id && gemSum(t.gem.id), now = s && s.lastAt >= t.gem.since - 1000 ? s.going : null;
+      if (t.gem.was === 'busy' && s && !now) try { gemNote(t, 'done'); } catch {}
+      t.gem.was = now;
+    }
+  }, 2000);
   const gemIdle = (t) => setTimeout(() => { gemCache = null; gemSessions(); if (!t.clients.size && !t.gem.id && !t.gem.enters.length && !t.gone) t.proc.kill(); }, 30000);
   let gemCache = null, gemAt = 0;
   const gemSessions = () => {
@@ -4042,8 +4079,8 @@ async function web() {
     return gist(tail, max);
   };
   // a conversation by its id, Claude's or GPT's; its last reply's gist (a note's text)
-  const anyChat = (id) => sessions().find((x) => x.id === id) ?? gptSessions().find((x) => x.id === id);
-  const wordsOf = (s, max) => (s?.gpt ? gistText(gptLast(s.home, s.id, 'agentMessage'), max) : lastWords(s?.file, max));
+  const anyChat = (id) => sessions().find((x) => x.id === id) ?? gptSessions().find((x) => x.id === id) ?? gemSessions().find((x) => x.id === id);
+  const wordsOf = (s, max) => (s?.gem ? gistText(gemLast(s.id), max) : s?.gpt ? gistText(gptLast(s.home, s.id, 'agentMessage'), max) : lastWords(s?.file, max));
   // who set a conversation's latest turn going (turnBy), by its record (a GPT one's: its last message of yours)
   // (null when its record can't be read now, deleted since the list was read: the push timer asks outside its try)
   // the same for the page, on each note it gets (by: the 管家's turns aren't marked as answered for you), kept once read,
@@ -4085,7 +4122,7 @@ async function web() {
       try {
         const s = n.id && anyChat(n.id), mine = s && sameDir(s.cwd, BUTLER), name = mine ? '管家' : n.title || n.project || 'Claude', folder = s ? (mine ? '' : path.basename(s.cwd)) : n.project;
         const m = { ...pushText({ ...n, gist: s ? wordsOf(s, 150) : n.gist }), id: n.id, group: name, ask: n.kind === 'ask', // a GPT 聊天 one's: on its note
-          sub: [folder !== name && folder, s && (s.gpt ? `GPT 账号 G${s.acct + 1}` : `账号 ${s.acct + 1}`)].filter(Boolean).join(' · ') };
+          sub: [folder !== name && folder, s && (s.gem ? `Gemini 账号 A${s.acct + 1}` : s.gpt ? `GPT 账号 G${s.acct + 1}` : `账号 ${s.acct + 1}`)].filter(Boolean).join(' · ') };
         (barkUrl() ? bark(m) : pushAll(m)).catch(() => {}); // Bark set up: it alone, not twice
       } catch {}
   }, 2000);
@@ -4243,7 +4280,7 @@ async function web() {
       list.sort((a, b) => b.at - a.at);
       // the Macs (the Mac mini, more): 新对话 offers them
       const reg = load(), macs = macList(reg).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
-      return { user: reg.user ?? null, usage: usageCache, gpt: gptState(), gemini: geminiAccounts(reg).map((g) => ({ label: g.label, on: g.id === reg.geminiOn })), oai: fs.existsSync(OAI_KEY), quota: quotaOn(reg), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
+      return { user: reg.user ?? null, usage: usageCache, gpt: gptState(), gemini: geminiAccounts(reg).map((g) => ({ label: g.label, on: g.id === reg.geminiOn, ...gemUsage(g) })), oai: fs.existsSync(OAI_KEY), quota: quotaOn(reg), macs, sessions: list, notes: unreadNotes(all).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects(), win: WIN,
         head, update: upd || updBusy || updErr ? { ...upd, busy: updBusy, err: updErr } : null };
     },
@@ -5035,6 +5072,28 @@ function saveLine(input, dir = LINES) {
   fs.writeFileSync(`${f}.tmp`, line); fs.renameSync(`${f}.tmp`, f); // whole, for the service reading it meanwhile
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
+// A Gemini account's quota, as agy hands it to its status line each time (per window: what's left, when it resets; its
+// plan): kept for that account (by the email it says, else the one on) in gem-quota\<id>.json, written when it changes
+const GEM_QUOTA = path.join(ROOT, 'gem-quota');
+function saveGemQuota(input, dir = GEM_QUOTA) {
+  if (input.product !== 'antigravity' || !input.quota || typeof input.quota !== 'object') return;
+  const reg = load(), all = geminiAccounts(reg), g = all.find((x) => x.email && x.email === input.email) ?? all.find((x) => !x.email && x.id === reg.geminiOn);
+  if (!g) return;
+  const q = Object.fromEntries(Object.entries(input.quota).map(([k, v]) => [k, { left: v?.remaining_fraction ?? null, reset: v?.reset_time ?? null }]));
+  const line = JSON.stringify({ plan: input.plan_tier ?? null, q }), f = path.join(dir, `${g.id}.json`);
+  try { if (fs.readFileSync(f, 'utf8') === line) return; } catch { fs.mkdirSync(dir, { recursive: true }); }
+  fs.writeFileSync(`${f}.tmp`, line); fs.renameSync(`${f}.tmp`, f);
+}
+// its Gemini models' windows as the page shows a GPT account's: how much used, when it resets (one past its reset: 0)
+function gemUsage(g, dir = GEM_QUOTA) {
+  let j;
+  try { j = JSON.parse(fs.readFileSync(path.join(dir, `${g.id}.json`), 'utf8')); } catch { return { windows: null }; }
+  const win = (k, name) => {
+    const x = j.q?.[k], at = Date.parse(x?.reset ?? ''), over = at > 0 && at < Date.now();
+    return typeof x?.left === 'number' ? { k: name, pct: over ? 0 : Math.round((1 - x.left) * 100), reset: at > 0 && !over ? until(at) : '' } : null;
+  };
+  return { plan: j.plan ?? null, windows: [win('gemini-5h', 'five_hour'), win('gemini-weekly', 'seven_day')].filter(Boolean) };
+}
 
 // claude-multi setup: what install.sh / install.ps1 run once the code is in ~/.claude-multi (run again: an update). Your
 // ~/.claude/settings.json gets the notes and the status line (added to what's there; the file as it was kept beside it),
@@ -5183,7 +5242,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { claudeCmd, agySlash, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { claudeCmd, agySlash, saveGemQuota, gemUsage, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
@@ -5250,6 +5309,7 @@ if (require.main === module) {
     try { input = JSON.parse(fs.readFileSync(0, 'utf8')); } catch {}
     console.log(statusline(input));
     try { saveLine(input); } catch {} // the line is what counts
+    try { saveGemQuota(input); } catch {} // (agy's: its account's quota)
   }
   else launch(process.argv.slice(2));
 }
