@@ -2598,16 +2598,16 @@ function makeConv(body, title) {
   // A Mac's: Claude Code's own commands only, a line saying why; a GPT one's: that line alone
   const slash = document.createElement('div'); slash.className = 'slash'; slash.hidden = true; slash.setAttribute('role', 'listbox'); $p('.send').append(slash);
   let cmds = null, asking = null, slashQ = '', picked = 0, offered = [], slashNote = '';
-  const askCmds = () => asking ??= fetch('/api/commands?' + new URLSearchParams(c.id ? { id: c.id } : c.mac ? { mac: c.mac } : { dir: c.dir(), acct: c.acct ?? '' }))
+  const askCmds = () => asking ??= fetch('/api/commands?' + new URLSearchParams(c.gem ? { gem: 1 } : c.id ? { id: c.id } : c.mac ? { mac: c.mac } : { dir: c.dir(), acct: c.acct ?? '' }))
     .then(async (r) => { const j = await r.json(); if (!r.ok) throw Object.assign(new Error(j.err), { old: r.status === 404 }); cmds = j.commands ?? []; slashNote = j.note ?? ''; slashDraw(); })
     .catch((e) => { cmds = []; if (e.old) toast('/ 的命令列表要等网页服务重启后才有', 3000); setTimeout(() => { cmds = asking = null; }, 60000); });
   function slashDraw() {
     const m = /^\/(\S*)$/.exec(line.value);
     if (!m || document.activeElement !== line) return void (slash.hidden = true); // (a draft put back: not while it's not typed in)
-    if (c.gpt || c.gem) { cmds = []; slashNote = `${c.gem ? 'Gemini（agy）' : 'GPT（Codex）'}对话的命令这里列不出，可以直接打完整的命令`; }
-    if (!cmds) { // asked for (a Mac's: from that Mac, the first time a few seconds: said meanwhile)
+    if (c.gpt) { cmds = []; slashNote = 'GPT（Codex）对话的命令这里列不出，可以直接打完整的命令'; }
+    if (!cmds) { // asked for (a Mac's: from that Mac, the first time a few seconds; a Gemini one's: off agy's own menu, ten or so: said meanwhile)
       askCmds();
-      if (c.mac) { slash.innerHTML = '<div class="slashNote">正在从 Mac 读命令和技能…（第一次要几秒）</div>'; slash.hidden = false; } else slash.hidden = true;
+      if (c.mac || c.gem) { slash.innerHTML = `<div class="slashNote">${c.gem ? '正在读 agy 的命令…（第一次要十几秒）' : '正在从 Mac 读命令和技能…（第一次要几秒）'}</div>`; slash.hidden = false; } else slash.hidden = true;
       return;
     }
     const q = m[1].toLowerCase(), names = (x) => [x.name, ...(x.also ?? [])].map((n) => n.toLowerCase()), starts = (x) => names(x).some((n) => n.startsWith(q));

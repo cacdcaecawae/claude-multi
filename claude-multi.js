@@ -1513,6 +1513,49 @@ function removeGemini(n) {
   if (fs.existsSync(g.home)) console.log(`已移除 Gemini 账号 ${g.label}，但文件夹没能放进回收站（${(r.stderr || '').trim().split('\n')[0]}），可以之后手动删：${g.home}`);
   else console.log(`已移除 Gemini 账号 ${g.label}，文件夹在回收站里。`);
 }
+// agy's / commands, as its own menu lists them (they're listed nowhere else): read off its screen once per agy (a new
+// one: again), its menu typed open in a pseudo-terminal in your home folder and gone down to its end, each its name and
+// what it does. Only with an account on (signed out, started bare it would ask you to sign in). Nothing sent, no model
+// asked. shortcut: plugins added later show up after the next agy update or a web restart
+let agyCmds = null;
+function agySlash() {
+  const agy = agyCmd();
+  if (!agy || !WIN || !load().geminiOn) return Promise.resolve([]);
+  let mt = 0;
+  try { mt = fs.statSync(agy).mtimeMs; } catch {}
+  if (agyCmds?.mt === mt) return agyCmds.list;
+  const list = new Promise((ok) => {
+    const { Terminal } = require('@xterm/headless'), t = new Terminal({ cols: 160, rows: 50, allowProposedApi: true });
+    let p;
+    try { p = require('@lydell/node-pty').spawn(agy, ['--settings', JSON.stringify({ trustedWorkspaces: [HOME] })], { name: 'xterm-256color', cols: 160, rows: 50, cwd: HOME, env: process.env }); } catch { return ok([]); }
+    p.onData((d) => t.write(d));
+    const rows = () => { const b = t.buffer.active, out = []; for (let y = 0; y < 50; y++) out.push(b.getLine(b.viewportY + y)?.translateToString(true) ?? ''); return out; };
+    const got = new Map();
+    let n = 0, ready = 0, still = 0;
+    const go = setInterval(() => { // every 0.1 s: its box up (a few seconds after, settled), its notice away, /, then ↓ till nothing new
+      n++;
+      const r = rows();
+      if (!ready) { if (r.some((x, i) => /^─{20}/.test(x) && /^>/.test(r[i + 1] ?? ''))) ready = n; else if (n > 150) end(); return; }
+      if (n - ready === 30) p.write('\x1b'); // (apart from the /: Esc and / together read as Alt+/)
+      if (n - ready === 36) p.write('/');
+      if (n - ready <= 40) return;
+      const was = got.size;
+      // 「> /clear (new)   Clear conversation…」: its name, its other names in brackets, what it does
+      for (const x of r) { const m = /^[>\s]\s*\/(\S+)(?: \(([^)]*)\))?\s{2,}(\S.*?)\s*$/.exec(x); if (m) got.set(m[1], { desc: m[3], also: m[2] ? m[2].split(/,\s*/) : [] }); }
+      still = got.size === was ? still + 1 : 0;
+      if ((still > 8 && got.size) || n > 400) end();
+      else p.write('\x1b[B');
+    }, 100);
+    function end() {
+      clearInterval(go);
+      require('child_process').execFile('taskkill', ['/pid', String(p.pid), '/t', '/f'], { windowsHide: true }, () => {});
+      ok([...got].map(([name, x]) => ({ name, desc: x.desc, hint: '', also: x.also, builtin: true })));
+    }
+  });
+  agyCmds = { mt, list };
+  list.then((l) => { if (!l.length) agyCmds = null; }); // (none read: tried again next time)
+  return list;
+}
 // start An: agy on that account here, in this terminal (switched on first)
 async function runGem(g, args = []) {
   const agy = agyCmd();
@@ -4210,6 +4253,7 @@ async function web() {
     // account and folder, kept 10 min. A Mac's ({mac} one not begun): Claude Code's own commands only, as listed here (its
     // skills are the Mac's, and nothing is run there to ask)
     'GET /api/commands': async (q) => {
+      if (q.get('gem')) { const l = await agySlash(); return { commands: l, note: l.length ? '' : '没读到 agy 的命令，可以直接打完整的命令' }; } // a Gemini one's: agy's own
       const s = q.get('id') ? sessions().find((x) => x.id === q.get('id')) : null, reg = load(), mac = s ? s.mac : q.get('mac');
       const got = (k, make) => { let c = slashCache.get(k); if (!c || Date.now() - c.at > 600000) { c = { at: Date.now(), list: make() }; slashCache.set(k, c); c.list.catch(() => slashCache.delete(k)); } return c.list; };
       const pc = (p, cwd) => got(`${p.configDir}|${path.resolve(cwd).toLowerCase()}`, () => slashList(claudeExe, p.configDir, cwd));
@@ -5139,7 +5183,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { claudeCmd, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { claudeCmd, agySlash, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
