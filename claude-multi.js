@@ -1126,13 +1126,15 @@ function newGpt() {
   return true;
 }
 // remove Gn: GPT account n leaves the list (not while a Codex runs on it: its marker, there from its start, before it has a
-// conversation), its folder (its login, its conversations) to the Recycle Bin
+// conversation), its folder (its login, its conversations) to the Recycle Bin; 用量 keeps what it used, as a removed
+// Claude account's (counted first: its records go with the folder)
 function removeGpt(n) {
   const g = gptAccounts()[n - 1];
   if (!g) { console.log('没有这个 GPT 账号：用 claude-multi list 看编号（G1、G2…）'); process.exit(1); }
   if (gptMarks().some((m) => sameDir(m.home, g.home))) { console.log('这个 GPT 账号上有 Codex 正在运行，先关掉再移除。'); process.exit(1); }
   canRecycle();
-  update((r) => { r.gpt = (r.gpt ?? []).filter((x) => x.id !== g.id); });
+  tokenStats();
+  update((r) => { r.gpt = (r.gpt ?? []).filter((x) => x.id !== g.id); (r.removedGpt ??= []).push({ id: g.id, label: g.label, home: g.home }); });
   log('gpt_removed', { profile_id: g.id });
   let r = {}; // as remove: never deleted with a link still in it
   try { unlinkAll(g.home); r = recycle([g.home]); } catch {}
@@ -5154,8 +5156,10 @@ function tokenRoots(reg = load()) {
     .concat(macList(reg).map((m) => ({ id: m.id, label: m.label, dir: path.join(macHome(m), 'projects'), mac: m.id, icon: m.icon ?? null })),
       // each Gemini account (gem: its A number): all of theirs in agy's one folder of records (brain), told apart in tokenStats
       geminiAccounts(reg).map((g, i) => ({ id: g.id, label: g.label, gem: i + 1, brain: path.join(GEMINI_HOME, 'antigravity-cli', 'brain') })),
-      // each GPT account (gpt: its G number): its Codex's records, the archived ones too (删除 archives one)
-      gptAccounts(reg).map((g, i) => ({ id: g.id, label: g.label, gpt: i + 1, dir: path.join(g.home, 'sessions'), arch: path.join(g.home, 'archived_sessions') })),
+      // each GPT account (gpt: its G number; a removed one's after them, as a removed Claude account's): its Codex's
+      // records, the archived ones too (删除 archives one)
+      [...gptAccounts(reg), ...(reg.removedGpt ?? []).map((g) => ({ ...g, label: `${g.label}（已移除）` }))]
+        .map((g, i) => ({ id: g.id, label: g.label, gpt: i + 1, dir: path.join(g.home, 'sessions'), arch: path.join(g.home, 'archived_sessions') })),
       macList(reg).map((m) => ({ id: `${m.id}-other`, of: m.id, label: '', dir: path.join(macHome(m), 'others'), other: true })));
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x

@@ -642,6 +642,14 @@ const press = async (key, shift = false) => {
   assert.deepEqual(await evaluate("[hg.live, hg.el.querySelector('.go').classList.contains('stop')]"), ['busy', true]);
   await evaluate("hg.el.querySelector('.go').click()");
   await until("hg.live === ''");
+  // 停止 with its row still up a moment (Codex not out of it yet): gone, not held again (the hold's 8 s, past until's 5)
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex('• Working (9s • esc to interrupt)'))}\n\n`);
+  await until("hg.live === 'busy'");
+  await evaluate("hg.el.querySelector('.go').click()");
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex('• Working (10s • esc to interrupt)'))}\n\n`);
+  await new Promise((ok) => setTimeout(ok, 500)); // (drawn with the row after 停止)
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex(''))}\n\n`);
+  await until("hg.live === ''");
   await evaluate('closeConv(hg)'); await both("state.sessions = state.sessions.filter((x) => x.id !== 'GPT1')");
   historyId = 'A'; histFeed = null; termGem = ''; gemRes = null;
   console.log('browser GPT 正在回复 ok');

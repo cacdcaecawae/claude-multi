@@ -529,6 +529,9 @@ if (SESSION0) {
   fs.rmSync(d, { recursive: true, force: true });
   const roots = tokenRoots({ profiles: [{ id: 'a', label: 'a@x', configDir: 'C:\\A' }], removed: [{ id: 'b', label: 'b@x', configDir: 'C:\\B' }] });
   assert.deepEqual(roots.map((r) => r.label), ['a@x', 'b@x（已移除）']);
+  // a removed GPT account too: its row after the ones there are, its records' (gone with its folder) still counted from the cache
+  const gr = tokenRoots({ profiles: [], gpt: [{ id: 'g1', label: 'o@x', home: 'C:\\G1' }], removedGpt: [{ id: 'g0', label: 'p@x', home: 'C:\\G0' }] });
+  assert.deepEqual(gr.map((r) => [r.label, r.gpt, r.dir]), [['o@x', 1, path.join('C:\\G1', 'sessions')], ['p@x（已移除）', 2, path.join('C:\\G0', 'sessions')]]);
   console.log('remove ok');
 }
 
