@@ -1801,7 +1801,7 @@ function effortSlide(pop, list, done) {
 async function setButlerEffort(v) { await post('/api/butler-model', { effort: v }); state.butlerEffort = v; }
 // A question on a card: its header, the question, its options as buttons (a number badge, or a multi-select's box), each
 // one's description under it; Claude's own two last ones (write in, chat about it) in our words, quieter.
-const OWN_TYPE = /^Type something/i, OWN_CHAT = /^Chat about this/i;
+const OWN_TYPE = /^(Type something|Write-in)/i, OWN_CHAT = /^Chat about this/i; // (agy's own question: Write-in...)
 const askHead = (m) => `${m.head ? `<div class="head">${esc(m.head)}</div>` : ''}${m.ask ? `<div class="q">${esc(m.ask)}</div>` : ''}`;
 const askOpts = (m, attr, on = () => false) => m.opts.map((o) => {
   const own = OWN_TYPE.test(o.label) ? '自己写一个回答…' : OWN_CHAT.test(o.label) ? '先不选，和它聊聊' : null;
@@ -1821,9 +1821,9 @@ async function drawAsks() {
   if (!Array.isArray(list)) return;
   list = list.filter((a) => !(Date.now() - (pickedAt.get(a.id) ?? 0) < 8000));
   askOf = new Map(list.map((a) => [a.id, a.menu?.ask]));
-  $('#asks').html = list.map(({ id, title, acct, menu }) => {
+  $('#asks').html = list.map(({ id, title, acct, gem, menu }) => { // (a Gemini one's: its mark, its A number)
     const simple = menu && !menu.tabs && !menu.opts.some((o) => o.check != null);
-    return `<div class="ask" data-id="${esc(id)}"><div class="from"><i style="background:${ACCT[(acct - 1) % ACCT.length]}"></i><b>${esc(title)}</b><span>账号 ${acct}</span><button class="open" data-open="1">打开对话 ›</button></div>${menu
+    return `<div class="ask" data-id="${esc(id)}"><div class="from">${gem ? mark('gem', acct) : `<i style="background:${ACCT[(acct - 1) % ACCT.length]}"></i>`}<b>${esc(title)}</b><span>${gem ? `Gemini A${acct}` : `账号 ${acct}`}</span><button class="open" data-open="1">打开对话 ›</button></div>${menu
       ? askHead(menu) + (simple ? askOpts(menu, (o) => `data-n="${o.n}"${OWN_TYPE.test(o.label) ? ' data-open="1"' : ''}`) : '<div class="note">多选，或者一次问了好几题，打开对话回答</div>')
       : '<div class="note">它在等你处理，打开看看</div>'}</div>`;
   }).join('');
@@ -1909,7 +1909,7 @@ function drawDesk() {
   const ra = u.accounts?.[u.rec];
   head('deskAcct', '账号', !u.open ? shut(u) : ra ? `推荐 ${u.rec + 1} · 可连续用 ${ra.runway}h` : '');
   $('#deskAcct').html = u.accounts?.length ? `${today ? `<div class="m tot">今天共 ${fmtTok(all(today))} token</div>` : ''}${u.accounts.map((a, i) => {
-    const on = state.sessions.filter((x) => x.pid && !x.gpt && x.acct === i).length; // a GPT one's acct is its G number
+    const on = state.sessions.filter((x) => x.pid && !x.gpt && !x.gem && x.acct === i).length; // a GPT one's acct is its G number, a Gemini one's its A
     return `<div class="acct"><div class="ah">${ac(i + 1)}<b>账号 ${i + 1}</b>${u.rec === i && u.open ? '<span class="pill g">推荐</span>' : ''}<span class="grow"></span><span class="pill ${a.err || a.api ? '' : a.runway >= 2 ? 'g' : a.runway > 0 ? 'o' : 'r'}">${a.api ? '按用量计费' : a.err ? '读不到额度' : a.runway > 0 ? `可连续用 ${a.runway}h` : '已用满'}</span></div>
       ${a.err ? '' : (a.windows ?? []).filter((w) => w.k === 'five_hour' || w.k === 'seven_day').map((w) => gauge(w.k === 'five_hour' ? '5 小时' : '7 天', w.pct, `${w.pct}% · ${esc(w.reset)}后重置`)).join('')}
       ${today?.by?.[i] ? `<div class="today">今天 ${fmtTok(all(today.by[i]))} token · ${today.by[i].n ?? 0} 次回复 · <b>${about(today.by[i].usd)}</b></div>` : ''}
@@ -2554,7 +2554,7 @@ function makeConv(body, title) {
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let gotAt = 0, waitAns = 0, waitT = 0; // when the record last brought messages; since when an answer the screen finished is waited for
-  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, busyFrom = 0, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
+  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, busyFrom = 0, menuNow = false, typeNow = false, typeTick = false, writeNow = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
   let queued = []; // what waits in Claude's queue, as the record says (sent from here, its window, the 管家): { text, at }
   let past = false, quiet = 0; // a (re)connection's first output is everything so far: its copies were made before, not again
   let switching = 0, conversationGen = 0; // a session change cancels writes still queued for the previous one
@@ -2608,7 +2608,7 @@ function makeConv(body, title) {
     const stop = view === 'hist' && busyNow && !line.value.trim() && !atts.length;
     const m = stop ? 'stop' : 'send';
     if (go.dataset.m !== m) { go.dataset.m = m; go.innerHTML = svg(I[m], 2); } // an arrow, or a square while Claude works
-    go.title = stop ? '停止（让 Claude 停下）' : '发送'; go.classList.toggle('stop', stop);
+    go.title = stop ? `停止（让 ${c.gem ? 'Gemini' : c.gpt ? 'GPT' : 'Claude'} 停下）` : '发送'; go.classList.toggle('stop', stop);
   }
   // its height to the words (not while hidden: it would be 0); every change of the words goes through grow, so the
   // draft is kept there, in this browser by conversation: a phone's page dropped in the background comes back with it.
@@ -2746,7 +2746,9 @@ function makeConv(body, title) {
     const g = conversationGen, origin = session, k0 = key;
     const current = () => g === conversationGen && key === k0;
     let delivered = false;
-    const answer = typeNow, tick = typeTick; // what you write for Claude's 「Type something」: pasted into it, then Enter (a multi-select's: none, it's ticked)
+    // what you write for Claude's 「Type something」 (agy's Write-in box open: the same): pasted into it, then Enter (a
+    // multi-select's: none, it's ticked). An answer, not a message: no bubble waiting for the record to bring it
+    const answer = typeNow || writeNow, tick = typeTick;
     // out of the box at once: what you type while its pictures upload is the next message, not wiped when this one goes
     sending = true; stops++; // a 停止 still watching Claude's input box: this message isn't the one to take back
     going = v; if (quick === null) { line.value = ''; atts = []; } grow(); drawAtts();
@@ -2798,7 +2800,7 @@ function makeConv(body, title) {
       }
       if (text && !(await step(`\x1b[200~${text.replace(/\n/g, '\r')}\x1b[201~`))) return back(lost);
       // the Enter not through: back here too (the words may still sit in Claude's own box)
-      if (!tick && !(await step('\r'))) return back('回车没发出去，消息放回了输入框（Claude 那边的输入框里可能还留着这段字）');
+      if (!tick && !(await step('\r'))) return back(`回车没发出去，消息放回了输入框（${c.gem ? 'Gemini' : 'Claude'} 那边的输入框里可能还留着这段字）`);
       delivered = true;
       if (current()) {
         if (answer && !tick) typing = null;
@@ -3010,7 +3012,7 @@ function makeConv(body, title) {
       : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : `${c.gem ? 'Gemini' : c.gpt ? 'GPT' : 'Claude'} 正在回复`}${took ? ' · ' + took : ''}</div>`
       : sc?.writing ? '<div class="ask"><div class="hint2">在下面的输入框里写你的回答，发送后就是你的答案</div><div class="row2"><button data-key="esc">回到选项</button><button data-key="term">去终端里操作</button></div></div>' : '');
     if (!menu) typing = null;
-    busyNow = !!busy && !menu; menuNow = !!menu; goMode();
+    busyNow = !!busy && !menu; menuNow = !!menu; writeNow = !menu && !!sc?.writing; goMode();
     const st = menuNow ? 'ask' : busyNow ? 'busy' : ''; // the tab shows it too
     if (c.live !== st) { c.live = st; if (c.g) drawTabs(c.g); }
     if (h === liveHtml && !toEnd) return;
@@ -3065,7 +3067,8 @@ function makeConv(body, title) {
     draw(); pop.place();
   }
   async function endIt() {
-    if (!key || c.ended || !confirm('结束这个对话？\n和在终端里按 Ctrl+C 一样，Claude 会退出，电脑上它的窗口也会关掉。对话记录会保留，之后可以从列表里接着聊。')) return;
+    // (agy: its first Ctrl+C only says 「press again to exit」, the second ends it, as a real agy 1.5 does)
+    if (!key || c.ended || !confirm(`结束这个对话？\n和在终端里按 Ctrl+C 一样，${c.gem ? 'Gemini（agy）' : 'Claude'} 会退出，电脑上它的窗口也会关掉。对话记录会保留，之后可以从列表里接着聊。`)) return;
     for (let k = 0; k < 4 && !c.ended; k++) { input('\x03'); await new Promise((ok) => setTimeout(ok, 600)); }
     setTimeout(() => { if (!c.ended && !c.closed) toast('还没结束，可以再点一次，或者去终端里看看'); }, 2000);
   }
@@ -3318,7 +3321,7 @@ function makeConv(body, title) {
     if ($p('.path').$h !== h) { $p('.path').$h = h; $p('.path').innerHTML = h; } // (drawn anew only when it changes: the mouse may be on it)
     // its screen says it's answering, the service has had it idle 20 s: this page's stream fell behind (a phone's, the
     // end of an answer never came) and is opened again, the screen rebuilt from the service's (once a minute at most)
-    if (busyNow && s && !s.busy && shown && key && !c.ended && !c.gpt && !c.gem) {
+    if (busyNow && s && !s.busy && shown && key && !c.ended && !c.gpt) { // (a Gemini one's busy: its record and its log, as the service reads them)
       busyIdle ||= Date.now();
       if (Date.now() - busyIdle > 20000 && Date.now() - healAt > 60000) { busyIdle = 0; healAt = Date.now(); connect(true); }
     } else busyIdle = 0;
