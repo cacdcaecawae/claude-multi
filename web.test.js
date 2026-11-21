@@ -353,12 +353,13 @@ const press = async (key, shift = false) => {
     await evaluate('sheetOff()');
     console.log('browser 新对话 folder window ok');
   }
-  // 用量: each Mac's records (listed last) under its name and its mark (Apple's; the old rainbow one for the MacBook), not as one more 账号 n
+  // 用量: each Mac's records (listed last) under its name and its mark (Apple's; the old rainbow one for the MacBook), not
+  // as one more 账号 n; a Gemini account's and a GPT one's under theirs (A1, G1)
   assert.equal(await evaluate(`(() => {
-    tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }, { label: 'g@x', total: 1, usd: 0, gem: 1 }], days: [], total: 4, usd: 0, today: '2000-01-02' }; renderTokens();
+    tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }, { label: 'g@x', total: 1, usd: 0, gem: 1 }, { label: 'o@x', total: 1, usd: 0, gpt: 1 }], days: [], total: 5, usd: 0, today: '2000-01-02' }; renderTokens();
     const h = [...document.querySelectorAll('#view .cardHead')];
-    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg linearGradient stop[stop-color="#61BB46"]') ? '+rainbow' : x.querySelector('.mk svg') ? '+apple' : x.querySelector('.ac')?.textContent === 'A1' ? '+A1' : '')).join(' | '); })()`),
-    '账号 1 | Mac mini+apple | Mac a1+rainbow | Gemini A1+A1');
+    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg linearGradient stop[stop-color="#61BB46"]') ? '+rainbow' : x.querySelector('.mk svg') ? '+apple' : /^[AG]1$/.test(x.querySelector('.ac')?.textContent) ? '+' + x.querySelector('.ac').textContent : '')).join(' | '); })()`),
+    '账号 1 | Mac mini+apple | Mac a1+rainbow | Gemini A1+A1 | GPT G1+G1');
   console.log('browser 用量 Mac mini, a MacBook and a Gemini account ok');
   // 换账号继续 on a Mac's: off in the list's menu, saying whose account it runs on; asked for anyway, a note, no card
   assert.equal(await evaluate(`(() => { const id = '0f1e2d3c-4b5a-4968-8776-000000000001';
@@ -628,6 +629,22 @@ const press = async (key, shift = false) => {
   await evaluate('closeConv(focusG.active)');
   await both('state.sessions = state.sessions.filter((x) => !x.gem); state.gemini = []', 'renderChats()');
   console.log('browser Gemini ok');
+  // GPT (Codex): its status row on its screen, 正在回复 at once (the service's word comes seconds later, none here); the
+  // row gone while its answer streams: held still; 停止: not
+  const codex = (row) => `\x1b[2J\x1b[H› 写一篇短文\r\n\r\n${row}\r\n\r\n› Ask Codex to do anything\r\n`;
+  historyId = 'GPT1'; histFeed = []; termGem = codex('• Working (3s • esc to interrupt)');
+  await both("state.sessions.push({ id: 'GPT1', gpt: true, title: 'GPT', acct: 0, cwd: 'C:/test', at: Date.now(), pid: 123 })"); // running (its busy not said yet)
+  await evaluate("window.hg = makeConv({ id: 'GPT1', gpt: true }, 'GPT'); addConv(focusG, hg)");
+  await until("hg.live === 'busy'");
+  assert.match(await evaluate("hg.el.querySelector('.live .busy')?.textContent"), /^GPT 正在回复 · \d+s$/);
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex('• # 短文'))}\n\n`);
+  await new Promise((ok) => setTimeout(ok, 700)); // (its redraw: 200 ms after the screen changes)
+  assert.deepEqual(await evaluate("[hg.live, hg.el.querySelector('.go').classList.contains('stop')]"), ['busy', true]);
+  await evaluate("hg.el.querySelector('.go').click()");
+  await until("hg.live === ''");
+  await evaluate('closeConv(hg)'); await both("state.sessions = state.sessions.filter((x) => x.id !== 'GPT1')");
+  historyId = 'A'; histFeed = null; termGem = ''; gemRes = null;
+  console.log('browser GPT 正在回复 ok');
   // a picture clicked: big in the middle of the page (no new tab), Esc puts it away; Ctrl+click left to the browser
   assert.equal(await evaluate(`(() => { const src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', a = document.createElement('a');
     a.className = 'hm img'; a.href = src; a.target = '_blank'; a.innerHTML = '<img alt="">'; document.body.append(a);

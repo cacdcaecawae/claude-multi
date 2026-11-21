@@ -5154,6 +5154,8 @@ function tokenRoots(reg = load()) {
     .concat(macList(reg).map((m) => ({ id: m.id, label: m.label, dir: path.join(macHome(m), 'projects'), mac: m.id, icon: m.icon ?? null })),
       // each Gemini account (gem: its A number): all of theirs in agy's one folder of records (brain), told apart in tokenStats
       geminiAccounts(reg).map((g, i) => ({ id: g.id, label: g.label, gem: i + 1, brain: path.join(GEMINI_HOME, 'antigravity-cli', 'brain') })),
+      // each GPT account (gpt: its G number): its Codex's records, the archived ones too (删除 archives one)
+      gptAccounts(reg).map((g, i) => ({ id: g.id, label: g.label, gpt: i + 1, dir: path.join(g.home, 'sessions'), arch: path.join(g.home, 'archived_sessions') })),
       macList(reg).map((m) => ({ id: `${m.id}-other`, of: m.id, label: '', dir: path.join(macHome(m), 'others'), other: true })));
 }
 // What the tokens would cost on the API: $ per million [input, output, cache read]; cache writes are 1.25x
@@ -5168,7 +5170,12 @@ const PRICES = { 'claude-fable-5-2': [8, 40, 0.2], 'claude-fable-5-1': [10, 50, 
   'claude-opus-5': [5, 25, 0.5], 'claude-opus-4': [5, 25, 0.5], 'claude-sonnet-5': [2, 10, 0.2], 'claude-sonnet-4': [3, 15, 0.3],
   'claude-haiku-4': [1, 5, 0.1], '<synthetic>': [0, 0, 0],
   'gemini-4-neon': [3, 15, 0.15], 'gemini-4-hydrogen': [1.5, 7.5, 0.075], 'gemini-4-argon': [2, 10, 0.1, '2026-12-01', 4, 20, 0.2],
-  'gemini-4-carbon': [2, 10, 0.1, '2026-12-01', 4, 20, 0.2], 'gemini-3.8-flash': [0.75, 3.75, 0.075, '2027-01-01', 1.5, 7.5, 0.15] };
+  'gemini-4-carbon': [2, 10, 0.1, '2026-12-01', 4, 20, 0.2], 'gemini-3.8-flash': [0.75, 3.75, 0.075, '2027-01-01', 1.5, 7.5, 0.15],
+  // GPT's (Codex's): OpenAI's Standard tier, developers.openai.com/api/docs/pricing as of 2026-11-21 (output includes
+  // reasoning); Fast (Codex's service_tier priority) is 2x, as fast is here. shortcut: short context only (≤272K input;
+  // Codex's window is 258K): a long-context row once a model's window passes it
+  'gpt-6.2-astra': [8, 40, 0.4], 'gpt-6-astra': [10, 50, 1], 'gpt-6.2-sol': [2, 10, 0.1], 'gpt-6.1-sol': [2, 10, 0.1],
+  'gpt-6.1-terra': [1, 5, 0.05], 'gpt-6-sol': [2, 10, 0.2], 'gpt-6-luna': [0.1, 0.5, 0.01] };
 function replyCost([, day, i, o, w5, w1, r, model, fast]) {
   const name = (model ?? '').replace(/^[\w.-]+\//, ''), k = Object.keys(PRICES).filter((p) => name.startsWith(p)).sort((a, b) => b.length - a.length)[0];
   const p = PRICES[k ?? 'claude-opus-5-5'], [pi, po, pr] = p[3] && String(day) >= p[3] ? p.slice(4) : p;
@@ -5222,7 +5229,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // its conversation, under projects\<folder>\: <id>.jsonl, or a subagent's record in the side folder <id>\
   const sidOf = (ri, f) => path.relative(roots[ri].dir, f).split(path.sep)[1]?.replace(/\.jsonl$/, '');
   roots.forEach((r, ri) => {
-    for (const f of walk(r.dir)) {
+    for (const f of r.arch ? walk(r.arch, walk(r.dir)) : walk(r.dir)) {
       let st; try { st = fs.statSync(f); } catch { continue; } // gone since the walk (Claude's cleanup, a delete): its cached replies stay, below
       const size = st.size;
       let c = cache.files[f] ?? { size: 0, recs: [] };
@@ -5239,6 +5246,21 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
           const end = buf.lastIndexOf(10) + 1;
           if (!end) { if (c.size + buf.length >= size) break; step *= 2; continue; }
           for (const l of buf.toString('utf8', 0, end).split('\n')) {
+            // a GPT one's (Codex's record): a response's usage (input with its cached part in it), under the model its turn
+            // named and Standard or Fast as its settings said (kept with the file: read on from where it was)
+            if (r.gpt) {
+              if (!/"(turn_context|thread_settings_applied|token_usage_record)"/.test(l)) continue;
+              let j; try { j = JSON.parse(l); } catch { continue; }
+              if (j.type === 'turn_context') c.m = j.payload?.model;
+              else if (j.payload?.type === 'thread_settings_applied') c.f = +/priority|fast/.test(j.payload.thread_settings?.service_tier ?? '');
+              else if (j.type === 'token_usage_record' && j.payload?.usage && j.payload.response_id) {
+                const u = j.payload.usage, rd = u.cached_input_tokens ?? 0, w = u.cache_write_input_tokens ?? 0, ts = Date.parse(j.timestamp);
+                const y = [`gpt:${j.payload.response_id}`, day(ts), Math.max(0, (u.input_tokens ?? 0) - rd - w), u.output_tokens ?? 0, w, 0, rd, c.m ?? '', c.f ?? 0, ts];
+                const i = at.get(y[0]);
+                if (i === undefined) { at.set(y[0], c.recs.length); c.recs.push(y); } else c.recs[i] = y;
+              }
+              continue;
+            }
             if (!l.includes('"type":"assistant"') || !l.includes('"usage":')) continue;
             const id = l.match(/"id":"(msg_[^"]+)"/)?.[1], ts = l.match(/"timestamp":"([^"]+)"/)?.[1];
             if (!id || !ts) continue;
@@ -5303,7 +5325,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // ponytail: the cache keeps every reply forever (~2 MB per busy fortnight); fold old files into day totals if it gets slow
   for (const [f, c] of Object.entries(cache.files)) {
     if (c.gem) { if (!next[f]) { next[f] = c; if (gems.length) gemCount(c); } continue; }
-    const ri = roots.findIndex((r) => f.startsWith(r.dir + path.sep));
+    const ri = roots.findIndex((r) => f.startsWith(r.dir + path.sep) || (r.arch && f.startsWith(r.arch + path.sep)));
     if (next[f] || ri < 0 || fs.existsSync(f)) continue;
     next[f] = c;
     count(c, ri, sidOf(ri, f));
@@ -5319,7 +5341,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 });
   const add = (t, x, usd) => { t.i += x[2]; t.o += x[3]; t.cw += x[4] + x[5]; t.cr += x[6]; t.usd += usd; t.n++; };
-  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0, ...(r.mac && { mac: r.mac, icon: r.icon ?? null }), ...(r.gem && { gem: r.gem }) }));
+  const days = {}, accounts = roots.map((r) => ({ label: r.label, total: 0, usd: 0, ...(r.mac && { mac: r.mac, icon: r.icon ?? null }), ...(r.gem && { gem: r.gem }), ...(r.gpt && { gpt: r.gpt }) }));
   const plus = {}; // what each Mac's other folders cost (by its id): in no total and no day, one amount beside that Mac's (plus)
   for (const { x, ri } of best.values()) {
     const usd = replyCost(x);

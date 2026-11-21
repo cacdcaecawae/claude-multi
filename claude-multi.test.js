@@ -183,6 +183,31 @@ assert.equal(t.total, 2); near(t.usd, (1 + 1 * 2) * 4 / 1e6);
   fs.rmSync(path.join(brain, 'g2'), { recursive: true }); // deleted: still counted
   assert.equal(tokenStats(gr, cache, log).total, 9e6);
 }
+// GPT (Codex): its records' responses (input with its cached part in it, output), each at the model its turn named and
+// the tier its settings said (Fast: 2x), at OpenAI's prices; one read on as it grows (the model and tier kept from before);
+// archived (moved: the same responses) counted once, then deleted: still counted
+{
+  const path = require('path'), home = path.join(tmp, 'codex'), cache = path.join(tmp, 'gpt.json'), log = path.join(tmp, 'none.log');
+  const dir = path.join(home, 'sessions', '2026', '11', '21'), f = path.join(dir, 'rollout-a.jsonl'), arch = path.join(home, 'archived_sessions', 'rollout-a.jsonl');
+  fs.mkdirSync(dir, { recursive: true }); fs.mkdirSync(path.dirname(arch), { recursive: true });
+  const L = (type, payload) => JSON.stringify({ timestamp: '2026-11-21T10:00:00Z', type, payload }) + '\n';
+  const tier = (t) => L('event_msg', { type: 'thread_settings_applied', thread_settings: { service_tier: t } });
+  const use = (id, inp, cached, out) => L('token_usage_record', { response_id: id, usage: { input_tokens: inp, cached_input_tokens: cached, cache_write_input_tokens: 0, output_tokens: out } });
+  fs.writeFileSync(f, L('session_meta', { id: 'a' }) + tier('default') + L('turn_context', { model: 'gpt-6.2-astra' })
+    + L('response_item', { type: 'message', content: [{ text: 'a "token_usage_record" in your words' }] }) + use('r1', 3e6, 2e6, 1e6)
+    + tier('priority') + L('turn_context', { model: 'gpt-6-astra' }) + use('r2', 1e6, 0, 0));
+  const gr = [{ id: 'c', label: 'c', dir: path.join(tmp, 'none') }, { id: 'g', label: 'g', gpt: 1, dir: path.join(home, 'sessions'), arch: path.dirname(arch) }];
+  t = tokenStats(gr, cache, log);
+  assert.deepEqual(t.accounts.map((a) => [a.total, a.gpt]), [[0, undefined], [5e6, 1]]);
+  near(t.accounts[1].usd, (8 + 40 + 2 * 0.4) + 10 * 2); // 6.2 Astra: 1M in not cached, 1M out, 2M cached; 6 Astra Fast: 1M in, 2x
+  fs.appendFileSync(f, use('r3', 0, 0, 1e6));
+  t = tokenStats(gr, cache, log);
+  assert.deepEqual([t.accounts[1].total, t.accounts[1].usd.toFixed(2)], [6e6, '168.80']); // 6 Astra Fast still: $50 out, 2x
+  fs.renameSync(f, arch); // 删除: codex archive
+  assert.equal(tokenStats(gr, cache, log).accounts[1].total, 6e6);
+  fs.rmSync(arch);
+  assert.equal(tokenStats(gr, cache, log).accounts[1].total, 6e6);
+}
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('tokens ok');
 
@@ -956,6 +981,16 @@ if (SESSION0) {
     'Keyboard: ↑/↓ Navigate  ←/→ Page  ctrl+f Grouped View  enter Select  f2 Rename  f4 Delete  tab Switch Tab', '  esc Go back / Clear search']);
   assert.deepEqual([res.menu.cur, res.menu.ask, res.menu.opts.map((o) => o.label)], [1, 'Conversations', ['Fix login · proj · 107 steps · 3h ago', 'Tidy notes · 5 steps · 4h ago']]);
   console.log('agy screen ok');
+}
+// Codex's screen (0.171, as it drew them): at work, its status row (either dot); its answer streaming (a • row of its
+// own, no esc to interrupt) and idle: not
+{
+  const { parseCodexScreen } = require('./screen.js'), foot = ['', '› Ask Codex to do anything', '', '  GPT-6.2 high · ~\\work · 写短文', '  ← for agents · ? for shortcuts'];
+  const work = (dot) => parseCodexScreen(['› 再写一篇，讲苹果的历史', '', `${dot} Working (35s • esc to interrupt)`, '  └ Tip: Switch models or reasoning effort quickly with /model.', ...foot]).busy;
+  assert.deepEqual([work('•')?.[1], work('◦')?.[1], work('•')?.[2]], ['Working', 'Working', '']); // (how long: the page's count, as agy's)
+  assert.equal(parseCodexScreen(['› 再写一篇，讲苹果的历史', '', '• # 苹果的历史：从天山果林到现代果园', '', '  ### 一、天山脚下的野果', ...foot]).busy, null);
+  assert.deepEqual(parseCodexScreen(foot), { busy: null, menu: null });
+  console.log('codex screen ok');
 }
 // What's on Claude's screen (screen.js, the page's and the 管家's): a question's options, the trust question, and
 // "❯ 4. …" in the input box (your words, not a menu)
