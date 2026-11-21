@@ -1127,6 +1127,12 @@ const SPARK = `<svg class="spark" viewBox="-32 -32 64 64" fill="currentColor">${
 const OPENAI = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>`;
 // gpt as ac takes it ('gem': the pixel A the Antigravity CLI shows as its logo)
 const AGY = '<svg viewBox="0 0 8 8" fill="currentColor" shape-rendering="crispEdges"><path d="M3 0h2v1H3zM2 1h4v2H2zM1 3h6v1H1zM1 4h2v2H1zM5 4h2v2H5zM0 6h2v2H0zM6 6h2v2H6z"/></svg>';
+// the same in its own colours, for the list's kind bar: agy 1.5's start screen, pixel by pixel (x, y in base 36, colour)
+const AGY_LOGO = `<svg viewBox="0 0 12 10" shape-rendering="crispEdges">${('50f2922e 60f07236 41dbb131 51f6912e 61f37337 71f0583b 329ec345 42b5b43e 52e2993d 62f67a34 72f86a35 82ef5442 '
+  + '3386c64e 4375b45e 53cc954d 63ef7947 73e16652 83e14f59 247cc251 3471c25c 445ca98f 545c91b3 648373b0 74746fc3 84995da8 949c5b97 '
+  + '2580c654 3554b881 454097de 754a7ee4 85706ece 958f64b4 2661c37d 3643aeab 864a80ea 966c73d8 176dc694 2762bad5 3747a8dc 873d89fb '
+  + '974a81f0 a76579e1 186bc7a3 2864b6f6 983886fb a84881f4 0967b9f4 1964b6f6 a93883f9 b93d85fc').split(' ')
+  .map((p) => `<rect x="${parseInt(p[0], 36)}" y="${p[1]}" width="1" height="1" fill="#${p.slice(2)}"/>`).join('')}</svg>`;
 const convKind = (x) => (x?.gem ? 'gem' : !!x?.gpt); // a conversation's kind, as ac and mark take it
 const mark = (gpt, n, mac) => (mac ? `<i class="mk" style="color:var(--apple)" title="${esc(macName(mac))}">${macMark(mac)}</i>` // a Mac's one: its mark (Apple's, a MacBook's)
   : gpt === 'gem' ? `<i class="mk" style="color:var(--gem)" title="Gemini">${AGY}</i>`
@@ -1475,8 +1481,9 @@ function renderChats() {
   const groupDot = (list) => nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : ''); // a folded group's: its rows' most urgent
   $('#sideTitle').textContent = proj ? '项目' : '对话';
   // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
-  const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', SPARK, 'Claude'], state.gpt?.length && ['gpt', OPENAI, 'GPT'], state.gemini?.length && ['gem', AGY, 'Gemini']].filter(Boolean)
-    .map(([k, l, name]) => `<button data-kind="${k}"${k === lk ? ' class="on"' : ''}${name ? ` title="${name}" aria-label="${name}"` : ''}>${l}</button>`).join('')}</div>` : '';
+  // each mark in its logo's own colour (OpenAI's: black, white on dark)
+  const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', SPARK, 'Claude', '#d97757'], state.gpt?.length && ['gpt', OPENAI, 'GPT', 'var(--fgHi)'], state.gemini?.length && ['gem', AGY_LOGO, 'Gemini']].filter(Boolean)
+    .map(([k, l, name, c]) => `<button data-kind="${k}"${k === lk ? ' class="on"' : ''}${name ? ` title="${name}" aria-label="${name}"` : ''}${c ? ` style="color:${c}"` : ''}>${l}</button>`).join('')}</div>` : '';
   const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.prompt, x.cwd)}">${lead(x)}
     <div class="main t">${x.mac ? '' : mark(convKind(x), x.acct + 1)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
@@ -2525,7 +2532,7 @@ const convFor = (s, acct) => (s.oai ? makeOai(s.id, s.title) : makeConv({ id: s.
 function makeConv(body, title) {
   const c = { id: body.id ?? null, title, acct: body.acct ?? null, gpt: !!body.gpt, gem: !!body.gem, mac: body.mac === true ? 'mac' : body.mac || null, g: null, started: false, ended: false, closed: false, live: '' }; // gpt: a GPT one (Codex); mac: on the Mac mini
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
-  let view = body.gem ? 'term' : 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
+  let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let gotAt = 0, waitAns = 0, waitT = 0; // when the record last brought messages; since when an answer the screen finished is waited for
   let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
   let queued = []; // what waits in Claude's queue, as the record says (sent from here, its window, the 管家): { text, at }
@@ -2536,7 +2543,7 @@ function makeConv(body, title) {
   const el = c.el = document.createElement('div');
   el.className = 'pane hist';
   el.innerHTML = `<div class="crumbs"><span class="path"></span>
-      ${body.gem ? '' : '<div class="seg"><button data-v="hist" class="on">对话</button><button data-v="term">终端</button></div>'}
+      <div class="seg"><button data-v="hist" class="on">对话</button><button data-v="term">终端</button></div>
       <button class="ico" data-act="more" title="新对话、换账号继续、结束对话">${svg(I.more, 1.8)}</button></div>
     <div class="notice"><span></span><button class="btn primary" data-act="resume">接着聊</button></div>
     <div class="screen"></div><div class="msgs"></div>
@@ -2678,6 +2685,7 @@ function makeConv(body, title) {
   async function stop() {
     const me = ++stops;
     input('\x1b');
+    if (c.gem) return; // (agy: Esc interrupts it; nothing of Claude's box to take back)
     for (const end = Date.now() + 3000; me === stops && term && !c.closed && Date.now() < end;) {
       await new Promise((ok) => setTimeout(ok, 300));
       const t = me === stops && typed();
@@ -2752,6 +2760,8 @@ function makeConv(body, title) {
       // asked again after the wait: the conversation ended, or a menu came up (Enter would pick what's highlighted)
       if (!current() || c.ended) return back('这个对话换了会话、终端或已结束，消息已放回草稿');
       if (menuNow && !(answer && typeNow)) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
+      // agy mid-turn may be asking in its terminal (run this command?): an Enter from here would answer it
+      if (c.gem && busyNow) return back('Gemini 还没答完，也可能在「终端」里等你确认。等它答完再发（消息放回了输入框）');
       const lost = '没发出去，消息放回了输入框'; // a step that didn't reach Claude: no Enter after it
       // each step to the terminal the message began on: switched to another account meanwhile, the rest isn't sent
       const step = (d) => (current() ? input(d) : Promise.resolve(false));
@@ -2846,7 +2856,7 @@ function makeConv(body, title) {
   // given up after 15 s: one read at a time, and one left hanging (a phone's network, a page put away mid-read) kept
   // every next read from going, the 对话 view frozen while its terminal went on
   async function histGet(qs) { // by the terminal's key once it's open (a new conversation has no id), else the id
-    const r = await (await fetch(`/api/history?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}${c.gpt ? '&gpt=1' : ''}${qs}`, { signal: AbortSignal.timeout(15000) })).json();
+    const r = await (await fetch(`/api/history?key=${encodeURIComponent(key ?? '')}&id=${encodeURIComponent(c.id ?? '')}${c.gpt ? '&gpt=1' : c.gem ? '&gem=1' : ''}${qs}`, { signal: AbortSignal.timeout(15000) })).json();
     if (r.err) throw new Error(r.err);
     // a long paste is recorded as Claude Code hands it to the model, in <pasted_content id="N"> … </pasted_content id="N">:
     // shown without them, and so your message sent here is found in the record (not shown twice)
@@ -2887,7 +2897,7 @@ function makeConv(body, title) {
       if (r.items.length) {
         gotAt = Date.now(); waitAns = 0; // (an answer waited for: in)
         const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
-        addItems($p('.hNew'), r.items, c.gpt || (c.mac && { mac: c.mac }));
+        addItems($p('.hNew'), r.items, c.gem ? { gem: true } : c.gpt || (c.mac && { mac: c.mac }));
         if (!first) for (const m of r.items) if (m.role === 'claude') peekWarm(m.text); // an Office file it names: its PDF made before it's opened
         const flat = (s) => s.replace(/\s+/g, ' '); // a paste's new lines may come back as \r\n
         // the record's message, or one with it inside (typed on after text left in Claude's input box): no longer waiting
@@ -2917,7 +2927,7 @@ function makeConv(body, title) {
       const r = await histGet(`&end=${histOldest}`);
       if (g !== histGen || !$p('.hOld')) return;
       const h = hist.scrollHeight, tmp = document.createElement('div');
-      addItems(tmp, r.items, c.gpt || (c.mac && { mac: c.mac })); $p('.hOld').prepend(...tmp.childNodes);
+      addItems(tmp, r.items, c.gem ? { gem: true } : c.gpt || (c.mac && { mac: c.mac })); $p('.hOld').prepend(...tmp.childNodes);
       histOldest = r.start; topNote();
       hist.scrollTop += hist.scrollHeight - h; // what you were reading stays where it was
     } catch { olderAfter = Date.now() + 5000; } finally { histBusy = false; }
@@ -2946,7 +2956,7 @@ function makeConv(body, title) {
     const live = $p('.live');
     if (!live) return;
     sent = sent.filter((s) => Date.now() - s.at < 600000); // ponytail: one the record never shows (some slash commands) goes after 10 min
-    const { busy, menu } = c.gpt ? { busy: !c.ended && state?.sessions.find((x) => x.id === c.id)?.busy ? [] : null, menu: null } : term && !c.ended ? screen() : {};
+    const { busy, menu } = c.gpt || c.gem ? { busy: !c.ended && state?.sessions.find((x) => x.id === c.id)?.busy ? [] : null, menu: null } : term && !c.ended ? screen() : {};
     const here = menu?.opts.find((o) => o.n === menu.cur);
     // 「Type something」: which option it is, per question, kept from when it still said so (written in, it shows the words)
     const blank = menu?.opts.find((o) => /^Type something/i.test(o.label));
@@ -2969,7 +2979,7 @@ function makeConv(body, title) {
       ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${askHead(menu)}${askOpts(menu, (o) => `data-pick="${o.n}"`, (o) => typeNow && o.n === menu.cur)}
         ${typeNow ? '<div class="hint2">在下面的输入框里写你的回答，发送后填进这一项</div>' : ''}
         <div class="row2">${menu.tabs ? '<button data-key="prev">← 上一题</button><button data-key="next" class="push">下一题 →</button>' : ''}<button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
-      : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : `${c.gpt ? 'GPT' : 'Claude'} 正在回复`}${took ? ' · ' + took : ''}</div>` : '');
+      : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : `${c.gem ? 'Gemini' : c.gpt ? 'GPT' : 'Claude'} 正在回复`}${took ? ' · ' + took : ''}</div>` : '');
     if (!menu) typing = null;
     busyNow = !!busy && !menu; menuNow = !!menu; goMode();
     const st = menuNow ? 'ask' : busyNow ? 'busy' : ''; // the tab shows it too
@@ -3236,7 +3246,10 @@ function makeConv(body, title) {
 
   let busyIdle = 0, healAt = 0; // since when the service has had it idle while its screen says answering; the last reopen for that
   c.sync = () => { // from the list: its title and account; and where it runs
-    if (c.gem && !c.id && key) { const n = state?.sessions.find((x) => x.gem && x.key === key); if (n) { c.id = session.id = n.id; markRows(); save(); } } // a new Gemini one: listed once you've said something
+    if (c.gem && !c.id && key) { // a new Gemini one: listed once you've said something (⋯'s 新对话: in its origin's 项目 then)
+      const n = state?.sessions.find((x) => x.gem && x.key === key);
+      if (n) { c.id = session.id = n.id; markRows(); save(); if (c.joins) { for (const p of c.joins) post('/api/project', { op: 'add', id: p, conv: [n.id] }).catch(() => {}); c.joins = null; } }
+    }
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null;
     if (s) { c.title = s.title; c.acct = s.pid ? s.acct + 1 : body.acct ?? s.acct + 1; }
     // its folder: a button, what's in it shown while the mouse is on it (dirPop), a click opens it in 预览; a Mac's own
@@ -3247,7 +3260,7 @@ function makeConv(body, title) {
     if ($p('.path').$h !== h) { $p('.path').$h = h; $p('.path').innerHTML = h; } // (drawn anew only when it changes: the mouse may be on it)
     // its screen says it's answering, the service has had it idle 20 s: this page's stream fell behind (a phone's, the
     // end of an answer never came) and is opened again, the screen rebuilt from the service's (once a minute at most)
-    if (busyNow && s && !s.busy && shown && key && !c.ended && !c.gpt) {
+    if (busyNow && s && !s.busy && shown && key && !c.ended && !c.gpt && !c.gem) {
       busyIdle ||= Date.now();
       if (Date.now() - busyIdle > 20000 && Date.now() - healAt > 60000) { busyIdle = 0; healAt = Date.now(); connect(true); }
     } else busyIdle = 0;
@@ -3517,7 +3530,7 @@ function navOf(pane, hist) {
     if (u) hist.scrollTo({ top: hist.scrollTop + u.getBoundingClientRect().top - hist.getBoundingClientRect().top - 12, behavior: 'smooth' });
   });
 }
-function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies headed GPT; {mac: its id}: a Mac's one's, headed with its mark
+function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies headed GPT; {gem: true}: a Gemini one's; {mac: its id}: a Mac's one's, headed with its mark
   // the turn's 改动 card sits last: out while the turn's new items go in, back at its end after them (a box emptied
   // meanwhile, a GPT 聊天's drawn again: none)
   if (box.$chg && !box.contains(box.$chg.el)) box.$chg = null;
@@ -3534,6 +3547,7 @@ function addItems(box, items, gpt = false) { // gpt: a GPT one's, its replies he
     // Claude's answer begins (its words or its first tool call right after your message): marked as Claude's
     if ((m.role === 'claude' || m.role === 'tool') && box.lastElementChild?.matches('.hm.user, .hm.img'))
       box.insertAdjacentHTML('beforeend', gpt?.mac ? `<div class="who"><i class="am">${macMark(gpt.mac)}</i>Claude</div>`
+        : gpt?.gem ? `<div class="who"><i class="gm">${AGY_LOGO}</i>Gemini</div>`
         : gpt ? `<div class="who"><i class="gm">${OPENAI}</i>GPT</div>` : `<div class="who">${SPARK}Claude</div>`);
     // a message of yours on the line an earlier one hung on, nothing answering that one: it was stopped and taken back
     // (the record keeps it, Claude doesn't), so it goes (the service leaves such out of what it reads at once)

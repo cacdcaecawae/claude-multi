@@ -17,6 +17,7 @@ let histHang = false, hung = null; // the next history read never answered (a ph
 let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
 let histQueue = null; // set: what the record says waits in Claude's queue, with every read
 const histReads = []; // when each history read came
+const histUrls = []; // what each asked (the last 50)
 // 新对话's 浏览: each folder's folders and files (a path: its own), and the places at the top ('')
 const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'C:/Users/ly/Desktop', 'D:/'], files: [] },
   'D:/': { path: 'D:/', up: '', dirs: ['D:/work', 'D:/.cache'], files: ['a.civa'] }, 'D:/work': { path: 'D:/work', up: 'D:/', dirs: [], files: [] } };
@@ -29,7 +30,7 @@ dirs['C:/test/sub'] = { path: 'C:/test/sub', up: 'C:/test', dirs: [], files: ['c
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/open') { opens++; let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { openBodies.push(JSON.parse(b)); } catch {} }); }
-  if (url.pathname === '/api/history') histReads.push(Date.now());
+  if (url.pathname === '/api/history') { histReads.push(Date.now()); histUrls.push(url.search); if (histUrls.length > 50) histUrls.shift(); }
   if (url.pathname === '/api/history' && histHang) { histHang = false; hung = res; return; } // left open, never answered
   if (url.pathname.startsWith('/api/peek') && /missing/.test(url.searchParams.get('path'))) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('没有这个文件：' + url.searchParams.get('path')); }
   if (url.pathname.startsWith('/api/peek') && /oldsvc/.test(url.searchParams.get('path'))) { res.writeHead(404, { 'content-type': 'application/json' }); return res.end('{"err":"没有这个地址"}'); } // a service before 预览
@@ -530,10 +531,15 @@ const press = async (key, shift = false) => {
   await evaluate("document.querySelector('[data-kind=\"gem\"]').click()");
   assert.deepEqual(await evaluate("[...document.querySelectorAll('#view [data-open]')].map((r) => r.dataset.open)"), ['GEM1']);
   await evaluate("document.querySelector('[data-kind=\"all\"]').click()");
+  historyId = 'GEM1'; histFeed = [{ role: 'user', text: 'hi', at: 1 }, { role: 'claude', text: 'Hi! How can I help you today?' }];
   await evaluate("document.querySelector('#view [data-open=\"GEM1\"]').click()"); // (one not running: started, as a Claude one)
   const rb = await opened();
   assert.deepEqual([rb.id, rb.acct, rb.gem], ['GEM1', 1, true]);
-  assert.deepEqual(await evaluate("[focusG.active.id, !!focusG.active.el.querySelector('.seg'), focusG.active.el.classList.contains('hist')]"), ['GEM1', false, false]);
+  // 对话 first, as a Claude one's, its record asked for as a Gemini one's, its replies headed Gemini
+  await until("focusG.active.el.querySelector('.who')");
+  assert.deepEqual(await evaluate("[focusG.active.id, !!focusG.active.el.querySelector('.seg'), focusG.active.el.querySelector('.seg .on').dataset.v, focusG.active.el.querySelector('.who').textContent]"), ['GEM1', true, 'hist', 'Gemini']);
+  assert.ok(histUrls.some((u) => /[?&]gem=1/.test(u) && /id=GEM1/.test(u)), histUrls.join(' '));
+  historyId = 'A'; histFeed = null;
   await evaluate('closeConv(focusG.active)');
   assert.ok(openBodies.every((b) => b.live && b.gem), JSON.stringify(openBodies)); // any more: reconnects to it, never a second agy
   openBodies.length = 0;

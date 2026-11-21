@@ -1524,48 +1524,119 @@ async function runGem(g, args = []) {
   child.on('error', (e) => { console.error(`无法启动 agy：${e.message}`); process.exit(1); });
   child.on('exit', (code) => process.exit(code ?? 1));
 }
+// A Gemini conversation's record: agy's transcript.jsonl in its brain folder, a step a line, as agy's own swarm board
+// reads it (builtin\plugins\swarm\sidecars\swarm_board\main.mjs): step_index, type, source, status, created_at to the
+// second. USER_INPUT: yours (source USER_EXPLICIT), your words between <USER_REQUEST> tags. PLANNER_RESPONSE: the
+// model's, logged only once it's done: content, tool_calls [{name, args}] (string args JSON-quoted). GENERIC: a tool
+// call's result (RUNNING for one sent to the background, for good). Also SYSTEM_MESSAGE, ERROR_MESSAGE. A turn is over
+// when its newest step is a reply calling no tool. Read again only once it changed (a line still being written left out
+// till then); the last 30 read kept. shortcut: read whole on each change; read its tail if one grows to megabytes
+const gemSaid = (c) => String(/<USER_REQUEST>\n?([\s\S]*?)\n?<\/USER_REQUEST>/.exec(c ?? '')?.[1] ?? c ?? '').trim();
+const gemCalls = (s) => (s?.type === 'PLANNER_RESPONSE' && Array.isArray(s.tool_calls) ? s.tool_calls : []);
+const gemReads = new Map();
+function gemSteps(id) {
+  if (!/^[\w-]{1,80}$/.test(id ?? '')) return [];
+  const f = path.join(GEMINI_HOME, 'antigravity-cli', 'brain', id, '.system_generated', 'logs', 'transcript.jsonl');
+  let mt = 0;
+  try { mt = fs.statSync(f).mtimeMs; } catch { return []; }
+  const r = gemReads.get(id);
+  gemReads.delete(id);
+  if (r?.mt === mt) return gemReads.set(id, r), r.steps;
+  let steps;
+  try { steps = fs.readFileSync(f, 'utf8').split('\n').flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } }); } catch { return r?.steps ?? []; }
+  steps.sort((a, b) => a.step_index - b.step_index);
+  gemReads.set(id, { mt, steps });
+  if (gemReads.size > 30) gemReads.delete(gemReads.keys().next().value);
+  return steps;
+}
+// what the list needs of one (its record read only once it changed): your first message and when, its last step's
+// time, and what it's at by that step: 'busy' (a turn not over: yours just in, a tool called or its result, the model
+// on it again) or 'wait' (a step waiting on you, if agy logs one so) or null
+const gemSums = new Map();
+function gemSum(id) {
+  let mt = 0;
+  try { mt = fs.statSync(path.join(GEMINI_HOME, 'antigravity-cli', 'brain', id, '.system_generated', 'logs', 'transcript.jsonl')).mtimeMs; } catch {}
+  const r = gemSums.get(id);
+  if (r?.mt === mt) return r.sum;
+  const steps = gemSteps(id), you = steps.find((x) => x.type === 'USER_INPUT' && x.source === 'USER_EXPLICIT'), last = steps[steps.length - 1];
+  const sum = you ? { first: gemSaid(you.content).split('\n')[0].trim(), made: gemTime(you.created_at), lastAt: gemTime(last.created_at),
+    going: last.status === 'WAITING' ? 'wait' : (last.type === 'PLANNER_RESPONSE' && !gemCalls(last).length) || last.type === 'ERROR_MESSAGE' ? null : 'busy' } : null;
+  gemSums.set(id, { mt, sum });
+  return sum;
+}
 // The Gemini conversations, once there's an account: ~/.gemini's (its conversation_summaries.db) with something you said
-// in it (history.jsonl, a line a message: the first is its title till agy gives one), not a helper agent's, their folder
-// still there; newest first; each on the account on (any goes on with it). Read again only once one of those changed; a
-// read that fails (a write in flight) keeps the last. shortcut: history.jsonl read whole on each change; read its tail
-// only if it grows to megabytes
+// in it (its record: the first is its title till agy gives one), not a helper agent's, their folder still there; newest
+// first; each on the account on (any goes on with it). The list read again only once the db changed; a read that fails
+// (a write in flight) keeps the last. going, lastAt: what it's at, for one an agy runs here (since it started)
 let gemHead = null;
 const gemTime = (s) => { const t = Date.parse(String(s ?? '').replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1')); return t > 0 ? t : 0; };
 function listGemini(reg = load()) {
   const out = [], mt = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } }, all = geminiAccounts(reg);
   if (all.length) {
-    const acct = Math.max(0, all.findIndex((g) => g.id === reg.geminiOn));
-    const dir = path.join(GEMINI_HOME, 'antigravity-cli'), hist = path.join(dir, 'history.jsonl');
-    const at = Math.max(0, ...['conversation_summaries.db', 'conversation_summaries.db-wal', 'history.jsonl'].map((x) => mt(path.join(dir, x))));
-    let r = gemHead;
-    if (at && r?.at !== at) try {
+    const acct = Math.max(0, all.findIndex((g) => g.id === reg.geminiOn)), dir = path.join(GEMINI_HOME, 'antigravity-cli');
+    const at = Math.max(0, ...['conversation_summaries.db', 'conversation_summaries.db-wal'].map((x) => mt(path.join(dir, x))));
+    if (at && gemHead?.at !== at) try {
       const d = codexDb(dir, 'conversation_summaries.db');
-      let rows;
-      try { rows = d.prepare('select conversation_id id, title, preview, last_modified_time up, workspace_uris ws, parent_conversation_id parent from conversation_summaries').all(); } finally { d.close(); }
-      const said = new Map(); // by conversation: your first message, when, in which folder; when your last
-      let lines = [];
-      try { lines = fs.readFileSync(hist, 'utf8').split('\n'); } catch {}
-      for (const l of lines) try {
-        const h = JSON.parse(l), s = h.conversationId && h.type !== 'slash_command' && String(h.display ?? '').trim();
-        if (!s) continue;
-        const x = said.get(h.conversationId);
-        if (x) x.last = Math.max(x.last, h.timestamp || 0);
-        else said.set(h.conversationId, { first: s, made: h.timestamp || 0, last: h.timestamp || 0, cwd: h.workspace ?? '' });
-      } catch {}
-      r = gemHead = { at, rows, said };
+      try { gemHead = { at, rows: d.prepare('select conversation_id id, title, last_modified_time up, workspace_uris ws, parent_conversation_id parent from conversation_summaries').all() }; } finally { d.close(); }
     } catch {}
-    for (const t of r?.rows ?? []) {
-      const s = r.said.get(t.id);
-      if (!s || t.parent) continue;
-      let cwd = s.cwd;
+    for (const t of gemHead?.rows ?? []) {
+      if (t.parent) continue;
+      let cwd = '';
       try { cwd = require('url').fileURLToPath(JSON.parse(t.ws)[0]); } catch {}
-      const first = s.first.split('\n')[0].trim(), title = String(t.title || first).split('\n')[0].trim().slice(0, 100);
       if (!cwd || !fs.existsSync(cwd)) continue;
-      out.push({ id: t.id, gem: true, acct, cwd, title, prompt: first !== title ? first.slice(0, 200) : null,
-        at: Math.max(gemTime(t.up), s.last), made: s.made, pid: null, busy: false, wait: false });
+      const s = gemSum(t.id);
+      if (!s) continue;
+      const title = String(t.title || s.first).split('\n')[0].trim().slice(0, 100);
+      out.push({ id: t.id, gem: true, acct, cwd, title, prompt: s.first && s.first !== title ? s.first.slice(0, 200) : null,
+        at: Math.max(gemTime(t.up), s.lastAt), made: s.made, pid: null, busy: false, wait: false, going: s.going, lastAt: s.lastAt });
     }
   }
   return out.sort((a, b) => b.at - a.at);
+}
+// A Gemini conversation's record as the page's messages (as gptHistory makes a GPT one's): what you said, its replies, a
+// line per tool it called named as Claude's are (the page counts them by name; its results not shown), a model error as
+// a note; a turn's end (about how long it took: its steps' times are to the second) with the reply that ends it, or by
+// your next message, or once it's no longer running (one cut short). By step_index, in pieces as history's: a model
+// step is logged whole, so nothing waits for a next read.
+const GEM_TOOL = [[/command|shell|terminal/i, 'Bash'], [/write|replace|edit|patch|create_file|delete/i, 'Edit'], [/view|read_file|list_dir|open_file/i, 'Read'],
+  [/search_web|web_search/i, 'WebSearch'], [/grep|find|search/i, 'Grep'], [/url|fetch|browser/i, 'WebFetch']];
+const gemArg = (v) => { const s = typeof v === 'string' ? v.trim() : ''; if (/^".*"$/s.test(s)) try { return String(JSON.parse(s)); } catch {} return s; };
+function gemTool(c) {
+  const name = String(c?.name ?? ''), a = c?.args && typeof c.args === 'object' ? c.args : {};
+  const what = ['CommandLine', 'Command', 'AbsolutePath', 'TargetFile', 'Path', 'Query', 'Url', 'toolSummary', 'toolAction'].map((k) => gemArg(a[k])).find(Boolean)
+    ?? Object.values(a).map(gemArg).find(Boolean) ?? '';
+  return `${GEM_TOOL.find(([re]) => re.test(name))?.[1] ?? name}  ${what.split('\n')[0].slice(0, 160)}`.trim();
+}
+function gemHistory(id, { from, end, keep = 120, live = false } = {}) {
+  const got = gemSteps(id);
+  let items = [], turn = null; // the turn going: when it began, its last step's time
+  const over = (o) => { if (turn) items.push({ role: 'done', text: String(Math.max(1000, turn.last - turn.at)), o }); turn = null; };
+  for (const s of got) {
+    const o = s.step_index, at = gemTime(s.created_at);
+    if (s.type === 'USER_INPUT') {
+      if (s.source !== 'USER_EXPLICIT') continue;
+      over(o); turn = { at, last: at };
+      const text = gemSaid(s.content);
+      if (text) items.push({ role: 'user', text, at, o });
+    } else if (s.type === 'PLANNER_RESPONSE' || s.type === 'ERROR_MESSAGE') {
+      if (turn) turn.last = at; else turn = { at, last: at }; // (going on by itself: after a background task, say)
+      if (s.type === 'ERROR_MESSAGE') { items.push({ role: 'note', text: `出错了：${String(s.error ?? s.content ?? '').split('\n')[0].slice(0, 200)}`, at, o }); over(o); continue; }
+      if (String(s.content ?? '').trim()) items.push({ role: 'claude', text: String(s.content).trim(), at, o });
+      for (const c of gemCalls(s)) items.push({ role: 'tool', text: gemTool(c), at, o });
+      if (!gemCalls(s).length) over(o);
+    }
+  }
+  if (!live) over((got[got.length - 1]?.step_index ?? 0) + 0.5);
+  items = items.filter((m) => (from == null || m.o >= Number(from)) && (end == null || m.o < Number(end)));
+  let start = 0;
+  if (from == null && items.length > keep) { // the newest messages, back to one of yours; more before them: where they begin
+    let cut = items.length - keep;
+    while (cut > 0 && items[cut].role !== 'user') cut--;
+    if (cut > 0 && items[cut - 1].role === 'done' && items[cut - 1].o === items[cut].o) cut--; // (a turn cut short: its end by your next message, with it)
+    items = items.slice(cut); start = cut ? items[0].o : 0;
+  }
+  const last = Math.max(-1, ...got.map((s) => s.step_index), from != null ? Number(from) - 1 : -1);
+  return { items: items.map(({ o, ...m }) => m), start, end: last + 1 };
 }
 
 // --- GPT 聊天:OpenAI's strongest model (GPT-6 Astra) over the API with your key (openai-key.txt here), as a plain chat:
@@ -3611,7 +3682,9 @@ async function web() {
     }
     for (const s of list) {
       const t = live.find((x) => x.gem.id === s.id);
-      if (t) { s.pid = t.pid; s.key = t.key; }
+      // what its record says, from steps this agy wrote (one an earlier agy left mid-turn isn't at work now); to the second
+      const now = t && s.lastAt >= t.gem.since - 1000;
+      if (t) { s.pid = t.pid; s.key = t.key; s.busy = now && s.going === 'busy'; s.wait = now && s.going === 'wait'; }
     }
     gemCache = list; gemAt = Date.now();
     return list;
@@ -4120,7 +4193,7 @@ async function web() {
       // and the GPT ones among them, by when they were last written (a GPT one runs here or not at all)
       for (const { home, ...s } of gptSessions()) list.push({ ...s, where: !s.pid ? null : s.web ? 'web' : 'pc', line: s.pid ? { model: s.model, effort: s.effort } : null });
       // and the Gemini ones (running: here), with what agy's status line shows; key: a new one's tab finds its id by it
-      for (const { made, ...s } of gemSessions()) list.push({ ...s, where: s.pid ? 'web' : null, line: s.pid ? readLine(s.id) : null });
+      for (const { made, going, lastAt, ...s } of gemSessions()) list.push({ ...s, where: s.pid ? 'web' : null, line: s.pid ? readLine(s.id) : null });
       // and the GPT 聊天 ones: no folder, no account, none running anywhere (busy: an answer pending at OpenAI)
       for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
@@ -4226,7 +4299,15 @@ async function web() {
     // a GPT conversation as the 管家's chat look asks: running here (its Codex is nowhere else), and at work
     'GET /api/gpt': (q) => { const s = gptSessions().find((x) => x.id === q.get('id')); return { pid: s?.pid ?? null, web: !!s?.web, busy: !!s?.busy }; },
     'GET /api/history': (q) => {
-      const g = terms.get(q.get('key') ?? '')?.gpt;
+      const gt = terms.get(q.get('key') ?? '');
+      if (gt?.gem || q.has('gem')) { // a Gemini one's: its record. Started here and not found yet (nothing said): nothing
+        if (gt?.gem && !gt.gem.id) gemSessions();
+        const id = gt?.gem ? gt.gem.id : q.get('id');
+        if (!id) return { items: [], start: 0, end: 0 };
+        const live = (!!gt?.gem && !gt.gone) || gemLive().some((x) => x.gem.id === id); // running here: a reply mid-stream waits
+        return { ...gemHistory(id, { from: q.get('from') || undefined, end: q.get('end') || undefined, live }), id };
+      }
+      const g = gt?.gpt;
       if (g || q.has('gpt')) { // a GPT one's: its thread's items. Started here and no thread yet: nothing
         if (g && !g.id) bindGpt();
         const id = g ? g.id : q.get('id'), home = g ? g.home : gptSessions().find((x) => x.id === id)?.home;
@@ -5058,7 +5139,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { claudeCmd, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { claudeCmd, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
