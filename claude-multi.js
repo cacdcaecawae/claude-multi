@@ -4488,17 +4488,29 @@ async function web() {
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
         return { key: startGpt(s.acct + 1, s.cwd, s.id, cols, rows).key, kind: 'pty' };
       }
-      if (b.gem) { // a Gemini one: {id} its agy here, or continued here on the account on; {dir, acct} a new one
+      if (b.gem) { // a Gemini one: {id} its agy here, or continued here (acct: on that account, else the one on); {dir, acct} a new one
         if (!b.id) {
           if (!isDir(b.dir)) throw new Error('文件夹不存在');
           return opened(await startGem(Number(b.acct) || 1, b.dir, null, cols, rows));
         }
-        const t = gemLive().find((x) => x.gem.id === b.id);
+        const t = gemLive().find((x) => x.gem.id === b.id), s = gemSessions().find((x) => x.id === b.id), cwd = t?.cwd ?? s?.cwd;
+        // {id, acct, swap}: 换账号继续. Its record is every account's: its agy here ended (an answer on its way cut short),
+        // started again on that one; not while another runs (one account on at a time); that switch failing: back on its own
+        if (t && b.swap) {
+          if (gemLive().some((x) => x !== t)) throw new Error('还有别的 Gemini 对话在运行：同一时间只能一个 Gemini 账号在线，先结束它们再换');
+          require('child_process').execFile('taskkill', ['/pid', String(t.pid), '/t', '/f'], { windowsHide: true }, () => {});
+          for (let k = 0; k < 50 && !t.gone; k++) await sleep(100);
+          if (!t.gone) throw new Error('它的 agy 没能停下来，稍后再试');
+          try { return opened(await startGem(Number(b.acct), cwd, b.id, cols, rows)); } catch (e) {
+            const back = geminiAccounts().findIndex((g) => g.id === load().geminiOn) + 1;
+            if (back) try { await startGem(back, cwd, b.id, cols, rows); } catch {}
+            throw new Error(`没换成：${e.message}${back ? `（已在 A${back} 上接着开着）` : ''}`);
+          }
+        }
         if (t) return { key: t.key, kind: 'pty' };
-        const s = gemSessions().find((x) => x.id === b.id);
         if (!s) throw new Error('找不到这个对话');
         if (b.live) throw new Error('这个对话已经不在运行了');
-        return opened(await startGem(s.acct + 1, s.cwd, s.id, cols, rows));
+        return opened(await startGem(Number(b.acct) || s.acct + 1, s.cwd, s.id, cols, rows));
       }
       if (b.mac && !b.id) { // {mac: its id (true: the Mac mini), dir?}: one started on that Mac, for that folder here (its project folder there), or in the Mac's folder
         if (b.dir && !isDir(b.dir)) throw new Error('文件夹不存在');

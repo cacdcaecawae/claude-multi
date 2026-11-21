@@ -1525,7 +1525,7 @@ function rowMenu(id, x, y, inProj) {
   // a GPT one: not renamed nor moved to another account here; deleted is archived (Codex's own, undone with codex unarchive).
   // A GPT 聊天 one: renamed and deleted here, at any time (an answer on its way is stopped)
   const no = 'Gemini 对话暂时不能在这里';
-  const items = (s.gem ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', `${no}改名`], ['swap', '换账号继续…', 'Gemini 对话不能换账号'], ['del', '删除…', `${no}删除`]]
+  const items = (s.gem ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', `${no}改名`], ['swap', '换账号继续…'], ['del', '删除…', `${no}删除`]]
     : s.oai ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…'], ['del', '删除…']] : s.gpt ? [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', 'GPT 对话暂时不能在这里改名'], ['swap', '换账号继续…', 'GPT 对话不能换账号'],
     ['del', '归档…', s.pid && '正在运行：先结束对话再归档']] : [!NARROW.matches && ['aside', '在右侧打开'], ['rename', '重命名…', s.pid && '正在运行：在对话里发 /rename 新名字'],
     ['swap', '换账号继续…', s.mac && `用的是 ${macName(s.mac)} 的账号，换不了`], ['del', '删除…', s.pid && '正在运行：先结束对话再删']]).filter(Boolean);
@@ -1549,7 +1549,7 @@ function paneMenu(c, b) {
   menuFor = { pane: c };
   popMenu(c.title, [
     ['fresh', '新对话', off || where, !off],
-    ['swap', '换账号继续…', c.gpt || c.gem ? `${c.gem ? 'Gemini' : 'GPT'} 对话不能换账号` : mac && `用的是 ${macName(mac)} 的账号，换不了`],
+    ['swap', '换账号继续…', c.gpt ? 'GPT 对话不能换账号' : mac && `用的是 ${macName(mac)} 的账号，换不了`],
     ['end', '结束对话', !c.where() && '没有在运行'],
   ], r.left, r.bottom + 4);
   if (!NARROW.matches) $('#cmenu').style.left = `${Math.max(8, r.right - $('#cmenu').offsetWidth)}px`; // its right edge under the ⋯
@@ -1590,12 +1590,12 @@ async function menuPick(e) {
 // not running isn't started first: the account picked on the card starts it). Its tab closed meanwhile, or another one
 // looked at (or 管家 mode gone into): no card, it would come up over that
 async function swapFrom(s) {
-  if (s.gpt || s.gem) return toast(`${s.gem ? 'Gemini' : 'GPT'} 对话不能换账号`);
+  if (s.gpt) return toast('GPT 对话不能换账号');
   if (s.mac) return toast(`用的是 ${macName(s.mac)} 的账号，换不了`);
   let c = convOf(s.id);
   if (c) activate(c.g, c);
   else if (s.pid) { await openSession(s.id); c = convOf(s.id); }
-  else addConv(focusG, (c = makeConv({ id: s.id }, s.title)));
+  else addConv(focusG, (c = makeConv({ id: s.id, gem: s.gem }, s.title)));
   for (const end = Date.now() + 5000; c && !c.closed && s.pid && !c.where() && !c.ended && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 200));
   if (c && !c.closed && !butler && focusG?.active === c) c.swap();
 }
@@ -3064,7 +3064,8 @@ function makeConv(body, title) {
   // the service comes back as event switched, one in a window on the computer as a new Claude in the same window, found
   // by asking for the conversation until it runs under another key. One not running is simply started on that account.
   function swap(to) { // to: the account already picked (the 管家's card)
-    if (c.gpt || c.gem) return toast(`${c.gem ? 'Gemini' : 'GPT'} 对话不能换账号`);
+    if (c.gpt) return toast('GPT 对话不能换账号');
+    if (c.gem) return gemSwap();
     const mac = c.mac || state?.sessions.find((x) => x.id === c.id)?.mac; // a Mac's runs on that Mac's account: none of these
     if (mac) return toast(`用的是 ${macName(mac)} 的账号，换不了`);
     const accts = state?.usage?.accounts ?? [], rec = state?.usage?.rec, cur = (c.acct ?? 1) - 1;
@@ -3094,7 +3095,35 @@ function makeConv(body, title) {
     };
     draw(); $('#sheet').classList.add('on');
   }
-  function switched() { c.acct = switching; toast(`已换到账号 ${switching}`); switching = 0; redraw(); }
+  // a Gemini one: on another Gemini account. Its record is every account's, so it just goes on there: its agy here ended
+  // and started again on that one (an answer on its way cut short: said), one not running started on it
+  function gemSwap() {
+    const gm = state?.gemini ?? [], cur = (c.acct ?? 1) - 1, used = (g) => (g.windows?.length ? Math.max(...g.windows.map((w) => w.pct)) : null);
+    if (!c.id) return toast('这个对话还没有消息，不用换账号');
+    if (gm.length < 2) return toast('只有一个 Gemini 账号：在电脑上运行 claude-multi new gemini 再加一个');
+    let acct = gm.findIndex((_, i) => i !== cur) + 1;
+    const draw = () => {
+      $('#sheetIn').innerHTML = `<div class="stitle">换账号继续</div><div class="m" style="margin-top:4px">${esc(c.title)}</div>
+        <div class="m" style="margin-top:14px">换到</div><div class="opts">${gm.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}"${i === cur ? ' disabled' : ''}>
+          A${i + 1} · ${esc(g.label)}<small>${i === cur ? '当前' : used(g) != null ? `额度用了 ${used(g)}%` : ''}</small></button>`).join('')}</div>
+        ${busyNow ? '<div class="m" style="white-space:normal">它正在回答：现在换，这一轮会被打断</div>' : ''}
+        <div class="btns" style="margin-top:16px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="swapGo" style="flex:2">换到 A${acct}</button></div>`;
+      document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
+      $('#cancel').onclick = sheetOff;
+      $('#swapGo').onclick = async () => {
+        sheetOff();
+        if (!key || c.ended) { body = { id: c.id, acct, gem: true }; c.acct = acct; return start(); }
+        toast(`正在换到 Gemini 账号 A${acct}…`, 8000);
+        gen++; es?.close(); es = null; // (its old agy's end isn't this tab's)
+        try {
+          const r = await post('/api/open', { id: c.id, gem: true, swap: true, acct, cols: term?.cols, rows: term?.rows });
+          switching = acct; ({ key, kind } = r); switched(); connect();
+        } catch (e) { switching = 0; toast(e.message, 6000); body = { id: c.id, gem: true }; start(); } // (on as it was, or again where the service put it)
+      };
+    };
+    draw(); $('#sheet').classList.add('on');
+  }
+  function switched() { c.acct = switching; toast(c.gem ? `已换到 Gemini 账号 A${switching}` : `已换到账号 ${switching}`); switching = 0; redraw(); }
   // one in a window: asked for again every 2 s, its old Claude still answering included, until it runs under another key
   async function follow() { // ends with the switch, or when the tab closes (switching cleared)
     const was = key;
