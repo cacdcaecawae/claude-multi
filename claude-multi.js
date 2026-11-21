@@ -1429,8 +1429,8 @@ function gemSettings(home = GEMINI_HOME, script = __filename.replace(/\\/g, '/')
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, JSON.stringify({ ...s, statusLine: { type: 'command', command: `node "${script}" statusline` } }, null, 2) + '\n');
 }
-// new gemini: an account, signed in with Google (agy models: it asks for one when there's none; a browser, or its link
-// opened anywhere and the code pasted back), each time: a sign-in agy has already is never taken unasked (the first's:
+// new gemini: an account, signed in with Google in agy started bare (the only way it signs in: signed out, its models
+// just says so), then left (/exit); a browser, or its link opened anywhere and the code pasted back. Each time: a sign-in agy has already is never taken unasked (the first's:
 // kept meanwhile, back if none is made). A Google account already here: its sign-in renewed. Not signed in (Ctrl+C there
 // too): its folder gone, the one on before on again.
 async function newGemini(running = agyRunning) {
@@ -1463,8 +1463,9 @@ async function newGemini(running = agyRunning) {
     if (first && ![0, 3].includes((await agyCred('save', before)).status)) return back('agy 现在的登录没能先存下来，没有加账号');
     if ((await agyCred('drop')).status !== 0) return back('agy 现在的登录没能清掉（不清掉它就会直接拿来用），没有加账号'); // so agy asks for one
     log('gemini_created', { profile_id: id });
-    console.log('正在用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回这里）……');
-    spawnSync(agy, ['models'], { stdio: 'inherit' });
+    console.log('接下来打开 agy：在里面选用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回去）。\n'
+      + '登录好以后输入 /exit 退出 agy（或连按两次 Ctrl+D），claude-multi 才会把这个账号存下来。');
+    spawnSync(agy, [], { stdio: 'inherit' });
     if ((await agyCred('save', gemLogin(home))).status !== 0) return back('还没检测到登录成功，没有加上账号');
     fs.rmSync(before, { force: true });
     const email = await gemWho(), all = geminiAccounts(), d = email ? all.findIndex((x) => x.email === email) : -1;

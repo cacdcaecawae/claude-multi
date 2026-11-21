@@ -2017,14 +2017,20 @@ if (process.platform === 'win32') {
       await gemOn(a1, async () => false);
       assert.deepEqual(await on(), [a1.id, 'one-refreshed']);
       yours();
-      // new gemini. agy here: node, run in TEST_HOME a script named models there that signs in with what tok holds;
-      // run elsewhere, no such script, no sign-in. Google: says it's g1. Each signs in for real: agy's own sign-in from
-      // before (mine) never taken, and back if none is made
+      // new gemini. agy here: node started bare (as agy is, to sign in), NODE_OPTIONS making it run a script first: one
+      // that signs in with what tok holds, or one that ends at once (no sign-in); either ends it before node would wait on
+      // its input. Google: says it's g1. Each signs in for real: agy's own sign-in from before (mine) never taken, and
+      // back if none is made
       process.env.CM_AGY = process.execPath;
-      const tok = path.join(TEST_HOME, 'tok.dpapi'), cwd = process.cwd(), fetch0 = global.fetch, day = new Date().toLocaleDateString('sv').replace(/-/g, '');
+      const tok = path.join(TEST_HOME, 'tok.dpapi'), fetch0 = global.fetch, day = new Date().toLocaleDateString('sv').replace(/-/g, '');
       const signs = (s) => execFileSync('powershell.exe', ['-NoProfile', '-Command', 'Add-Type -AssemblyName System.Security; [IO.File]::WriteAllText($env:F, [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($env:S), $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)))'], { env: { ...process.env, F: tok, S: s } });
-      fs.writeFileSync(path.join(TEST_HOME, 'models'), `require(${JSON.stringify(path.join(__dirname, 'claude-multi.js'))}).agyCred('load', ${JSON.stringify(tok)});`);
-      const add = async (signed) => { if (signed) process.chdir(TEST_HOME); try { return await quiet(() => newGemini(async () => false)); } finally { process.chdir(cwd); } };
+      const yes = path.join(TEST_HOME, 'agy-signs.js'), no = path.join(TEST_HOME, 'agy-none.js'), o = process.env.NODE_OPTIONS;
+      fs.writeFileSync(yes, `require('child_process').execFileSync(process.execPath, ['-e', ${JSON.stringify(`require(${JSON.stringify(path.join(__dirname, 'claude-multi.js'))}).agyCred('load', ${JSON.stringify(tok)})`)}], { env: { ...process.env, NODE_OPTIONS: '' } }); process.exit(0);`);
+      fs.writeFileSync(no, 'process.exit(1);');
+      const add = async (signed) => {
+        process.env.NODE_OPTIONS = `--require ${JSON.stringify(signed ? yes : no)}`;
+        try { return await quiet(() => newGemini(async () => false)); } finally { if (o === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = o; }
+      };
       const made = () => fs.readdirSync(ACCOUNTS_T).filter((x) => x.startsWith(`gemini-${day}`));
       global.fetch = async () => ({ ok: true, json: async () => ({ email: 'g1@example.com' }) });
       try {
