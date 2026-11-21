@@ -2156,7 +2156,9 @@ async function renderTokens() {
   const max = Math.max(1, ...days.map((x) => all(x.d))), today = days.at(-1).d, active = t.days.filter((d) => all(d)).length || 1;
   // each account in its ring's color, the same every day (a whole bar in one color hid who used it).
   // shortcut: a 9th account takes the first's color again; fold the oldest into one 其他 if it comes to that
-  const col = (i) => (t.accounts[i]?.mac === 'mac' ? 'var(--apple)' : ACCT[i % ACCT.length]); // the Mac mini's: Apple's (more Macs: a color of their own each)
+  // the Mac mini's: Apple's (more Macs: a color of their own each); a Gemini account's: Gemini's (shortcut: two of them share it)
+  const col = (i) => (t.accounts[i]?.mac === 'mac' ? 'var(--apple)' : t.accounts[i]?.gem ? 'var(--gem)' : ACCT[i % ACCT.length]);
+  const name = (a, i) => (a?.mac ? esc(a.label) : a?.gem ? `Gemini A${a.gem}` : `账号 ${i + 1}`), ring = (a, i) => (a.mac ? mark(false, 0, a.mac) : a.gem ? ac(a.gem, '', 'gem') : ac(i + 1));
   $('#view').html = `<div class="panel"><div class="sub">${n} 个账号的对话记录 · 金额按 API 价格折算，订阅不按这个收费</div>
     <div class="tiles">
       <div class="tile"><div class="k">累计</div><div class="v">${fmtTok(t.total)}</div><div class="u">${about(t.usd)}</div></div>
@@ -2165,10 +2167,10 @@ async function renderTokens() {
       <div class="tile"><div class="k">日均</div><div class="v">${fmtTok(t.total / active)}</div><div class="u">${about(t.usd / active)}</div></div>
     </div>
     <h3>近 14 天</h3><div class="card"><div class="bars">${days.map((x) => `<div title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${fmtTok(all(x.d))} · ${usd(x.d?.usd ?? 0)}">
-      ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${col(i)}" title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${t.accounts[i]?.mac ? esc(t.accounts[i].label) : `账号 ${i + 1}`} ${fmtTok(all(b))} · ${usd(b.usd)}"></i>` : '').join('')}</div>`).join('')}</div>
+      ${(x.d?.by ?? []).map((b, i) => all(b) ? `<i style="height:${all(b) / max * 100}%;background:${col(i)}" title="${x.dt.getMonth() + 1}/${x.dt.getDate()} ${name(t.accounts[i], i)} ${fmtTok(all(b))} · ${usd(b.usd)}"></i>` : '').join('')}</div>`).join('')}</div>
       <div class="ticks"><span>${days[0].dt.getMonth() + 1}/${days[0].dt.getDate()}</span><span>今天</span></div>
-      <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${col(i)}"></i>${a.mac ? esc(a.label) : `账号 ${i + 1}`}</span>`).join('')}</div></div>
-    <h3>按账号</h3>${t.accounts.map((a, i) => `<div class="card cardHead">${a.mac ? mark(false, 0, a.mac) : ac(i + 1)}<div class="grow"><b>${a.mac ? esc(a.label) : `账号 ${i + 1}`}</b>
+      <div class="legend">${t.accounts.map((a, i) => `<span><i style="background:${col(i)}"></i>${name(a, i)}</span>`).join('')}</div></div>
+    <h3>按账号</h3>${t.accounts.map((a, i) => `<div class="card cardHead">${ring(a, i)}<div class="grow"><b>${name(a, i)}</b>
       ${a.mac ? '' : `<div class="m">${esc(a.label)}</div>`}</div><div style="text-align:right"><b>${fmtTok(a.total)}</b><div class="m">${about(a.usd)}${a.plus != null ? `<span title="这台 Mac 上其他文件夹的 Claude Code 用量，不算进上面的任何合计"> + ${usd(a.plus)}</span>` : ''}</div></div></div>`).join('')}</div>`;
 }
 

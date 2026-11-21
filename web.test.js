@@ -352,11 +352,11 @@ const press = async (key, shift = false) => {
   }
   // 用量: each Mac's records (listed last) under its name and its mark (Apple's; the old rainbow one for the MacBook), not as one more 账号 n
   assert.equal(await evaluate(`(() => {
-    tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }], days: [], total: 3, usd: 0, today: '2000-01-02' }; renderTokens();
+    tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }, { label: 'g@x', total: 1, usd: 0, gem: 1 }], days: [], total: 4, usd: 0, today: '2000-01-02' }; renderTokens();
     const h = [...document.querySelectorAll('#view .cardHead')];
-    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg linearGradient stop[stop-color="#61BB46"]') ? '+rainbow' : x.querySelector('.mk svg') ? '+apple' : '')).join(' | '); })()`),
-    '账号 1 | Mac mini+apple | Mac a1+rainbow');
-  console.log('browser 用量 Mac mini and a MacBook ok');
+    return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg linearGradient stop[stop-color="#61BB46"]') ? '+rainbow' : x.querySelector('.mk svg') ? '+apple' : x.querySelector('.ac')?.textContent === 'A1' ? '+A1' : '')).join(' | '); })()`),
+    '账号 1 | Mac mini+apple | Mac a1+rainbow | Gemini A1+A1');
+  console.log('browser 用量 Mac mini, a MacBook and a Gemini account ok');
   // 换账号继续 on a Mac's: off in the list's menu, saying whose account it runs on; asked for anyway, a note, no card
   assert.equal(await evaluate(`(() => { const id = '0f1e2d3c-4b5a-4968-8776-000000000001';
     state.sessions.push({ id, title: 'on Mac', cwd: '/Users/me/work', acct: -1, mac: 'la-a1', at: Date.now(), pid: null });
