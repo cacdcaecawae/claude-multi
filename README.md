@@ -233,7 +233,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 
 **Gemini 对话**（Antigravity 命令行）
 
-- 先装好 Google 的 Antigravity 命令行：在 PowerShell 里运行 `irm https://antigravity.google/cli/install.ps1 | iex`。再运行 `claude-multi new gemini`：它会打开 `agy`，在里面选用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回去）。登录好以后输入 `/exit` 退出 `agy`，这个账号才会存下来。账号要能用 Antigravity（Google 会先让新账号验证一下）。
+- 先装好 Google 的 Antigravity 命令行：在 PowerShell 里运行 `irm https://antigravity.google/cli/install.ps1 | iex`。再运行 `claude-multi new gemini`：它会打开 `agy`，在里面选用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回去）。登录成功就存下来了，之后输入 `/exit` 退出 `agy`，会告诉你存成了哪个账号。账号要能用 Antigravity（Google 会先让新账号验证一下）。
 - **设置、MCP、插件和对话记录所有 Gemini 账号共用**，都在你自己的 `~\.gemini` 里，claude-multi 不搬也不改它（只在里面设好状态栏）。所以 A1 的额度用完了，换到 A2 可以接着聊同一个对话。
 - **同一时间只有一个 Gemini 账号在线。** `agy` 把登录存在 Windows 凭据管理器里的一条记录里，所有账号共用这一条。claude-multi 替每个账号保管它的登录（加密存在 `accounts\gemini-…` 里，只有这个 Windows 用户能解开），换账号就是把那个账号的登录换进去。用另一个账号开始时会先换过去；有 `agy` 在运行时换不了，先把它结束。列表里的 Gemini 对话显示的是现在在线的账号，接着聊就用它。
 - 每次运行 `new gemini` 都要登录一次，选哪个 Google 账号由你定。`agy` 之前自己的登录不会被直接拿来用；没登录成功的话，它会原样放回去。

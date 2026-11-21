@@ -1968,9 +1968,11 @@ if (process.platform === 'win32') {
   const sf = path.join(GEM, 'settings.json');
   fs.writeFileSync(sf, JSON.stringify({ model: 'gemini-4-neon-high' }));
   gemSettings(undefined, '/x/claude-multi.js');
-  assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')), { model: 'gemini-4-neon-high', statusLine: { type: 'command', command: 'node "/x/claude-multi.js" statusline' } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')), { model: 'gemini-4-neon-high', statusLine: { type: 'command', command: 'node /x/claude-multi.js statusline' } }); // bare: agy's cmd hands quotes on
   fs.writeFileSync(sf, String.fromCharCode(0xfeff) + JSON.stringify({ theme: 'dark' })); gemSettings(undefined, '/x/claude-multi.js'); // a BOM before (Notepad's)
-  assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')), { theme: 'dark', statusLine: { type: 'command', command: 'node "/x/claude-multi.js" statusline' } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')), { theme: 'dark', statusLine: { type: 'command', command: 'node /x/claude-multi.js statusline' } });
+  gemSettings(undefined, '/x y/claude-multi.js'); // a path with a space: none (ours out), the rest kept
+  assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')), { theme: 'dark' });
   fs.writeFileSync(sf, '{ theme: dark }'); gemSettings(undefined, '/x/claude-multi.js'); // not JSON: left as it is
   assert.equal(fs.readFileSync(sf, 'utf8'), '{ theme: dark }');
   fs.writeFileSync(sf, JSON.stringify({ statusLine: { command: 'mine.cmd' } })); gemSettings(undefined, '/x/claude-multi.js');
@@ -2025,7 +2027,12 @@ if (process.platform === 'win32') {
       const tok = path.join(TEST_HOME, 'tok.dpapi'), fetch0 = global.fetch, day = new Date().toLocaleDateString('sv').replace(/-/g, '');
       const signs = (s) => execFileSync('powershell.exe', ['-NoProfile', '-Command', 'Add-Type -AssemblyName System.Security; [IO.File]::WriteAllText($env:F, [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($env:S), $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)))'], { env: { ...process.env, F: tok, S: s } });
       const yes = path.join(TEST_HOME, 'agy-signs.js'), no = path.join(TEST_HOME, 'agy-none.js'), o = process.env.NODE_OPTIONS;
-      fs.writeFileSync(yes, `require('child_process').execFileSync(process.execPath, ['-e', ${JSON.stringify(`require(${JSON.stringify(path.join(__dirname, 'claude-multi.js'))}).agyCred('load', ${JSON.stringify(tok)})`)}], { env: { ...process.env, NODE_OPTIONS: '' } }); process.exit(0);`);
+      // (the one that signs in stays on till the account is on, as you would in agy, and says what it saw then)
+      const saw = path.join(TEST_HOME, 'agy-saw.txt');
+      fs.writeFileSync(yes, `require('child_process').execFileSync(process.execPath, ['-e', ${JSON.stringify(`require(${JSON.stringify(path.join(__dirname, 'claude-multi.js'))}).agyCred('load', ${JSON.stringify(tok)})`)}], { env: { ...process.env, NODE_OPTIONS: '' } });
+const fs = require('fs'), t = Date.now(); let on = null;
+while (!on && Date.now() - t < 30000) { try { on = JSON.parse(fs.readFileSync(${JSON.stringify(regFile)}, 'utf8')).geminiOn; } catch {} if (!on) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300); }
+fs.writeFileSync(${JSON.stringify(saw)}, String(on)); process.exit(0);`);
       fs.writeFileSync(no, 'process.exit(1);');
       const add = async (signed) => {
         process.env.NODE_OPTIONS = `--require ${JSON.stringify(signed ? yes : no)}`;
@@ -2045,14 +2052,14 @@ if (process.platform === 'win32') {
         assert.equal(await add(true), true); // signed in: that one A1 (its folder: its sign-in alone), the status line set
         const g1 = reg().gemini?.[0];
         assert.deepEqual([g1?.id, g1?.email, ...await on()], [`gemini-${day}-001`, 'g1@example.com', g1?.id, one]);
-        assert.deepEqual([fs.readdirSync(g1.home), fs.existsSync(stash)], [['cm-login.dpapi'], false]);
-        assert.match(fs.readFileSync(sf, 'utf8'), /claude-multi\.js\\" statusline/);
+        assert.deepEqual([fs.readdirSync(g1.home), fs.existsSync(stash), fs.readFileSync(saw, 'utf8')], [['cm-login.dpapi'], false, g1.id]); // on while agy still ran
+        if (!/\s/.test(__dirname)) assert.match(fs.readFileSync(sf, 'utf8'), /"node [^"]*claude-multi\.js statusline"/);
         assert.equal(await add(false), null); // the next, not signed in: its folder gone, A1 on again
         assert.deepEqual([reg().gemini.length, ...await on(), made()], [1, g1.id, one, [g1.id]]);
         yours();
-        const two = '{"token":{"access_token":"t2"}}'; signs(two);
+        const two = '{"token":{"access_token":"t2"}}'; signs(two); fs.rmSync(saw);
         assert.equal(await add(true), true); // the same Google account again: A1's sign-in renewed, A1 on, no second
-        assert.deepEqual([reg().gemini.length, ...await on(), made()], [1, g1.id, two, [g1.id]]);
+        assert.deepEqual([reg().gemini.length, ...await on(), made(), fs.readFileSync(saw, 'utf8')], [1, g1.id, two, [g1.id], g1.id]);
         yours();
       } finally { global.fetch = fetch0; }
       assert.equal((await agyCred('has')).status, 0); assert.equal((await agyCred('drop')).status, 0); assert.equal((await agyCred('has')).status, 3);
