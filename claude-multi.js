@@ -1524,12 +1524,15 @@ async function runGem(g, args = []) {
   child.on('error', (e) => { console.error(`无法启动 agy：${e.message}`); process.exit(1); });
   child.on('exit', (code) => process.exit(code ?? 1));
 }
-// A Gemini conversation's record: agy's transcript.jsonl in its brain folder, a step a line (step_index, type, source,
-// status, created_at to the second; content for a message, tool and args for a tool call), your words in it between
-// <USER_REQUEST> tags. Read again only once it changed; a line still being written left out till then. shortcut: read
-// whole on each change; read its tail if one grows to megabytes
-const GEM_ACTIVE = /^(RUNNING|GENERATING|PENDING|QUEUED|WAITING)$/; // a step not over yet (WAITING: on you, a permission)
+// A Gemini conversation's record: agy's transcript.jsonl in its brain folder, a step a line, as agy's own swarm board
+// reads it (builtin\plugins\swarm\sidecars\swarm_board\main.mjs): step_index, type, source, status, created_at to the
+// second. USER_INPUT: yours (source USER_EXPLICIT), your words between <USER_REQUEST> tags. PLANNER_RESPONSE: the
+// model's, logged only once it's done: content, tool_calls [{name, args}] (string args JSON-quoted). GENERIC: a tool
+// call's result (RUNNING for one sent to the background, for good). Also SYSTEM_MESSAGE, ERROR_MESSAGE. A turn is over
+// when its newest step is a reply calling no tool. Read again only once it changed (a line still being written left out
+// till then); the last 30 read kept. shortcut: read whole on each change; read its tail if one grows to megabytes
 const gemSaid = (c) => String(/<USER_REQUEST>\n?([\s\S]*?)\n?<\/USER_REQUEST>/.exec(c ?? '')?.[1] ?? c ?? '').trim();
+const gemCalls = (s) => (s?.type === 'PLANNER_RESPONSE' && Array.isArray(s.tool_calls) ? s.tool_calls : []);
 const gemReads = new Map();
 function gemSteps(id) {
   if (!/^[\w-]{1,80}$/.test(id ?? '')) return [];
@@ -1537,18 +1540,34 @@ function gemSteps(id) {
   let mt = 0;
   try { mt = fs.statSync(f).mtimeMs; } catch { return []; }
   const r = gemReads.get(id);
-  if (r?.mt === mt) return r.steps;
+  gemReads.delete(id);
+  if (r?.mt === mt) return gemReads.set(id, r), r.steps;
   let steps;
   try { steps = fs.readFileSync(f, 'utf8').split('\n').flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } }); } catch { return r?.steps ?? []; }
   steps.sort((a, b) => a.step_index - b.step_index);
   gemReads.set(id, { mt, steps });
+  if (gemReads.size > 30) gemReads.delete(gemReads.keys().next().value);
   return steps;
+}
+// what the list needs of one (its record read only once it changed): your first message and when, its last step's
+// time, and what it's at by that step: 'busy' (a turn not over: yours just in, a tool called or its result, the model
+// on it again) or 'wait' (a step waiting on you, if agy logs one so) or null
+const gemSums = new Map();
+function gemSum(id) {
+  let mt = 0;
+  try { mt = fs.statSync(path.join(GEMINI_HOME, 'antigravity-cli', 'brain', id, '.system_generated', 'logs', 'transcript.jsonl')).mtimeMs; } catch {}
+  const r = gemSums.get(id);
+  if (r?.mt === mt) return r.sum;
+  const steps = gemSteps(id), you = steps.find((x) => x.type === 'USER_INPUT' && x.source === 'USER_EXPLICIT'), last = steps[steps.length - 1];
+  const sum = you ? { first: gemSaid(you.content).split('\n')[0].trim(), made: gemTime(you.created_at), lastAt: gemTime(last.created_at),
+    going: last.status === 'WAITING' ? 'wait' : (last.type === 'PLANNER_RESPONSE' && !gemCalls(last).length) || last.type === 'ERROR_MESSAGE' ? null : 'busy' } : null;
+  gemSums.set(id, { mt, sum });
+  return sum;
 }
 // The Gemini conversations, once there's an account: ~/.gemini's (its conversation_summaries.db) with something you said
 // in it (its record: the first is its title till agy gives one), not a helper agent's, their folder still there; newest
 // first; each on the account on (any goes on with it). The list read again only once the db changed; a read that fails
-// (a write in flight) keeps the last. going: its last step not over ('busy', or 'wait' on you), what it is while an agy
-// runs it
+// (a write in flight) keeps the last. going, lastAt: what it's at, for one an agy runs here (since it started)
 let gemHead = null;
 const gemTime = (s) => { const t = Date.parse(String(s ?? '').replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1')); return t > 0 ? t : 0; };
 function listGemini(reg = load()) {
@@ -1565,25 +1584,31 @@ function listGemini(reg = load()) {
       let cwd = '';
       try { cwd = require('url').fileURLToPath(JSON.parse(t.ws)[0]); } catch {}
       if (!cwd || !fs.existsSync(cwd)) continue;
-      const steps = gemSteps(t.id), you = steps.find((x) => x.type === 'USER_INPUT' && x.source === 'USER_EXPLICIT'), last = steps[steps.length - 1];
-      if (!you) continue;
-      const first = gemSaid(you.content).split('\n')[0].trim(), title = String(t.title || first).split('\n')[0].trim().slice(0, 100);
-      out.push({ id: t.id, gem: true, acct, cwd, title, prompt: first && first !== title ? first.slice(0, 200) : null,
-        at: Math.max(gemTime(t.up), gemTime(last.created_at)), made: gemTime(you.created_at), pid: null, busy: false, wait: false,
-        going: last.status === 'WAITING' ? 'wait' : last.type === 'USER_INPUT' || GEM_ACTIVE.test(last.status ?? '') ? 'busy' : null });
+      const s = gemSum(t.id);
+      if (!s) continue;
+      const title = String(t.title || s.first).split('\n')[0].trim().slice(0, 100);
+      out.push({ id: t.id, gem: true, acct, cwd, title, prompt: s.first && s.first !== title ? s.first.slice(0, 200) : null,
+        at: Math.max(gemTime(t.up), s.lastAt), made: s.made, pid: null, busy: false, wait: false, going: s.going, lastAt: s.lastAt });
     }
   }
   return out.sort((a, b) => b.at - a.at);
 }
 // A Gemini conversation's record as the page's messages (as gptHistory makes a GPT one's): what you said, its replies, a
-// line per tool call named as Claude's are (the page counts them by name), a turn's end once the next begins or it's no
-// longer running (with about how long it took: its steps' times are to the second); by step_index, in pieces as
-// history's. One running (live): read up to its first step not over (a reply mid-stream), which waits for the next read.
+// line per tool it called named as Claude's are (the page counts them by name; its results not shown), a model error as
+// a note; a turn's end (about how long it took: its steps' times are to the second) with the reply that ends it, or by
+// your next message, or once it's no longer running (one cut short). By step_index, in pieces as history's: a model
+// step is logged whole, so nothing waits for a next read.
 const GEM_TOOL = [[/command|shell|terminal/i, 'Bash'], [/write|replace|edit|patch|create_file|delete/i, 'Edit'], [/view|read_file|list_dir|open_file/i, 'Read'],
   [/search_web|web_search/i, 'WebSearch'], [/grep|find|search/i, 'Grep'], [/url|fetch|browser/i, 'WebFetch']];
+const gemArg = (v) => { const s = typeof v === 'string' ? v.trim() : ''; if (/^".*"$/s.test(s)) try { return String(JSON.parse(s)); } catch {} return s; };
+function gemTool(c) {
+  const name = String(c?.name ?? ''), a = c?.args && typeof c.args === 'object' ? c.args : {};
+  const what = ['CommandLine', 'Command', 'AbsolutePath', 'TargetFile', 'Path', 'Query', 'Url', 'toolSummary', 'toolAction'].map((k) => gemArg(a[k])).find(Boolean)
+    ?? Object.values(a).map(gemArg).find(Boolean) ?? '';
+  return `${GEM_TOOL.find(([re]) => re.test(name))?.[1] ?? name}  ${what.split('\n')[0].slice(0, 160)}`.trim();
+}
 function gemHistory(id, { from, end, keep = 120, live = false } = {}) {
-  const all = gemSteps(id), stop = live ? all.findIndex((s) => GEM_ACTIVE.test(s.status ?? '')) : -1, got = stop < 0 ? all : all.slice(0, stop);
-  const hi = stop < 0 ? Infinity : all[stop].step_index;
+  const got = gemSteps(id);
   let items = [], turn = null; // the turn going: when it began, its last step's time
   const over = (o) => { if (turn) items.push({ role: 'done', text: String(Math.max(1000, turn.last - turn.at)), o }); turn = null; };
   for (const s of got) {
@@ -1593,13 +1618,12 @@ function gemHistory(id, { from, end, keep = 120, live = false } = {}) {
       over(o); turn = { at, last: at };
       const text = gemSaid(s.content);
       if (text) items.push({ role: 'user', text, at, o });
-      continue;
-    }
-    if (turn) turn.last = at;
-    if (s.type === 'PLANNER_RESPONSE') { if (String(s.content ?? '').trim()) items.push({ role: 'claude', text: String(s.content).trim(), at, o }); }
-    else if (s.type !== 'SYSTEM_MESSAGE') {
-      const name = String(s.tool ?? s.tool_name ?? s.type ?? ''), a = s.args && typeof s.args === 'object' ? Object.values(s.args).find((v) => typeof v === 'string') : s.args;
-      items.push({ role: 'tool', text: `${GEM_TOOL.find(([re]) => re.test(name))?.[1] ?? name}  ${String(a ?? '').split('\n')[0].slice(0, 160)}`.trim(), at, o });
+    } else if (s.type === 'PLANNER_RESPONSE' || s.type === 'ERROR_MESSAGE') {
+      if (turn) turn.last = at; else turn = { at, last: at }; // (going on by itself: after a background task, say)
+      if (s.type === 'ERROR_MESSAGE') { items.push({ role: 'note', text: `出错了：${String(s.error ?? s.content ?? '').split('\n')[0].slice(0, 200)}`, at, o }); over(o); continue; }
+      if (String(s.content ?? '').trim()) items.push({ role: 'claude', text: String(s.content).trim(), at, o });
+      for (const c of gemCalls(s)) items.push({ role: 'tool', text: gemTool(c), at, o });
+      if (!gemCalls(s).length) over(o);
     }
   }
   if (!live) over((got[got.length - 1]?.step_index ?? 0) + 0.5);
@@ -1608,11 +1632,11 @@ function gemHistory(id, { from, end, keep = 120, live = false } = {}) {
   if (from == null && items.length > keep) { // the newest messages, back to one of yours; more before them: where they begin
     let cut = items.length - keep;
     while (cut > 0 && items[cut].role !== 'user') cut--;
-    if (cut > 0 && items[cut - 1].role === 'done') cut--; // (the turn before's end goes by your next message's place: with it)
+    if (cut > 0 && items[cut - 1].role === 'done' && items[cut - 1].o === items[cut].o) cut--; // (a turn cut short: its end by your next message, with it)
     items = items.slice(cut); start = cut ? items[0].o : 0;
   }
   const last = Math.max(-1, ...got.map((s) => s.step_index), from != null ? Number(from) - 1 : -1);
-  return { items: items.map(({ o, ...m }) => m), start, end: hi === Infinity ? last + 1 : hi };
+  return { items: items.map(({ o, ...m }) => m), start, end: last + 1 };
 }
 
 // --- GPT 聊天:OpenAI's strongest model (GPT-6 Astra) over the API with your key (openai-key.txt here), as a plain chat:
@@ -3658,7 +3682,9 @@ async function web() {
     }
     for (const s of list) {
       const t = live.find((x) => x.gem.id === s.id);
-      if (t) { s.pid = t.pid; s.key = t.key; s.busy = s.going === 'busy'; s.wait = s.going === 'wait'; }
+      // what its record says, from steps this agy wrote (one an earlier agy left mid-turn isn't at work now); to the second
+      const now = t && s.lastAt >= t.gem.since - 1000;
+      if (t) { s.pid = t.pid; s.key = t.key; s.busy = now && s.going === 'busy'; s.wait = now && s.going === 'wait'; }
     }
     gemCache = list; gemAt = Date.now();
     return list;
@@ -4167,7 +4193,7 @@ async function web() {
       // and the GPT ones among them, by when they were last written (a GPT one runs here or not at all)
       for (const { home, ...s } of gptSessions()) list.push({ ...s, where: !s.pid ? null : s.web ? 'web' : 'pc', line: s.pid ? { model: s.model, effort: s.effort } : null });
       // and the Gemini ones (running: here), with what agy's status line shows; key: a new one's tab finds its id by it
-      for (const { made, going, ...s } of gemSessions()) list.push({ ...s, where: s.pid ? 'web' : null, line: s.pid ? readLine(s.id) : null });
+      for (const { made, going, lastAt, ...s } of gemSessions()) list.push({ ...s, where: s.pid ? 'web' : null, line: s.pid ? readLine(s.id) : null });
       // and the GPT 聊天 ones: no folder, no account, none running anywhere (busy: an answer pending at OpenAI)
       for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });

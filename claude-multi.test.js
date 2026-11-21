@@ -1946,33 +1946,41 @@ if (process.platform === 'win32') {
   ins.run('c-sub', 'helper', '', '2026-11-20 09:00:00+00:00', JSON.stringify([uri]), 'c-old');      // a helper agent's
   ins.run('c-gone', 'x', '', '2026-11-20 09:00:00+00:00', JSON.stringify([url.pathToFileURL(path.join(TEST_HOME, 'nope')).href]), ''); // its folder gone
   d.close();
-  // each one's record, as agy 1.5 writes it (brain\<id>\.system_generated\logs\transcript.jsonl, a step a line); a line
-  // still being written at the end
+  // each one's record, as agy 1.5 writes it (brain\<id>\.system_generated\logs\transcript.jsonl, a step a line, as its own
+  // swarm board reads it): a model step logged once done, its tool calls on it (string args JSON-quoted), each call's
+  // result a GENERIC step (one sent to the background RUNNING for good); a line still being written at the end
   const say = (t) => `<USER_REQUEST>\n${t}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: now.\n</ADDITIONAL_METADATA>`;
   const rec = (id, steps) => { const f = path.join(GEM, 'brain', id, '.system_generated', 'logs'); fs.mkdirSync(f, { recursive: true });
     fs.writeFileSync(path.join(f, 'transcript.jsonl'), steps.map((s, i) => JSON.stringify({ step_index: i, status: 'DONE', ...s })).join('\n') + '\n{"step_index":9'); };
-  const U = (t, at) => ({ source: 'USER_EXPLICIT', type: 'USER_INPUT', created_at: at, content: say(t) }), M = (t, at, more) => ({ source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: at, content: t, ...more });
-  rec('c-old', [U('把登录改好', '2026-11-19T07:59:00Z'), M('好了', '2026-11-19T07:59:30Z')]);
-  rec('c-new', [U('加一个测试\n第二行', '2026-11-20T10:00:00Z'), M('', '2026-11-20T10:00:02Z'),
-    { source: 'MODEL', type: 'GENERIC', tool: 'run_command', args: { CommandLine: 'npm test\n--watch', Cwd: work }, created_at: '2026-11-20T10:00:03Z' },
-    { source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'x', created_at: '2026-11-20T10:00:04Z' }, M('测试加好了', '2026-11-20T10:00:09Z'),
-    { source: 'USER_IMPLICIT', type: 'USER_INPUT', content: 'auto', created_at: '2026-11-20T10:04:00Z' },
-    U('再跑一遍', '2026-11-20T10:05:00Z'), M('在跑', '2026-11-20T10:05:01Z', { status: 'GENERATING' })]);
+  const U = (t, at) => ({ source: 'USER_EXPLICIT', type: 'USER_INPUT', created_at: at, content: say(t) }), M = (t, at, calls) => ({ source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: at, content: t, ...(calls && { tool_calls: calls }) });
+  const G = (at, status = 'DONE') => ({ source: 'MODEL', type: 'GENERIC', status, created_at: at }), q = JSON.stringify;
+  // one cut short by your next message (its end by that), the next answered
+  rec('c-old', [U('把登录改好', '2026-11-19T07:59:00Z'), M('改一半', '2026-11-19T07:59:10Z', [{ name: 'edit_file', args: { toolSummary: q('Edit a.js'), TargetFile: q('/p/a.js') } }]),
+    G('2026-11-19T07:59:12Z'), U('算了', '2026-11-19T07:59:30Z'), M('好了', '2026-11-19T07:59:40Z')]);
+  // two commands, one a server left running (its result RUNNING for good); then on at work: a command called, its result not in
+  rec('c-new', [U('加一个测试\n第二行', '2026-11-20T10:00:00Z'), M('', '2026-11-20T10:00:02Z', [{ name: 'run_command', args: { CommandLine: q('npm test\n--watch'), Cwd: q(work) } }, { name: 'run_command', args: { CommandLine: q('npm run dev') } }]),
+    G('2026-11-20T10:00:05Z'), G('2026-11-20T10:00:05Z', 'RUNNING'), { source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'x', created_at: '2026-11-20T10:00:06Z' },
+    M('测试加好了', '2026-11-20T10:00:09Z'), { source: 'USER_IMPLICIT', type: 'USER_INPUT', content: 'auto', created_at: '2026-11-20T10:04:00Z' },
+    U('再跑一遍', '2026-11-20T10:05:00Z'), M('在跑', '2026-11-20T10:05:01Z', [{ name: 'run_command', args: { CommandLine: q('npm test') } }])]);
   rec('c-empty', [{ source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'x', created_at: '2026-11-20T09:00:00Z' }]);
-  rec('c-sub', [U('sub', '2026-11-20T09:00:00Z')]); rec('c-gone', [U('gone', '2026-11-20T09:00:00Z')]);
+  rec('c-sub', [U('sub', '2026-11-20T09:00:00Z')]);
+  rec('c-gone', [U('gone', '2026-11-20T09:00:00Z'), { source: 'SYSTEM', type: 'ERROR_MESSAGE', error: 'quota\nmore', created_at: '2026-11-20T09:00:00Z' }]);
   const L = listGemini();
   assert.deepEqual(L.map((s) => [s.id, s.title, s.prompt, s.cwd, s.acct, s.gem, s.going]), [['c-new', '加一个测试', null, work, 0, true, 'busy'], ['c-old', '修复登录', '把登录改好', work, 0, true, null]]);
-  assert.deepEqual(L.map((s) => [s.at, s.made]), [[Date.parse('2026-11-20T10:05:01Z'), Date.parse('2026-11-20T10:00:00Z')], [Date.parse('2026-11-19T08:00:00.123Z'), Date.parse('2026-11-19T07:59:00Z')]]);
-  // its record as the page's messages: yours (without what agy adds), its replies, a tool call as Claude's is named, a
-  // turn's end with about how long; running, up to its reply mid-stream (read again from there); in pieces
+  assert.deepEqual(L.map((s) => [s.at, s.made, s.lastAt]), [[Date.parse('2026-11-20T10:05:01Z'), Date.parse('2026-11-20T10:00:00Z'), Date.parse('2026-11-20T10:05:01Z')],
+    [Date.parse('2026-11-19T08:00:00.123Z'), Date.parse('2026-11-19T07:59:00Z'), Date.parse('2026-11-19T07:59:40Z')]]);
+  // its record as the page's messages: yours (without what agy adds), its replies, each tool it called as Claude's are
+  // named (its results not shown), a turn's end with about how long, a model error as a note; nothing held back for a
+  // step still running (a server); in pieces
   const hd = (id, o) => gemHistory(id, o).items.map((m) => [m.role, m.text]);
-  assert.deepEqual(hd('c-new', { live: true }), [['user', '加一个测试\n第二行'], ['tool', 'Bash  npm test'], ['claude', '测试加好了'], ['done', '9000'], ['user', '再跑一遍']]);
-  assert.deepEqual([gemHistory('c-new', { live: true }).end, gemHistory('c-new').end], [7, 8]);
-  assert.deepEqual(hd('c-new').slice(-2), [['claude', '在跑'], ['done', '1000']]); // over (no agy on it): all, its end too
-  // read on from where the last read ended (6: before your next message was there): the turn before's end comes with it
-  assert.deepEqual(hd('c-new', { from: 6, live: true }), [['done', '9000'], ['user', '再跑一遍']]);
-  const k2 = gemHistory('c-new', { keep: 2 }); // the newest piece from your last message, the turn before's end with it; the rest before
-  assert.deepEqual([k2.start, k2.items.map((m) => m.role), hd('c-new', { end: k2.start }).map((m) => m[0])], [6, ['done', 'user', 'claude', 'done'], ['user', 'tool', 'claude']]);
+  const tail = [['user', '再跑一遍'], ['claude', '在跑'], ['tool', 'Bash  npm test']];
+  assert.deepEqual(hd('c-new', { live: true }), [['user', '加一个测试\n第二行'], ['tool', 'Bash  npm test'], ['tool', 'Bash  npm run dev'], ['claude', '测试加好了'], ['done', '9000'], ...tail]);
+  assert.deepEqual([gemHistory('c-new', { live: true }).end, gemHistory('c-new').end, hd('c-new', { from: 6, live: true })], [9, 9, tail]);
+  assert.deepEqual(hd('c-new').slice(-1), [['done', '1000']]); // cut short (no agy on it any more): its end too
+  assert.deepEqual(hd('c-old'), [['user', '把登录改好'], ['claude', '改一半'], ['tool', 'Edit  /p/a.js'], ['done', '10000'], ['user', '算了'], ['claude', '好了'], ['done', '10000']]);
+  const k3 = gemHistory('c-old', { keep: 3 }); // the newest piece from your last message, the end of the turn it cut short with it; the rest before
+  assert.deepEqual([k3.start, k3.items.map((m) => m.role), hd('c-old', { end: k3.start }).map((m) => m[0])], [3, ['done', 'user', 'claude', 'done'], ['user', 'claude', 'tool']]);
+  assert.deepEqual(hd('c-gone'), [['user', 'gone'], ['note', '出错了：quota'], ['done', '1000']]);
   assert.deepEqual([hd('../c-old'), hd('nope')], [[], []]);
   // the same ones with A2 on (they go on with it); none before there's an account
   fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, a2], geminiOn: a2.id }));

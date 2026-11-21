@@ -2685,6 +2685,7 @@ function makeConv(body, title) {
   async function stop() {
     const me = ++stops;
     input('\x1b');
+    if (c.gem) return; // (agy: Esc interrupts it; nothing of Claude's box to take back)
     for (const end = Date.now() + 3000; me === stops && term && !c.closed && Date.now() < end;) {
       await new Promise((ok) => setTimeout(ok, 300));
       const t = me === stops && typed();
@@ -2759,6 +2760,8 @@ function makeConv(body, title) {
       // asked again after the wait: the conversation ended, or a menu came up (Enter would pick what's highlighted)
       if (!current() || c.ended) return back('这个对话换了会话、终端或已结束，消息已放回草稿');
       if (menuNow && !(answer && typeNow)) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
+      // agy mid-turn may be asking in its terminal (run this command?): an Enter from here would answer it
+      if (c.gem && busyNow) return back('Gemini 还没答完，也可能在「终端」里等你确认。等它答完再发（消息放回了输入框）');
       const lost = '没发出去，消息放回了输入框'; // a step that didn't reach Claude: no Enter after it
       // each step to the terminal the message began on: switched to another account meanwhile, the rest isn't sent
       const step = (d) => (current() ? input(d) : Promise.resolve(false));
@@ -3243,7 +3246,10 @@ function makeConv(body, title) {
 
   let busyIdle = 0, healAt = 0; // since when the service has had it idle while its screen says answering; the last reopen for that
   c.sync = () => { // from the list: its title and account; and where it runs
-    if (c.gem && !c.id && key) { const n = state?.sessions.find((x) => x.gem && x.key === key); if (n) { c.id = session.id = n.id; markRows(); save(); } } // a new Gemini one: listed once you've said something
+    if (c.gem && !c.id && key) { // a new Gemini one: listed once you've said something (⋯'s 新对话: in its origin's 项目 then)
+      const n = state?.sessions.find((x) => x.gem && x.key === key);
+      if (n) { c.id = session.id = n.id; markRows(); save(); if (c.joins) { for (const p of c.joins) post('/api/project', { op: 'add', id: p, conv: [n.id] }).catch(() => {}); c.joins = null; } }
+    }
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null;
     if (s) { c.title = s.title; c.acct = s.pid ? s.acct + 1 : body.acct ?? s.acct + 1; }
     // its folder: a button, what's in it shown while the mouse is on it (dirPop), a click opens it in 预览; a Mac's own
