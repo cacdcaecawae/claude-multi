@@ -52,5 +52,18 @@
     }
     return { busy, menu };
   }
-  if (typeof module !== 'undefined') module.exports = { parseScreen }; else root.parseScreen = parseScreen;
+  // agy's screen (Google's Antigravity CLI, 1.5): at work, its spinner row over its box (「⣟  Generating...」); a question
+  // (Run this command?, or its own 「Question 1/1: …」): numbered options over 「↑/↓ Navigate · …」 with > at the current
+  // one, read as Claude's with that > as ❯ (your messages above and its box start > too: the last numbered one only); its
+  // own question's 「Write-in...」 open (Your answer:, 「enter Submit · esc Back」): writing; what waits in its queue,
+  // 「▸ … (alt+m to send immediately)」 (its row may be cut short: …)
+  function parseAgyScreen(rows) {
+    const spin = rows.map((r) => /^\s*[⠀-⣿]\s+(\S.*?)\s*$/.exec(r)).find(Boolean), foot = rows.findLastIndex((r) => /↑\/↓ Navigate/.test(r));
+    const up = rows.slice(0, Math.max(0, foot)), cur = up.findLastIndex((r) => /^\s*>\s*\d+\.\s/.test(r));
+    if (cur >= 0) up[cur] = up[cur].replace('>', '❯');
+    return { busy: spin ? [spin[0], spin[1], ''] : null, menu: cur >= 0 ? parseScreen(up).menu : null,
+      writing: foot < 0 && rows.some((r) => /enter Submit · esc Back/.test(r)),
+      queue: rows.map((r) => /^\s*▸\s+(.*?)\s*\(alt\+m to send immediately\)\s*$/.exec(r)?.[1]?.replace(/…$/, '')).filter(Boolean) };
+  }
+  if (typeof module !== 'undefined') module.exports = { parseScreen, parseAgyScreen }; else Object.assign(root, { parseScreen, parseAgyScreen });
 })(this);

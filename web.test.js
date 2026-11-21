@@ -12,6 +12,8 @@ const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
+let termGem = '', gemRes = null; // one whose screen shows agy's (these rows), and its stream, to show more on it later
+const inputs = []; // what was typed into the terminals (/api/input), in order
 const openBodies = []; // what each open asked for
 let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
 let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
@@ -29,6 +31,7 @@ dirs['C:/test'] = { path: 'C:/test', up: 'C:/', dirs: ['C:/test/sub'], files: ['
 dirs['C:/test/sub'] = { path: 'C:/test/sub', up: 'C:/test', dirs: [], files: ['c.txt'] };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/api/input') { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { inputs.push(JSON.parse(b).data); } catch {} }); }
   if (url.pathname === '/api/open') { opens++; let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { openBodies.push(JSON.parse(b)); } catch {} }); }
   if (url.pathname === '/api/history') { histReads.push(Date.now()); histUrls.push(url.search); if (histUrls.length > 50) histUrls.shift(); }
   if (url.pathname === '/api/history' && histHang) { histHang = false; hung = res; return; } // left open, never answered
@@ -54,6 +57,7 @@ const server = http.createServer((req, res) => {
     const osc = (t) => `event: data\ndata: ${JSON.stringify(`x\x1b]52;c;${Buffer.from(t).toString('base64')}\x07y`)}\n\n`;
     res.write(osc('旧的复制'));
     if (termBusy) res.write(`event: data\ndata: ${JSON.stringify('\r\n✻ Thinking… (3s · esc to interrupt)\r\n')}\n\n`);
+    if (termGem) { gemRes = res; res.write(`event: data\ndata: ${JSON.stringify(termGem)}\n\n`); }
     setTimeout(() => res.write(osc('终端里复制的中文')), 300);
     return;
   }
@@ -531,7 +535,8 @@ const press = async (key, shift = false) => {
   await evaluate("document.querySelector('[data-kind=\"gem\"]').click()");
   assert.deepEqual(await evaluate("[...document.querySelectorAll('#view [data-open]')].map((r) => r.dataset.open)"), ['GEM1']);
   await evaluate("document.querySelector('[data-kind=\"all\"]').click()");
-  historyId = 'GEM1'; histFeed = [{ role: 'user', text: 'hi', at: 1 }, { role: 'claude', text: 'Hi! How can I help you today?' }];
+  historyId = 'GEM1'; histFeed = [{ role: 'user', text: 'hi\n附件：C:\\Users\\me\\.claude-multi\\uploads\\20261121T010203-abcdef-猫.png', at: 1 }, { role: 'claude', text: 'Hi! How can I help you today?' }];
+  termGem = '\r\n> 你是什么模型\r\n⣟  Generating...\r\n────────\r\n';
   await evaluate("document.querySelector('#view [data-open=\"GEM1\"]').click()"); // (one not running: started, as a Claude one)
   const rb = await opened();
   assert.deepEqual([rb.id, rb.acct, rb.gem], ['GEM1', 1, true]);
@@ -539,7 +544,55 @@ const press = async (key, shift = false) => {
   await until("focusG.active.el.querySelector('.who')");
   assert.deepEqual(await evaluate("[focusG.active.id, !!focusG.active.el.querySelector('.seg'), focusG.active.el.querySelector('.seg .on').dataset.v, focusG.active.el.querySelector('.who').textContent]"), ['GEM1', true, 'hist', 'Gemini']);
   assert.ok(histUrls.some((u) => /[?&]gem=1/.test(u) && /id=GEM1/.test(u)), histUrls.join(' '));
-  historyId = 'A'; histFeed = null;
+  // a picture it was sent (as a file: 附件：its path): itself in the bubble, small, its name under it
+  assert.deepEqual(await evaluate("(() => { const a = focusG.active.el.querySelector('.hm.user a.att.pic'); return a && [a.querySelector('img').getAttribute('src'), a.textContent]; })()"),
+    [`/api/file?n=${encodeURIComponent('20261121T010203-abcdef-猫.png')}`, '附件：猫.png']);
+  // agy at work on its screen: 正在回复 at once (the list's word comes seconds later), its tab turning too
+  await until("focusG.active.live === 'busy'");
+  assert.match(await evaluate("focusG.active.el.querySelector('.live .busy')?.textContent"), /^Gemini 正在回复 · \d+s$/); // how long: since the page saw it start (agy's screen says none)
+  // what waits in its queue (as agy 1.5 shows it): 排队中; its thought summary (▸ too) isn't one
+  const gemShow = (rows) => gemRes.write(`event: data\ndata: ${JSON.stringify('\x1b[2J\x1b[H' + rows.join('\r\n'))}\n\n`), R = '─'.repeat(60);
+  gemShow([R, '> 你是什么模型', '▸ Thought for 5s, 203 tokens', '⣟  Generating...', '▸ 再写一首，关于冬天 (alt+m to send immediately)', R, '>', R]);
+  await until("[...focusG.active.el.querySelectorAll('.live .hm.user.pending')].some((e) => /排队中/.test(e.textContent) && /再写一首，关于冬天/.test(e.textContent))");
+  assert.equal(await evaluate("focusG.active.el.querySelectorAll('.live .hm.user.pending').length"), 1);
+  // a question (Run this command?, as agy 1.5 asks it): in 对话 with its options; one picked: the arrow keys to it, Enter
+  gemShow([R, '> 删掉 junk.txt', '● Ran (Remove-Item .\\junk.txt) (ctrl+o to expand)', 'Command', R, 'Requesting permission for:', '   Remove-Item .\\junk.txt', 'Run this command?',
+    '> 1. Yes, run command', "  2. Yes, and always allow in this conversation for commands that start with 'Remove-Item'", '  3. Yes, and always allow (Persist to settings.json)', '  4. No, cancel',
+    '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command', 'Gemini 账号 A1']);
+  await until("focusG.active.el.querySelector('.live .ask [data-pick]')");
+  assert.deepEqual(await evaluate("[focusG.active.live, focusG.active.el.querySelectorAll('.live .ask [data-pick]').length, /Run this command\\?/.test(focusG.active.el.querySelector('.live .ask').textContent)]"), ['ask', 4, true]);
+  inputs.length = 0;
+  await evaluate("focusG.active.el.querySelector('.live .ask [data-pick=\"4\"]').click()");
+  for (let i = 0; i < 60 && inputs.length < 4; i++) await new Promise((r) => setTimeout(r, 50)); // (the keys on their way)
+  assert.deepEqual(inputs, ['\x1b[B', '\x1b[B', '\x1b[B', '\r']);
+  // its own question (as agy 1.5 asks it): 「Write-in...」 picked, opened with Enter; its box open, 对话 says to write the
+  // answer below (no 正在回复), and what's sent is the answer: pasted, then Enter
+  gemShow([R, '? 你最喜欢哪种颜色？', 'Question', R, 'Question 1/1: 你最喜欢哪种颜色？', '> 1. 红', '  2. 绿', '  3. 蓝', '  4. Write-in...', '  ↑/↓ Navigate · enter Select · esc Skip', 'Gemini 账号 A1']);
+  await until("focusG.active.el.querySelectorAll('.live .ask [data-pick]').length === 4");
+  inputs.length = 0;
+  await evaluate("focusG.active.el.querySelector('.live .ask [data-pick=\"4\"]').click()");
+  for (let i = 0; i < 60 && inputs.length < 4; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(inputs, ['\x1b[B', '\x1b[B', '\x1b[B', '\r']);
+  gemShow([R, 'Question 1/1: 你最喜欢哪种颜色？', '  1. 红', '  2. 绿', '  3. 蓝', '> 4. Write-in...', '  Your answer:', '  enter Submit · esc Back', 'Gemini 账号 A1']);
+  await until("/写你的回答/.test(focusG.active.el.querySelector('.live')?.textContent ?? '')");
+  assert.deepEqual(await evaluate("[focusG.active.live, !!focusG.active.el.querySelector('.live .busy')]"), ['', false]);
+  inputs.length = 0;
+  await evaluate("{ const c = focusG.active, t = c.el.querySelector('.send textarea'); t.value = '紫色'; t.dispatchEvent(new Event('input')); c.el.querySelector('.go').click(); }");
+  for (let i = 0; i < 60 && inputs.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(inputs.slice(0, 2), ['\x1b[200~紫色\x1b[201~', '\r']);
+  // 换账号继续 on another Gemini account (its quota on the card): the service asked to end it here and go on there
+  openBodies.length = 0;
+  await evaluate("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false, windows: [{ k: 'five_hour', pct: 30, reset: '1小时' }] }]; focusG.active.acct = 1; focusG.active.swap()");
+  await until("document.querySelector('#sheetIn [data-a=\"2\"]')");
+  assert.match(await evaluate("document.querySelector('#sheetIn [data-a=\"2\"]').textContent"), /A2 · g2@example\.com\s*额度用了 30%/);
+  await evaluate("document.querySelector('#sheetIn [data-a=\"2\"]').click(); document.querySelector('#swapGo').click()");
+  const sw = await opened();
+  assert.deepEqual([sw?.id, sw?.gem, sw?.swap, sw?.acct], ['GEM1', true, true, 2]);
+  await until("/已换到 Gemini 账号 A2/.test(document.querySelector('#toast').textContent)");
+  await evaluate("Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 1, pid: 123 }); focusG.active.sync()"); // the list: running here, on A2 now (the one on)
+  await until('focusG.active.acct === 2');
+  await evaluate("state.gemini = [{ label: 'g@example.com', on: true }]; Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 0, pid: null })");
+  historyId = 'A'; histFeed = null; termGem = ''; gemRes = null;
   await evaluate('closeConv(focusG.active)');
   assert.ok(openBodies.every((b) => b.live && b.gem), JSON.stringify(openBodies)); // any more: reconnects to it, never a second agy
   openBodies.length = 0;

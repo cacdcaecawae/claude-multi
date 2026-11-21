@@ -762,6 +762,26 @@ if (SESSION0) {
   assert.match(cli('chat', 'look', 'oai-1'), /^「量子纠缠」 oai-1\nGPT 聊天 · 普通 · medium · 正在回答（已经 2 分钟）/);
   assert.equal(cli('chat', 'say', 'oai-1', '再说说'), '「量子纠缠」还在回答上一条：它答完网页服务会告诉你，之后再发');
   fs.rmSync(root, { recursive: true, force: true });
+}
+// A Gemini one for the 管家, in a home of its own (its ~/.gemini, one account): listed by sessions --all (gem, A1), read
+// with chat look (where it runs: not here, the service there being another's), a new one on an account there isn't refused
+{
+  const fs = require('fs'), path = require('path'), os = require('os'), url = require('url'), { spawnSync } = require('child_process'), { DatabaseSync } = require('node:sqlite');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-home-')), work = path.join(root, 'work'), a = path.join(root, '.gemini', 'antigravity-cli'), id = '9e1f0000-1111-2222-3333-444444444444';
+  fs.mkdirSync(path.join(root, '.claude-multi'), { recursive: true }); fs.mkdirSync(work); fs.mkdirSync(path.join(a, 'brain', id, '.system_generated', 'logs'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude-multi', 'profiles.json'), JSON.stringify({ profiles: [], gemini: [{ id: 'gemini-1', label: 'g@example.com', email: 'g@example.com', home: path.join(root, 'g1') }], geminiOn: 'gemini-1' }));
+  const d = new DatabaseSync(path.join(a, 'conversation_summaries.db'));
+  d.exec("create table conversation_summaries (conversation_id text, title text, last_modified_time text, workspace_uris text, parent_conversation_id text)");
+  d.prepare('insert into conversation_summaries values (?, ?, ?, ?, ?)').run(id, '修复登录', '2026-11-20 10:00:00+00:00', JSON.stringify([url.pathToFileURL(work).href]), ''); d.close();
+  fs.writeFileSync(path.join(a, 'brain', id, '.system_generated', 'logs', 'transcript.jsonl'), [
+    { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-20T09:59:00Z', content: '<USER_REQUEST>\n把登录改好\n</USER_REQUEST>' },
+    { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-11-20T09:59:30Z', content: '改好了。' }].map((x) => JSON.stringify(x)).join('\n') + '\n');
+  const cli = (...x) => spawnSync(process.execPath, [path.join(__dirname, 'claude-multi.js'), ...x], { env: { ...process.env, USERPROFILE: root, HOME: root }, encoding: 'utf8' }).stdout.trim();
+  assert.deepEqual(JSON.parse(cli('sessions', '--json', '--all')).filter((s) => s.gem).map((s) => [s.id, s.title, s.who, s.cwd]), [[id, '修复登录', 'A1', work]]);
+  assert.equal(cli('chat', 'look', '登录'), `「修复登录」 ${id}\nGemini 账号 A1 · ${work} · 没在运行\n\n最后的回答：\n改好了。`);
+  assert.equal(cli('chat', 'new', work, '你好', '--gemini', '--acct', 'A3'), '没有 Gemini 账号 A3（用户要先运行 claude-multi new gemini 加一个）');
+  fs.rmSync(root, { recursive: true, force: true });
+  console.log('butler gemini ok');
   console.log('gpt chat for the 管家 ok');
 }
 
@@ -868,6 +888,37 @@ if (SESSION0) {
   console.log('chat ok');
 }
 
+// What's on agy's screen (screen.js: Gemini ones, the page's and the 管家's), on screens a real agy 1.5 showed: its
+// question to run a command, its own question, its Write-in open, at work with a message queued (its thought's ▸ row
+// none), its / menu (no question), a numbered message of yours (no question)
+{
+  const { parseAgyScreen } = require('./screen.js'), R = '─'.repeat(110);
+  const run = parseAgyScreen([R, '> 用命令行删除 junk.txt', '● Ran (Remove-Item .\\junk.txt) (ctrl+o to expand)', 'Command', R, 'Requesting permission for:', '   Remove-Item .\\junk.txt', 'Run this command?',
+    '> 1. Yes, run command', "  2. Yes, and always allow in this conversation for commands that start with 'Remove-Item", ".\\junk.txt'", '  3. Yes, and always allow (Persist to settings.json)', '  4. No, cancel',
+    '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command', 'Gemini 账号 A1  │  Gemini 4 Neon (High)']);
+  assert.deepEqual([run.busy, run.menu.cur, run.menu.ask, run.menu.opts.map((o) => o.label.slice(0, 16)), run.menu.opts[1].desc], [null, 1, 'Requesting permission for:\nRemove-Item .\\junk.txt\nRun this command?',
+    ['Yes, run command', 'Yes, and always ', 'Yes, and always ', 'No, cancel'], ".\\junk.txt'"]);
+  const own = parseAgyScreen(['? 你最喜欢哪种颜色？', 'Question', R, 'Question 1/1: 你最喜欢哪种颜色？', '> 1. 红', '  2. 绿', '  3. 蓝', '  4. Write-in...', '  ↑/↓ Navigate · enter Select · esc Skip']);
+  assert.deepEqual([own.menu.ask, own.menu.opts.map((o) => o.label)], ['Question 1/1: 你最喜欢哪种颜色？', ['红', '绿', '蓝', 'Write-in...']]);
+  const write = parseAgyScreen([R, 'Question 1/1: 你最喜欢哪种颜色？', '  1. 红', '> 4. Write-in...', '  Your answer:', '  enter Submit · esc Back']);
+  assert.deepEqual([write.menu, write.writing], [null, true]);
+  const q = parseAgyScreen([R, '> 写一首诗', '▸ Thought for 5s, 203 tokens', '⣟  Generating...', '└ Tip: Press ctrl+r to review pending artifacts.', '▸ 再写一首，关于冬天 (alt+m to send immediately)', R, '>', R]);
+  assert.deepEqual([q.busy?.[1], q.menu, q.writing, q.queue], ['Generating...', null, false, ['再写一首，关于冬天']]);
+  const slash = parseAgyScreen([R, '> /', R, '> /add-dir             Add a directory to the workspace', '  /agents              List available custom agents', '  ↑/↓ Navigate · enter Select · tab Complete']);
+  const mine = parseAgyScreen([R, '> 1. 先改登录', '  2. 再加测试', '⣟  Generating...', R, '>', R]);
+  assert.deepEqual([slash.menu, mine.menu, mine.queue], [null, null, []]);
+  console.log('agy screen ok');
+  // what the web service checks when agy's output names a question: its screen (its output drawn) has one with options;
+  // a reply that only says 「Question 1/3:」 (agy working on this very code) has none
+  (async () => {
+    const { termRows } = require('./claude-multi'), out = (rows) => '\x1b[2J\x1b[H' + rows.map((r) => `\x1b[38;5;245m${r}\x1b[0m`).join('\r\n');
+    const asks = parseAgyScreen(await termRows(out([R, 'Requesting permission for:', '   Remove-Item .\\junk.txt', 'Run this command?', '> 1. Yes, run command', '  2. Yes, and always allow', '  3. No, cancel',
+      '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command']), 120, 30)).menu;
+    const says = parseAgyScreen(await termRows(out(['● 第一题：', 'Question 1/3: 你最喜欢哪种颜色？', '  1. 红', '  2. 绿', R, '>', R]), 120, 30)).menu;
+    assert.deepEqual([asks?.opts.map((o) => o.label), says], [['Yes, run command', 'Yes, and always allow', 'No, cancel'], null]);
+    console.log('agy asks ok');
+  })().catch((e) => { console.error(e); process.exitCode = 1; });
+}
 // What's on Claude's screen (screen.js, the page's and the 管家's): a question's options, the trust question, and
 // "❯ 4. …" in the input box (your words, not a menu)
 {
@@ -1925,7 +1976,7 @@ if (process.platform === 'win32') {
 // Gemini (agy): its conversations from ~/.gemini's conversation_summaries.db and history.jsonl, shared by all accounts;
 // its status line; the account on switched by its sign-in alone (Credential Manager: a test entry here, never agy's own)
 {
-  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemHistory, gemOn, agyCred, gemSettings, statusline, saveLine, readLine } = require('./claude-multi');
+  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemHistory, gemOn, agyCred, gemSettings, statusline, saveLine, readLine, saveGemQuota, gemUsage, gemRename, gemDelete, gemAgyConvs, gemEnded } = require('./claude-multi');
   const { DatabaseSync } = require('node:sqlite');
   const regFile = path.join(TEST_HOME, '.claude-multi', 'profiles.json'), reg0 = fs.readFileSync(regFile, 'utf8');
   const GEM = path.join(TEST_HOME, '.gemini', 'antigravity-cli');
@@ -1953,10 +2004,12 @@ if (process.platform === 'win32') {
   const rec = (id, steps) => { const f = path.join(GEM, 'brain', id, '.system_generated', 'logs'); fs.mkdirSync(f, { recursive: true });
     fs.writeFileSync(path.join(f, 'transcript.jsonl'), steps.map((s, i) => JSON.stringify({ step_index: i, status: 'DONE', ...s })).join('\n') + '\n{"step_index":9'); };
   const U = (t, at) => ({ source: 'USER_EXPLICIT', type: 'USER_INPUT', created_at: at, content: say(t) }), M = (t, at, calls) => ({ source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: at, content: t, ...(calls && { tool_calls: calls }) });
-  const G = (at, status = 'DONE') => ({ source: 'MODEL', type: 'GENERIC', status, created_at: at }), q = JSON.stringify;
-  // one cut short by your next message (its end by that), the next answered
-  rec('c-old', [U('把登录改好', '2026-11-19T07:59:00Z'), M('改一半', '2026-11-19T07:59:10Z', [{ name: 'edit_file', args: { toolSummary: q('Edit a.js'), TargetFile: q('/p/a.js') } }]),
-    G('2026-11-19T07:59:12Z'), U('算了', '2026-11-19T07:59:30Z'), M('好了', '2026-11-19T07:59:40Z')]);
+  const G = (at, status = 'DONE', content) => ({ source: 'MODEL', type: 'GENERIC', status, created_at: at, ...(content && { content }) }), q = JSON.stringify;
+  // one cut short by your next message (its end by that; its edit: as its result says), the next a file written and
+  // answered (its lines counted off the call: its result says none)
+  rec('c-old', [U('把登录改好', '2026-11-19T07:59:00Z'), M('改一半', '2026-11-19T07:59:10Z', [{ name: 'edit_file', args: { toolSummary: q('Edit a.js'), Path: q('/p/a.js'), Target: q('a\nb'), Replacement: q('c') } }]),
+    G('2026-11-19T07:59:12Z', 'DONE', 'Made 1 replacement in /p/a.js starting at line 2 (+5/-4 lines).'), U('算了', '2026-11-19T07:59:30Z'),
+    M('', '2026-11-19T07:59:40Z', [{ name: 'write_file', args: { Path: q('/p/b.js'), Content: q('x\ny\n') } }]), G('2026-11-19T07:59:41Z', 'DONE', 'Created file.'), M('写好了', '2026-11-19T07:59:45Z')]);
   // two commands, one a server left running (its result RUNNING for good); then on at work: a command called, its result not in
   rec('c-new', [U('加一个测试\n第二行', '2026-11-20T10:00:00Z'), M('', '2026-11-20T10:00:02Z', [{ name: 'run_command', args: { CommandLine: q('npm test\n--watch'), Cwd: q(work) } }, { name: 'run_command', args: { CommandLine: q('npm run dev') } }]),
     G('2026-11-20T10:00:05Z'), G('2026-11-20T10:00:05Z', 'RUNNING'), { source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'x', created_at: '2026-11-20T10:00:06Z' },
@@ -1968,7 +2021,7 @@ if (process.platform === 'win32') {
   const L = listGemini();
   assert.deepEqual(L.map((s) => [s.id, s.title, s.prompt, s.cwd, s.acct, s.gem, s.going]), [['c-new', '加一个测试', null, work, 0, true, 'busy'], ['c-old', '修复登录', '把登录改好', work, 0, true, null]]);
   assert.deepEqual(L.map((s) => [s.at, s.made, s.lastAt]), [[Date.parse('2026-11-20T10:05:01Z'), Date.parse('2026-11-20T10:00:00Z'), Date.parse('2026-11-20T10:05:01Z')],
-    [Date.parse('2026-11-19T08:00:00.123Z'), Date.parse('2026-11-19T07:59:00Z'), Date.parse('2026-11-19T07:59:40Z')]]);
+    [Date.parse('2026-11-19T08:00:00.123Z'), Date.parse('2026-11-19T07:59:00Z'), Date.parse('2026-11-19T07:59:45Z')]]);
   // its record as the page's messages: yours (without what agy adds), its replies, each tool it called as Claude's are
   // named (its results not shown), a turn's end with about how long, a model error as a note; nothing held back for a
   // step still running (a server); in pieces
@@ -1977,9 +2030,11 @@ if (process.platform === 'win32') {
   assert.deepEqual(hd('c-new', { live: true }), [['user', '加一个测试\n第二行'], ['tool', 'Bash  npm test'], ['tool', 'Bash  npm run dev'], ['claude', '测试加好了'], ['done', '9000'], ...tail]);
   assert.deepEqual([gemHistory('c-new', { live: true }).end, gemHistory('c-new').end, hd('c-new', { from: 6, live: true })], [9, 9, tail]);
   assert.deepEqual(hd('c-new').slice(-1), [['done', '1000']]); // cut short (no agy on it any more): its end too
-  assert.deepEqual(hd('c-old'), [['user', '把登录改好'], ['claude', '改一半'], ['tool', 'Edit  /p/a.js'], ['done', '10000'], ['user', '算了'], ['claude', '好了'], ['done', '10000']]);
+  assert.deepEqual(hd('c-old'), [['user', '把登录改好'], ['claude', '改一半'], ['tool', 'Edit  /p/a.js'], ['edit', '/p/a.js'], ['done', '10000'],
+    ['user', '算了'], ['tool', 'Edit  /p/b.js'], ['edit', '/p/b.js'], ['claude', '写好了'], ['done', '15000']]);
+  assert.deepEqual(gemHistory('c-old').items.filter((m) => m.role === 'edit').map((m) => [m.text, m.add, m.del]), [['/p/a.js', 5, 4], ['/p/b.js', 2, 0]]);
   const k3 = gemHistory('c-old', { keep: 3 }); // the newest piece from your last message, the end of the turn it cut short with it; the rest before
-  assert.deepEqual([k3.start, k3.items.map((m) => m.role), hd('c-old', { end: k3.start }).map((m) => m[0])], [3, ['done', 'user', 'claude', 'done'], ['user', 'claude', 'tool']]);
+  assert.deepEqual([k3.start, k3.items.map((m) => m.role), hd('c-old', { end: k3.start }).map((m) => m[0])], [3, ['done', 'user', 'tool', 'edit', 'claude', 'done'], ['user', 'claude', 'tool', 'edit']]);
   assert.deepEqual(hd('c-gone'), [['user', 'gone'], ['note', '出错了：quota'], ['done', '1000']]);
   assert.deepEqual([hd('../c-old'), hd('nope')], [[], []]);
   // the same ones with A2 on (they go on with it); none before there's an account
@@ -1988,6 +2043,36 @@ if (process.platform === 'win32') {
   fs.writeFileSync(regFile, reg0);
   assert.deepEqual(listGemini(), []);
   fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, a2], geminiOn: a1.id }));
+  // renamed: the list by its new name, agy's list too (one running here: its name in claude-multi only); deleted: its
+  // record and files gone (to the Recycle Bin: here, just removed), its row out of agy's list, its name forgotten
+  const dbTitle = (id) => { const x = new DatabaseSync(path.join(GEM, 'conversation_summaries.db')); try { return x.prepare('select title from conversation_summaries where conversation_id = ?').get(id)?.title ?? null; } finally { x.close(); } };
+  gemRename('c-old', '登录的事'); gemRename('c-new', '跑测试', true);
+  assert.deepEqual([listGemini().map((s) => [s.id, s.title]), dbTitle('c-old'), dbTitle('c-new')], [[['c-new', '跑测试'], ['c-old', '登录的事']], '登录的事', '']);
+  for (const [d, f] of [['conversations', 'c-new.db'], ['annotations', 'c-new.pbtxt'], ['presence', 'c-new.lock'], ['presence', 'c-old.lock']]) {
+    fs.mkdirSync(path.join(GEM, d), { recursive: true }); fs.writeFileSync(path.join(GEM, d, f), 'x');
+  }
+  const regNow = JSON.parse(fs.readFileSync(regFile, 'utf8')); // (the tests after this one change it before it goes on)
+  (async () => { // (the web service's bin: in the background)
+    const gone = []; await gemDelete('c-new', async (p) => { gone.push(...p.map((x) => path.relative(GEM, x))); p.forEach((x) => fs.rmSync(x, { recursive: true })); return { status: 0 }; });
+    assert.deepEqual([gone, listGemini(regNow).map((s) => s.id), dbTitle('c-new'), 'c-new' in JSON.parse(fs.readFileSync(path.join(TEST_HOME, '.claude-multi', 'gem-titles.json'), 'utf8'))],
+      [[path.join('brain', 'c-new'), path.join('conversations', 'c-new.db'), path.join('annotations', 'c-new.pbtxt'), path.join('presence', 'c-new.lock')], ['c-old'], null, false]);
+  })().catch((e) => { console.error(e); process.exitCode = 1; });
+  // a turn's end, by its record: once over (a reply calling no tool, an error), since the agy that runs it began (its steps then: each end once)
+  assert.deepEqual([gemEnded({ going: null, lastAt: 5000, n: 7 }, 4000), gemEnded({ going: null, lastAt: 5000, n: 7 }, 9000), gemEnded({ going: 'busy', lastAt: 5000, n: 7 }, 0), gemEnded(null, 0)], [7, null, null, null]);
+  assert.throws(() => gemRename('../x', 'y'), /找不到这个对话/);
+  // the conversation each agy running holds, by its log (as agy 1.5 writes it): its pid on the first line, the last one it
+  // names its own; a pid an older agy had too: the newest log's; one with no conversation yet: none
+  const logs = path.join(GEM, 'log'), u = (n) => `${String(n).repeat(8)}-1111-2222-3333-444444444444`;
+  fs.mkdirSync(logs, { recursive: true });
+  const logAt = (name, ...l) => fs.writeFileSync(path.join(logs, name), l.map((x) => `I1120 10:00:00.000000      1 x.go:1] ${x}`).join('\n') + '\n');
+  logAt('cli-20261120_100000.log', 'Starting language server process with pid 111', `Created conversation ${u(1)} (backend=X)`, `Resuming conversation ${u(2)}`, `Streaming conversation ${u(2)}`);
+  logAt('cli-20261119_090000.log', 'Starting language server process with pid 111', `Created conversation ${u(3)} (backend=X)`);
+  logAt('cli-20261120_110000.log', 'Starting language server process with pid 222', 'Language server version: 1.5.13');
+  assert.deepEqual([...gemAgyConvs(new Set([111, 222, 333]))], [[u(2), { pid: 111, since: new Date(2026, 10, 20, 10, 0, 0).getTime() }]]);
+  // what a log adds read on (another conversation sent to); one an agy named long before its last 256 KB (idle for hours)
+  fs.appendFileSync(path.join(logs, 'cli-20261120_100000.log'), `I1120 10:05:00.000000      1 x.go:1] Forwarding user message to conversation ${u(4)}\n`);
+  logAt('cli-20261120_120000.log', 'Starting language server process with pid 444', `Created conversation ${u(5)} (backend=X)`, ...Array(4000).fill('x'.repeat(100)));
+  assert.deepEqual([...gemAgyConvs(new Set([111, 444]))].map(([id, m]) => [id, m.pid]), [[u(5), 444], [u(4), 111]]);
   // its status line: ours set in ~/.gemini's settings (what's there kept), a status line of your own left; what it says,
   // by the account on (its email), and kept for the page's status bar (its effort is the model's)
   const sf = path.join(GEM, 'settings.json');
@@ -2005,6 +2090,14 @@ if (process.platform === 'win32') {
   const gin = { product: 'antigravity', email: 'g2@example.com', session_id: 'c-gem', model: { display_name: 'Gemini 4 Neon', effort: 'high' }, context_window: { used_percentage: 12 } };
   assert.equal(statusline(gin), 'Gemini 账号 A2  │  Gemini 4 Neon · high  │  context 12%');
   assert.equal(statusline({ ...gin, email: 'other@example.com' }).split('  │  ')[0], 'Gemini');
+  // its account's quota, kept as agy hands it over (whose: by its email), its Gemini windows as the page shows them (one
+  // past its reset: 0)
+  const qd = path.join(TEST_HOME, 'gem-quota'), soon = new Date(Date.now() + 3 * 3600e3 + 90e3).toISOString();
+  saveGemQuota({ ...gin, plan_tier: 'Google AI Pro', quota: { 'gemini-5h': { remaining_fraction: 0.75, reset_time: soon, reset_in_seconds: 1 }, 'gemini-weekly': { remaining_fraction: 0.5, reset_time: '2000-01-01T00:00:00Z' }, '3p-5h': { remaining_fraction: 1 } } }, qd);
+  const gu = gemUsage(a2, qd);
+  assert.deepEqual([fs.readdirSync(qd), gu.plan, gu.windows.map((w) => [w.k, w.pct, w.reset ? 'set' : ''])], [[`${a2.id}.json`], 'Google AI Pro', [['five_hour', 25, 'set'], ['seven_day', 0, '']]]);
+  assert.match(gu.windows[0].reset, /^3小时0[12]分$/);
+  assert.deepEqual(gemUsage(a1, qd), { windows: null }); // none read for it yet
   fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, { ...a2, email: null }], geminiOn: a2.id })); // its email never found: by being on
   assert.equal(statusline({ ...gin, email: 'other@example.com' }).split('  │  ')[0], 'Gemini 账号 A2');
   const ld = path.join(TEST_HOME, 'gem-status'); saveLine(gin, ld);
