@@ -2533,7 +2533,7 @@ function makeConv(body, title) {
   let term = null, fit = null, es = null, key = null, kind = null, mine = null, ptySize = null, q = Promise.resolve(), shown = false;
   let view = 'hist', histTimer = null, histEnd = null, histOldest = null, histBusy = false, histNow = false, histGen = 0;
   let gotAt = 0, waitAns = 0, waitT = 0; // when the record last brought messages; since when an answer the screen finished is waited for
-  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
+  let sent = [], liveHtml = '', liveT = 0, fitT = 0, busyNow = false, busyFrom = 0, menuNow = false, typeNow = false, typeTick = false, typing = null, typeOpt = new Map(), txt = null, txtT = 0, lastSeen = 0, gen = 0, fails = 0;
   let queued = []; // what waits in Claude's queue, as the record says (sent from here, its window, the 管家): { text, at }
   let past = false, quiet = 0; // a (re)connection's first output is everything so far: its copies were made before, not again
   let switching = 0, conversationGen = 0; // a session change cancels writes still queued for the previous one
@@ -2709,7 +2709,7 @@ function makeConv(body, title) {
   // connected, or a menu waiting (the message would be typed into it, and its Enter pick what's highlighted: "No, exit")
   const cantSend = () => (sending ? '上一条还在发，稍等一下'
     : !key || c.ended ? (c.started && !c.ended ? '还在连接，稍等一下再发' : '这个对话没有在运行，先点上面的「接着聊」')
-    : menuNow && !typeNow ? 'Claude 在等你先在上面选一项，选完再发（你写的还在输入框里）' : '');
+    : menuNow && !typeNow ? `${c.gem ? 'Gemini' : 'Claude'} 在等你先在上面选一项，选完再发（你写的还在输入框里）` : '');
   // One message, whole and in order: its pictures (uploaded, each path pasted, Claude attaching it), its text as a paste
   // (its new lines stay in it), then Enter on its own; the next waits till this one is through. Typed in one piece with
   // its Enter, a long text was taken for a paste, the Enter with it for a new line, and the message sat there unsent.
@@ -2758,9 +2758,7 @@ function makeConv(body, title) {
       }
       // asked again after the wait: the conversation ended, or a menu came up (Enter would pick what's highlighted)
       if (!current() || c.ended) return back('这个对话换了会话、终端或已结束，消息已放回草稿');
-      if (menuNow && !(answer && typeNow)) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
-      // agy mid-turn may be asking in its terminal (run this command?): an Enter from here would answer it
-      if (c.gem && busyNow) return back('Gemini 还没答完，也可能在「终端」里等你确认。等它答完再发（消息放回了输入框）');
+      if (menuNow && !(answer && typeNow)) return back(`${c.gem ? 'Gemini' : 'Claude'} 在等你先在上面选一项，选完再发（消息放回了输入框）`);
       const lost = '没发出去，消息放回了输入框'; // a step that didn't reach Claude: no Enter after it
       // each step to the terminal the message began on: switched to another account meanwhile, the rest isn't sent
       const step = (d) => (current() ? input(d) : Promise.resolve(false));
@@ -2775,7 +2773,7 @@ function makeConv(body, title) {
         for (const end = Date.now() + 4000; imagesShown() < before + pics.length && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 100));
         // asked again after that wait: a menu up now would take the words and the Enter
         if (!current() || c.ended) return back('这个对话换了会话、终端或已结束，消息已放回草稿');
-        if (menuNow && !(answer && typeNow)) return back('Claude 在等你先在上面选一项，选完再发（消息放回了输入框）');
+        if (menuNow && !(answer && typeNow)) return back(`${c.gem ? 'Gemini' : 'Claude'} 在等你先在上面选一项，选完再发（消息放回了输入框）`);
       }
       if (text && !(await step(`\x1b[200~${text.replace(/\n/g, '\r')}\x1b[201~`))) return back(lost);
       // the Enter not through: back here too (the words may still sit in Claude's own box)
@@ -2892,7 +2890,7 @@ function makeConv(body, title) {
       }
       if (first) { histOldest = r.start; hist.innerHTML = '<div class="col"><div class="hTop hm note"></div><div class="hOld"></div><div class="hNew"></div><div class="live"></div></div>'; }
       histEnd = r.end;
-      queued = (r.queue ?? []).map((x) => ({ ...x, text: shownText(x.text) })).filter((x) => x.text); // (none: not running, or a GPT one)
+      if (!c.gem) queued = (r.queue ?? []).map((x) => ({ ...x, text: shownText(x.text) })).filter((x) => x.text); // (none: not running, or a GPT one; a Gemini one's: off its screen)
       if (r.items.length) {
         gotAt = Date.now(); waitAns = 0; // (an answer waited for: in)
         const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
@@ -2945,13 +2943,19 @@ function makeConv(body, title) {
   hist.addEventListener('load', () => { if (pinned) hist.scrollTop = hist.scrollHeight; }, true); // a picture came in under you
   hist.addEventListener('scroll', () => { pinned = hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80; endBtn(); if (hist.scrollTop < 300) loadOlder(); });
   new ResizeObserver(() => { if (pinned) hist.scrollTop = hist.scrollHeight; }).observe(hist);
-  // Off the terminal's screen (screen.js, shared with the 管家's commands): Claude at work, a menu up. agy at work: the
-  // spinner line over its box (「⣟  Generating...」), there the moment it starts
+  // Off the terminal's screen (screen.js, shared with the 管家's commands): Claude at work, a menu up. agy's: at work, its
+  // spinner row over its box (「⣟  Generating...」), there the moment it starts; a question (Run this command?), numbered
+  // options over 「↑/↓ Navigate · …」 with > at the current one, read as Claude's with that > as ❯ (your messages above
+  // and its box start > too: the last numbered one only); what waits in its queue, 「▸ … (alt+m to send immediately)」
   function screen() {
     const b = term.buffer.active, rows = [];
     for (let i = 0; i < term.rows; i++) rows.push(b.getLine(b.baseY + i)?.translateToString(true) ?? '');
-    if (c.gem) { const m = rows.map((r) => /^\s*[⠀-⣿]\s+(\S.*?)\s*$/.exec(r)).find(Boolean); return { busy: m ? [m[0], m[1], ''] : null, menu: null }; }
-    return parseScreen(rows);
+    if (!c.gem) return parseScreen(rows);
+    const spin = rows.map((r) => /^\s*[⠀-⣿]\s+(\S.*?)\s*$/.exec(r)).find(Boolean), foot = rows.findLastIndex((r) => /↑\/↓ Navigate/.test(r));
+    const up = rows.slice(0, Math.max(0, foot)), cur = up.findLastIndex((r) => /^\s*>\s*\d+\.\s/.test(r));
+    if (cur >= 0) up[cur] = up[cur].replace('>', '❯');
+    return { busy: spin ? [spin[0], spin[1], ''] : null, menu: cur >= 0 ? parseScreen(up).menu : null,
+      queue: rows.map((r) => /^\s*▸\s+(.*?)\s*\(alt\+m to send immediately\)\s*$/.exec(r)?.[1]?.replace(/…$/, '')).filter(Boolean) };
   }
   function drawLive(toEnd) {
     const live = $p('.live');
@@ -2959,21 +2963,26 @@ function makeConv(body, title) {
     sent = sent.filter((s) => Date.now() - s.at < 600000); // ponytail: one the record never shows (some slash commands) goes after 10 min
     // a GPT one's: as the service has it; a Gemini one's: its screen, or the service's (its record: at a tool, say)
     const told = !c.ended && state?.sessions.find((x) => x.id === c.id)?.busy ? [] : null;
-    const { busy, menu } = c.gpt ? { busy: told, menu: null } : c.gem ? { busy: (term && !c.ended && screen().busy) || told, menu: null } : term && !c.ended ? screen() : {};
+    const sc = c.gem && term && !c.ended ? screen() : null;
+    if (c.gem) queued = (sc?.queue ?? []).map((text) => ({ text, at: 0, cut: true })); // (its row may be cut short: one of yours that starts so)
+    const { busy, menu } = c.gpt ? { busy: told, menu: null } : c.gem ? { busy: sc?.busy || told, menu: sc?.menu ?? null } : term && !c.ended ? screen() : {};
     const here = menu?.opts.find((o) => o.n === menu.cur);
     // 「Type something」: which option it is, per question, kept from when it still said so (written in, it shows the words)
     const blank = menu?.opts.find((o) => /^Type something/i.test(o.label));
     if (blank) typeOpt.set(menu.ask, blank.n);
     typeNow = !!here && ((typing?.ask === menu.ask && typing.n === menu.cur) || typeOpt.get(menu.ask) === menu.cur); // picked on this question
     typeTick = typeNow && here.check != null; // a multi-select's: what you write ticks it, no Enter after
-    const took = busy && /(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0];
+    // how long it's been at it, as its screen says (Claude's, Codex's); agy's says none: since this page saw it start
+    busyFrom = busy ? busyFrom || Date.now() : 0;
+    const secs = Math.floor((Date.now() - busyFrom) / 1000);
+    const took = busy && (/(\d+h\s*)?(\d+m\s*)?\d+s/.exec(busy[2] ?? '')?.[0] ?? (c.gem ? (secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`) : undefined));
     // its screen done with an answer the record hasn't brought yet (a Mac's comes a second or two later): the record read
     // at once, then every 0.3 s till it's in, 10 s at most (not when the record brought something just now: likely in)
     if (busyNow && !busy && !menu && view === 'hist' && Date.now() - gotAt > 2000) { waitAns = Date.now(); loadHist(); }
     if (busy || menu || Date.now() - waitAns > 10000) waitAns = 0;
     // in Claude's queue (taken in once its current step is done): 排队中 on it; one sent from elsewhere (its window, another
     // page, the 管家) waiting there too, in the order they were sent
-    const flat = (s) => s.replace(/\s+/g, ''), same = (s, x) => flat(x.text) === flat(s.text) || (s.text && flat(x.text).includes(flat(s.text)));
+    const flat = (s) => s.replace(/\s+/g, ''), same = (s, x) => flat(x.text) === flat(s.text) || (s.text && flat(x.text).includes(flat(s.text))) || (x.cut && s.text && flat(s.text).startsWith(flat(x.text)));
     const Q = '<span class="lab">排队中</span>';
     const h = [...sent.map((s) => ({ at: s.at, h: (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
       + (s.text ? `<div class="hm user pending">${queued.some((x) => same(s, x)) ? Q : ''}${userBody(s.text, [], true)}</div>` : '') })),

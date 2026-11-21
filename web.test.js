@@ -12,7 +12,8 @@ const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
-let termGem = false; // one whose screen shows agy at work (its spinner line over its box)
+let termGem = '', gemRes = null; // one whose screen shows agy's (these rows), and its stream, to show more on it later
+const inputs = []; // what was typed into the terminals (/api/input), in order
 const openBodies = []; // what each open asked for
 let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
 let histFeed = null; // set: what the record brought since the last read (each read takes it), else the long answer every time
@@ -30,6 +31,7 @@ dirs['C:/test'] = { path: 'C:/test', up: 'C:/', dirs: ['C:/test/sub'], files: ['
 dirs['C:/test/sub'] = { path: 'C:/test/sub', up: 'C:/test', dirs: [], files: ['c.txt'] };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/api/input') { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { inputs.push(JSON.parse(b).data); } catch {} }); }
   if (url.pathname === '/api/open') { opens++; let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { openBodies.push(JSON.parse(b)); } catch {} }); }
   if (url.pathname === '/api/history') { histReads.push(Date.now()); histUrls.push(url.search); if (histUrls.length > 50) histUrls.shift(); }
   if (url.pathname === '/api/history' && histHang) { histHang = false; hung = res; return; } // left open, never answered
@@ -55,7 +57,7 @@ const server = http.createServer((req, res) => {
     const osc = (t) => `event: data\ndata: ${JSON.stringify(`x\x1b]52;c;${Buffer.from(t).toString('base64')}\x07y`)}\n\n`;
     res.write(osc('旧的复制'));
     if (termBusy) res.write(`event: data\ndata: ${JSON.stringify('\r\n✻ Thinking… (3s · esc to interrupt)\r\n')}\n\n`);
-    if (termGem) res.write(`event: data\ndata: ${JSON.stringify('\r\n> 你是什么模型\r\n⣟  Generating...\r\n────────\r\n')}\n\n`);
+    if (termGem) { gemRes = res; res.write(`event: data\ndata: ${JSON.stringify(termGem)}\n\n`); }
     setTimeout(() => res.write(osc('终端里复制的中文')), 300);
     return;
   }
@@ -533,7 +535,8 @@ const press = async (key, shift = false) => {
   await evaluate("document.querySelector('[data-kind=\"gem\"]').click()");
   assert.deepEqual(await evaluate("[...document.querySelectorAll('#view [data-open]')].map((r) => r.dataset.open)"), ['GEM1']);
   await evaluate("document.querySelector('[data-kind=\"all\"]').click()");
-  historyId = 'GEM1'; histFeed = [{ role: 'user', text: 'hi', at: 1 }, { role: 'claude', text: 'Hi! How can I help you today?' }]; termGem = true;
+  historyId = 'GEM1'; histFeed = [{ role: 'user', text: 'hi', at: 1 }, { role: 'claude', text: 'Hi! How can I help you today?' }];
+  termGem = '\r\n> 你是什么模型\r\n⣟  Generating...\r\n────────\r\n';
   await evaluate("document.querySelector('#view [data-open=\"GEM1\"]').click()"); // (one not running: started, as a Claude one)
   const rb = await opened();
   assert.deepEqual([rb.id, rb.acct, rb.gem], ['GEM1', 1, true]);
@@ -543,8 +546,23 @@ const press = async (key, shift = false) => {
   assert.ok(histUrls.some((u) => /[?&]gem=1/.test(u) && /id=GEM1/.test(u)), histUrls.join(' '));
   // agy at work on its screen: 正在回复 at once (the list's word comes seconds later), its tab turning too
   await until("focusG.active.live === 'busy'");
-  assert.equal(await evaluate("focusG.active.el.querySelector('.live .busy')?.textContent"), 'Gemini 正在回复');
-  historyId = 'A'; histFeed = null; termGem = false;
+  assert.match(await evaluate("focusG.active.el.querySelector('.live .busy')?.textContent"), /^Gemini 正在回复 · \d+s$/); // how long: since the page saw it start (agy's screen says none)
+  // what waits in its queue (as agy 1.5 shows it): 排队中; its thought summary (▸ too) isn't one
+  const gemShow = (rows) => gemRes.write(`event: data\ndata: ${JSON.stringify('\x1b[2J\x1b[H' + rows.join('\r\n'))}\n\n`), R = '─'.repeat(60);
+  gemShow([R, '> 你是什么模型', '▸ Thought for 5s, 203 tokens', '⣟  Generating...', '▸ 再写一首，关于冬天 (alt+m to send immediately)', R, '>', R]);
+  await until("[...focusG.active.el.querySelectorAll('.live .hm.user.pending')].some((e) => /排队中/.test(e.textContent) && /再写一首，关于冬天/.test(e.textContent))");
+  assert.equal(await evaluate("focusG.active.el.querySelectorAll('.live .hm.user.pending').length"), 1);
+  // a question (Run this command?, as agy 1.5 asks it): in 对话 with its options; one picked: the arrow keys to it, Enter
+  gemShow([R, '> 删掉 junk.txt', '● Ran (Remove-Item .\\junk.txt) (ctrl+o to expand)', 'Command', R, 'Requesting permission for:', '   Remove-Item .\\junk.txt', 'Run this command?',
+    '> 1. Yes, run command', "  2. Yes, and always allow in this conversation for commands that start with 'Remove-Item'", '  3. Yes, and always allow (Persist to settings.json)', '  4. No, cancel',
+    '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command', 'Gemini 账号 A1']);
+  await until("focusG.active.el.querySelector('.live .ask [data-pick]')");
+  assert.deepEqual(await evaluate("[focusG.active.live, focusG.active.el.querySelectorAll('.live .ask [data-pick]').length, /Run this command\\?/.test(focusG.active.el.querySelector('.live .ask').textContent)]"), ['ask', 4, true]);
+  inputs.length = 0;
+  await evaluate("focusG.active.el.querySelector('.live .ask [data-pick=\"4\"]').click()");
+  for (let i = 0; i < 60 && inputs.length < 4; i++) await new Promise((r) => setTimeout(r, 50)); // (the keys on their way)
+  assert.deepEqual(inputs, ['\x1b[B', '\x1b[B', '\x1b[B', '\r']);
+  historyId = 'A'; histFeed = null; termGem = ''; gemRes = null;
   await evaluate('closeConv(focusG.active)');
   assert.ok(openBodies.every((b) => b.live && b.gem), JSON.stringify(openBodies)); // any more: reconnects to it, never a second agy
   openBodies.length = 0;
