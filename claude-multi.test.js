@@ -1925,7 +1925,7 @@ if (process.platform === 'win32') {
 // Gemini (agy): its conversations from ~/.gemini's conversation_summaries.db and history.jsonl, shared by all accounts;
 // its status line; the account on switched by its sign-in alone (Credential Manager: a test entry here, never agy's own)
 {
-  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemOn, agyCred, gemSettings, statusline, saveLine, readLine } = require('./claude-multi');
+  const fs = require('fs'), path = require('path'), url = require('url'), { listGemini, gemHistory, gemOn, agyCred, gemSettings, statusline, saveLine, readLine } = require('./claude-multi');
   const { DatabaseSync } = require('node:sqlite');
   const regFile = path.join(TEST_HOME, '.claude-multi', 'profiles.json'), reg0 = fs.readFileSync(regFile, 'utf8');
   const GEM = path.join(TEST_HOME, '.gemini', 'antigravity-cli');
@@ -1946,17 +1946,34 @@ if (process.platform === 'win32') {
   ins.run('c-sub', 'helper', '', '2026-11-20 09:00:00+00:00', JSON.stringify([uri]), 'c-old');      // a helper agent's
   ins.run('c-gone', 'x', '', '2026-11-20 09:00:00+00:00', JSON.stringify([url.pathToFileURL(path.join(TEST_HOME, 'nope')).href]), ''); // its folder gone
   d.close();
-  const h = JSON.stringify;
-  fs.writeFileSync(path.join(GEM, 'history.jsonl'), [
-    h({ display: '/model', timestamp: 1000, workspace: work, type: 'slash_command' }),
-    h({ display: '把登录改好', timestamp: Date.parse('2026-11-19T07:59:00Z'), workspace: work, conversationId: 'c-old' }),
-    h({ display: '加一个测试\n第二行', timestamp: Date.parse('2026-11-20T10:00:00Z'), workspace: work, conversationId: 'c-new' }),
-    h({ display: '再跑一遍', timestamp: Date.parse('2026-11-20T10:05:00Z'), workspace: work, conversationId: 'c-new' }),
-    h({ display: 'sub', timestamp: 5, workspace: work, conversationId: 'c-sub' }), h({ display: 'gone', timestamp: 5, workspace: work, conversationId: 'c-gone' }),
-    '{ not json', ''].join('\n'));
+  // each one's record, as agy 1.5 writes it (brain\<id>\.system_generated\logs\transcript.jsonl, a step a line); a line
+  // still being written at the end
+  const say = (t) => `<USER_REQUEST>\n${t}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: now.\n</ADDITIONAL_METADATA>`;
+  const rec = (id, steps) => { const f = path.join(GEM, 'brain', id, '.system_generated', 'logs'); fs.mkdirSync(f, { recursive: true });
+    fs.writeFileSync(path.join(f, 'transcript.jsonl'), steps.map((s, i) => JSON.stringify({ step_index: i, status: 'DONE', ...s })).join('\n') + '\n{"step_index":9'); };
+  const U = (t, at) => ({ source: 'USER_EXPLICIT', type: 'USER_INPUT', created_at: at, content: say(t) }), M = (t, at, more) => ({ source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: at, content: t, ...more });
+  rec('c-old', [U('把登录改好', '2026-11-19T07:59:00Z'), M('好了', '2026-11-19T07:59:30Z')]);
+  rec('c-new', [U('加一个测试\n第二行', '2026-11-20T10:00:00Z'), M('', '2026-11-20T10:00:02Z'),
+    { source: 'MODEL', type: 'GENERIC', tool: 'run_command', args: { CommandLine: 'npm test\n--watch', Cwd: work }, created_at: '2026-11-20T10:00:03Z' },
+    { source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'x', created_at: '2026-11-20T10:00:04Z' }, M('测试加好了', '2026-11-20T10:00:09Z'),
+    { source: 'USER_IMPLICIT', type: 'USER_INPUT', content: 'auto', created_at: '2026-11-20T10:04:00Z' },
+    U('再跑一遍', '2026-11-20T10:05:00Z'), M('在跑', '2026-11-20T10:05:01Z', { status: 'GENERATING' })]);
+  rec('c-empty', [{ source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'x', created_at: '2026-11-20T09:00:00Z' }]);
+  rec('c-sub', [U('sub', '2026-11-20T09:00:00Z')]); rec('c-gone', [U('gone', '2026-11-20T09:00:00Z')]);
   const L = listGemini();
-  assert.deepEqual(L.map((s) => [s.id, s.title, s.prompt, s.cwd, s.acct, s.gem]), [['c-new', '加一个测试', null, work, 0, true], ['c-old', '修复登录', '把登录改好', work, 0, true]]);
-  assert.deepEqual(L.map((s) => [s.at, s.made]), [[Date.parse('2026-11-20T10:05:00Z'), Date.parse('2026-11-20T10:00:00Z')], [Date.parse('2026-11-19T08:00:00.123Z'), Date.parse('2026-11-19T07:59:00Z')]]);
+  assert.deepEqual(L.map((s) => [s.id, s.title, s.prompt, s.cwd, s.acct, s.gem, s.going]), [['c-new', '加一个测试', null, work, 0, true, 'busy'], ['c-old', '修复登录', '把登录改好', work, 0, true, null]]);
+  assert.deepEqual(L.map((s) => [s.at, s.made]), [[Date.parse('2026-11-20T10:05:01Z'), Date.parse('2026-11-20T10:00:00Z')], [Date.parse('2026-11-19T08:00:00.123Z'), Date.parse('2026-11-19T07:59:00Z')]]);
+  // its record as the page's messages: yours (without what agy adds), its replies, a tool call as Claude's is named, a
+  // turn's end with about how long; running, up to its reply mid-stream (read again from there); in pieces
+  const hd = (id, o) => gemHistory(id, o).items.map((m) => [m.role, m.text]);
+  assert.deepEqual(hd('c-new', { live: true }), [['user', '加一个测试\n第二行'], ['tool', 'Bash  npm test'], ['claude', '测试加好了'], ['done', '9000'], ['user', '再跑一遍']]);
+  assert.deepEqual([gemHistory('c-new', { live: true }).end, gemHistory('c-new').end], [7, 8]);
+  assert.deepEqual(hd('c-new').slice(-2), [['claude', '在跑'], ['done', '1000']]); // over (no agy on it): all, its end too
+  // read on from where the last read ended (6: before your next message was there): the turn before's end comes with it
+  assert.deepEqual(hd('c-new', { from: 6, live: true }), [['done', '9000'], ['user', '再跑一遍']]);
+  const k2 = gemHistory('c-new', { keep: 2 }); // the newest piece from your last message, the turn before's end with it; the rest before
+  assert.deepEqual([k2.start, k2.items.map((m) => m.role), hd('c-new', { end: k2.start }).map((m) => m[0])], [6, ['done', 'user', 'claude', 'done'], ['user', 'tool', 'claude']]);
+  assert.deepEqual([hd('../c-old'), hd('nope')], [[], []]);
   // the same ones with A2 on (they go on with it); none before there's an account
   fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, a2], geminiOn: a2.id }));
   assert.deepEqual(listGemini().map((s) => [s.id, s.acct]), [['c-new', 1], ['c-old', 1]]);
