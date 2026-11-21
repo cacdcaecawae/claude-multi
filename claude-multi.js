@@ -1420,19 +1420,22 @@ async function gemWho() {
   } catch { return null; }
 }
 // its status line (model, context used: the page's status bar), unless one of your own is set there; settings it can't
-// read (not JSON) left as they are (trim: a BOM too)
+// read (not JSON) left as they are (trim: a BOM too). agy runs it through cmd with every quote handed on as it is, so the
+// path goes bare. shortcut: a claude-multi whose path has a space gets none (ours taken out); its 8.3 name if one needs it
 function gemSettings(home = GEMINI_HOME, script = __filename.replace(/\\/g, '/')) {
   const f = path.join(home, 'antigravity-cli', 'settings.json');
   let s = {};
   try { const t = fs.readFileSync(f, 'utf8').trim(); s = t ? JSON.parse(t) : {}; } catch (e) { if (e.code !== 'ENOENT') return; }
   if (s.statusLine && !String(s.statusLine.command ?? '').includes('claude-multi.js')) return;
+  const { statusLine, ...rest } = s;
   fs.mkdirSync(path.dirname(f), { recursive: true });
-  fs.writeFileSync(f, JSON.stringify({ ...s, statusLine: { type: 'command', command: `node "${script}" statusline` } }, null, 2) + '\n');
+  fs.writeFileSync(f, JSON.stringify(/\s/.test(script) ? rest : { ...s, statusLine: { type: 'command', command: `node ${script} statusline` } }, null, 2) + '\n');
 }
-// new gemini: an account, signed in with Google (agy models: it asks for one when there's none; a browser, or its link
-// opened anywhere and the code pasted back), each time: a sign-in agy has already is never taken unasked (the first's:
-// kept meanwhile, back if none is made). A Google account already here: its sign-in renewed. Not signed in (Ctrl+C there
-// too): its folder gone, the one on before on again.
+// new gemini: an account, signed in with Google in agy started bare (the only way it signs in: signed out, its models
+// just says so); a browser, or its link opened anywhere and the code pasted back. Kept the moment agy has the sign-in
+// (looked for every few seconds): however agy is left after, or its window closed, it's an account. Each time: a sign-in
+// agy has already is never taken unasked (the first's: kept meanwhile, back if none is made). A Google account already
+// here: its sign-in renewed. Not signed in: its folder gone, the one on before on again.
 async function newGemini(running = agyRunning) {
   const agy = agyCmd();
   if (!agy) { console.log(`没找到 agy，先装好 Antigravity 的命令行（在 PowerShell 里）：${AGY_GET}`); return null; }
@@ -1463,24 +1466,38 @@ async function newGemini(running = agyRunning) {
     if (first && ![0, 3].includes((await agyCred('save', before)).status)) return back('agy 现在的登录没能先存下来，没有加账号');
     if ((await agyCred('drop')).status !== 0) return back('agy 现在的登录没能清掉（不清掉它就会直接拿来用），没有加账号'); // so agy asks for one
     log('gemini_created', { profile_id: id });
-    console.log('正在用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回这里）……');
-    spawnSync(agy, ['models'], { stdio: 'inherit' });
-    if ((await agyCred('save', gemLogin(home))).status !== 0) return back('还没检测到登录成功，没有加上账号');
-    fs.rmSync(before, { force: true });
-    const email = await gemWho(), all = geminiAccounts(), d = email ? all.findIndex((x) => x.email === email) : -1;
-    if (d >= 0) { // an account here already (its saved sign-in unreadable, say): this its sign-in now, it on; the new folder (only made now) gone
-      fs.copyFileSync(gemLogin(home), gemLogin(all[d].home));
-      update((x) => { x.geminiOn = all[d].id; });
-      fs.rmSync(home, { recursive: true, force: true });
-      log('gemini_relogin', { profile_id: all[d].id });
-      console.log(`Gemini 账号 A${d + 1}（${email}）重新登录好了，现在在线的就是它`);
-      return true;
+    console.log('接下来打开 agy：在里面选用 Google 账号登录（会打开浏览器；没打开就把它给的网址复制到浏览器里，登好把授权码粘回去）。\n'
+      + '登录成功就已经存好了。之后输入 /exit 退出 agy（或连按两次 Ctrl+D），这里会告诉你存成了哪个账号。');
+    // what's said once agy is left (agy's screen till then); null: no sign-in kept
+    const keep = async () => {
+      if ((await agyCred('save', gemLogin(home))).status !== 0) return null;
+      fs.rmSync(before, { force: true });
+      const email = await gemWho(), all = geminiAccounts(), d = email ? all.findIndex((x) => x.email === email) : -1;
+      if (d >= 0) { // an account here already (its saved sign-in unreadable, say): this its sign-in now, it on; the new folder (only made now) gone
+        fs.copyFileSync(gemLogin(home), gemLogin(all[d].home));
+        update((x) => { x.geminiOn = all[d].id; });
+        fs.rmSync(home, { recursive: true, force: true });
+        log('gemini_relogin', { profile_id: all[d].id });
+        return `Gemini 账号 A${d + 1}（${email}）重新登录好了，现在在线的就是它`;
+      }
+      try { gemSettings(); } catch {} // (no status line: no reason to lose the sign-in)
+      const r = update((x) => { (x.gemini ??= []).push({ id, label: email || 'Google 账号', email, home, createdAt: now() }); x.geminiOn = id; });
+      log('gemini_registered', { profile_id: id });
+      return `已保存 Gemini 账号 A${r.gemini.length}：${email || 'Google 账号'}（现在在线的就是它）`
+        + (email ? '' : `\n没查到这个 Google 账号的邮箱（可能连不上 googleapis.com），先叫它「Google 账号」。同一个号别再加一次；加重了用 claude-multi remove A${r.gemini.length} 去掉`);
+    };
+    const child = require('child_process').spawn(agy, [], { stdio: 'inherit' });
+    let over = false, said = null;
+    const ended = new Promise((ok) => { child.on('exit', ok); child.on('error', ok); }).then(() => { over = true; });
+    for (;;) {
+      const last = over; // (agy gone before this look: the last one)
+      if ((await agyCred('has')).status === 0) { said = await keep(); break; }
+      if (last) break;
+      await Promise.race([ended, sleep(3000)]);
     }
-    try { gemSettings(); } catch {} // (no status line: no reason to lose the sign-in)
-    const r = update((x) => { (x.gemini ??= []).push({ id, label: email || 'Google 账号', email, home, createdAt: now() }); x.geminiOn = id; });
-    log('gemini_registered', { profile_id: id });
-    console.log(`已保存 Gemini 账号 A${r.gemini.length}：${email || 'Google 账号'}（现在在线的就是它）`);
-    if (!email) console.log(`没查到这个 Google 账号的邮箱（可能连不上 googleapis.com），先叫它「Google 账号」。同一个号别再加一次；加重了用 claude-multi remove A${r.gemini.length} 去掉`);
+    await ended;
+    if (!said) return back('还没检测到登录成功，没有加上账号');
+    console.log(said);
     return true;
   } catch (e) { return back(`没加上：${e.message}`); }
 }
