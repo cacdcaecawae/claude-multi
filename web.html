@@ -2688,7 +2688,7 @@ function makeConv(body, title) {
   async function stop() {
     const me = ++stops;
     input('\x1b');
-    if (c.gem) return; // (agy: Esc interrupts it; nothing of Claude's box to take back)
+    if (c.gem) return void setTimeout(load, 1500); // (agy: Esc interrupts it, nothing of Claude's box to take back; the service sees it in agy's log)
     for (const end = Date.now() + 3000; me === stops && term && !c.closed && Date.now() < end;) {
       await new Promise((ok) => setTimeout(ok, 300));
       const t = me === stops && typed();
