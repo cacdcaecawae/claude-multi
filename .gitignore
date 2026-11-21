@@ -16,6 +16,8 @@
 !quota-panel.js
 !quota-panel.test.js
 !quota-panel.browser.test.js
+!sdk.js
+!sdk.test.js
 !THIRD_PARTY_NOTICES.txt
 !package.json
 !package-lock.json

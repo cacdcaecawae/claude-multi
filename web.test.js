@@ -8,7 +8,7 @@ const browser = process.env.BROWSER_EXE || [
 if (!browser) throw Error('Set BROWSER_EXE to a Chromium browser executable');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-browser-test-'));
 const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title: 'Test conversation', acct: 0, cwd: 'C:/test', at: Date.now(), pid: 123 }],
-  notes: [], gpt: [], oai: true, tickets: [], waits: [], usage: { accounts: [{ label: 'test', windows: [], runway: 2 }], rec: 0, open: true, projects: [] } };
+  notes: [], gpt: [], oai: true, sdkModels: require('./sdk').MODELS, tickets: [], waits: [], usage: { accounts: [{ label: 'test', windows: [], runway: 2 }], rec: 0, open: true, projects: [] } };
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
@@ -27,6 +27,8 @@ const histUrls = []; // what each asked (the last 50)
 const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'C:/Users/ly/Desktop', 'D:/'], files: [] },
   'D:/': { path: 'D:/', up: '', dirs: ['D:/work', 'D:/.cache'], files: ['a.civa'] }, 'D:/work': { path: 'D:/work', up: 'D:/', dirs: [], files: [] } };
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
+// an API 额度 one as the service has it (/api/sdk), and what the page sent it: messages, answers, 停止
+let sdkState = { busy: false }; const sdkPosts = [];
 const cmdAsks = []; // whose commands / asked for, in turn
 const CMDS = [{ name: 'usage', desc: 'Show usage', hint: '' }, { name: 'usage-credits', desc: 'Credits', hint: '' }, { name: 'clear', desc: 'Start anew', hint: '[name]' }, { name: 'status', desc: 'Status', hint: '' }];
 dirs['D:\\figs'] = { path: 'D:\\figs', up: 'D:\\', dirs: ['D:\\figs\\old'], files: ['图7.pptx', 'a.png', 'x.exe'] };
@@ -53,6 +55,14 @@ const server = http.createServer((req, res) => {
       res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ id: 'oai-1' }));
     }));
   }
+  if (url.pathname.startsWith('/api/sdk/')) {
+    let b = ''; req.on('data', (d) => (b += d));
+    return req.on('end', () => {
+      sdkPosts.push([url.pathname.slice(9), JSON.parse(b)]);
+      if (url.pathname === '/api/sdk/send') sdkState = { busy: true, since: Date.now(), note: '正在启动', model: JSON.parse(b).model };
+      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(url.pathname === '/api/sdk/send' ? { id: 'S1' } : {}));
+    });
+  }
   if (url.pathname === '/api/term') {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write('event: size\ndata: {"w":100,"h":30,"kind":"pty"}\n\n');
@@ -71,6 +81,7 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
       : url.pathname === '/api/history' ? { id: historyId, start: 0, end: histFeed?.length ?? 1, items: histFeed ? histFeed.slice(Number(url.searchParams.get('from') ?? 0)) : [{ role: 'claude', text: long }], ...(histQueue && { queue: histQueue }) }
       : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' }
+      : url.pathname === '/api/sdk' ? sdkState
       : url.pathname === '/api/commands' ? (cmdAsks.push(url.searchParams.get('id') ?? url.searchParams.get('dir') ?? url.searchParams.get('mac')), url.searchParams.get('id') === 'M' ? { commands: [{ name: 'clear', desc: 'Start anew', hint: '[name]', also: ['reset'], builtin: true }, { name: 'maintain-formal-verification-skill', desc: 'a Mac skill', hint: '', also: [], builtin: false }] } : { commands: CMDS })
       : url.pathname.startsWith('/api/peek') ? { type: /\.exe$/.test(url.searchParams.get('path')) ? 'application/octet-stream' : /\.pptx$/.test(url.searchParams.get('path')) ? 'application/pdf' : 'image/png' }
       : url.pathname === '/api/dirs' ? dirs[url.searchParams.get('path')] ?? { err: '打不开' } : {};
@@ -258,6 +269,56 @@ const press = async (key, shift = false) => {
   release(); oaiHold = null;
   await until("localStorage.getItem('cm-draft:oai-1') === null");
   await evaluate('closeConv(oc)'); oai = { items: [], busy: false };
+  // API 额度: on an API account, 新对话 under Claude offers Claude Code or the Agent SDK; the SDK one's pane sends with the
+  // model on its button, says it's starting, then asks: a permission (允许), AskUserQuestion's two questions (one a
+  // multi-select: 提交 once both are picked), words typed answering one; its record as a Claude one's; 停止; why a turn failed
+  state.usage.accounts[0].api = true; await evaluate('load()');
+  await evaluate("document.querySelector('[data-new]').click()");
+  await evaluate("document.querySelector('[data-k=\"claude\"]').click()");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('#sheetIn [data-sdk]')].map((b) => b.textContent + (b.classList.contains('on') ? ' on' : ''))"), ['Claude Code on', 'API 额度：Agent SDK，按用量计费']);
+  await evaluate("(() => { document.querySelector('[data-sdk=\"1\"]').click(); const d = document.querySelector('#dirIn'); d.value = 'C:/test'; d.dispatchEvent(new Event('input')); document.querySelector('#start').click(); })()");
+  await until("!!document.querySelector('.pane.on.sdk')");
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .path').textContent, document.querySelector('.pane.on .bset').textContent, document.querySelector('.pane.on .hTop').textContent]"), ['API 额度 · test', 'Opus 5.5', '还没有消息，在下面发一条开始']);
+  await evaluate("document.querySelector('.pane.on .bset').click()");
+  await evaluate("document.querySelector('.pane.on .bPop [data-sm=\"claude-sonnet-5-5\"]').click()");
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .bset').textContent, localStorage.getItem('cm-sdk-model'), document.querySelector('.bPop [data-sm=\"claude-haiku-5-5\"] small').textContent]"), ['Sonnet 5.5', 'claude-sonnet-5-5', '$0.1 / $0.5']);
+  await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='整理一下';t.dispatchEvent(new Event('input'));document.querySelector('.pane.on .go').click(); })()");
+  await until("document.querySelector('.pane.on .live .busy')?.textContent.startsWith('正在启动')");
+  assert.deepEqual(sdkPosts.shift(), ['send', { id: null, acct: 1, dir: 'C:/test', text: '整理一下', paths: [], model: 'claude-sonnet-5-5' }]);
+  assert.deepEqual(await evaluate("[focusG.active.id, document.querySelector('.pane.on .go').dataset.m, document.querySelector('.pane.on .live .hm.user').textContent]"), ['S1', 'stop', '整理一下']);
+  historyId = 'S1'; histFeed = [{ role: 'user', text: '整理一下', at: Date.now() }];
+  sdkState = { busy: true, since: Date.now(), ask: { tool: 'Bash', what: 'rm -rf build', why: '清理旧的构建' } };
+  await until("document.querySelector('.pane.on .live pre.sdkWhat')?.textContent === 'rm -rf build'");
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .live .ask .head').textContent, document.querySelector('.pane.on .live .ask .q').textContent, [...document.querySelectorAll('.pane.on .live .ask .pick')].map((b) => b.textContent), !!document.querySelector('.pane.on .live .hm.user'), document.querySelector('.pane.on .hNew .hm.user').textContent]"),
+    ['要用 Bash', '清理旧的构建', ['1允许', '2不允许'], false, '整理一下']);
+  await evaluate("document.querySelector('.pane.on .live .pick[data-sa=\"1\"]').click()");
+  for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', allow: true }]);
+  sdkState = { busy: true, since: Date.now(), ask: { tool: 'AskUserQuestion', questions: [{ question: '用哪个库？', header: '库', multi: false, options: [{ label: 'React', desc: '组件' }, { label: 'Vue', desc: '' }] },
+    { question: '要哪些页？', header: '页面', multi: true, options: [{ label: '首页', desc: '' }, { label: '设置', desc: '' }] }] } };
+  await until("document.querySelectorAll('.pane.on .live .ask .q').length === 2");
+  assert.equal(await evaluate("document.querySelector('.pane.on .live [data-sgo]').disabled"), true);
+  await evaluate("document.querySelector('.pane.on .live [data-sq=\"0\"][data-sn=\"1\"]').click()");
+  await evaluate("document.querySelector('.pane.on .live [data-sq=\"1\"][data-sn=\"0\"]').click()");
+  await evaluate("document.querySelector('.pane.on .live [data-sq=\"1\"][data-sn=\"1\"]').click()");
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .live [data-sq=\"0\"][data-sn=\"1\"]').classList.contains('on'), document.querySelectorAll('.pane.on .live .box.on').length, document.querySelector('.pane.on .live [data-sgo]').disabled]"), [true, 2, false]);
+  await evaluate("document.querySelector('.pane.on .live [data-sgo]').click()");
+  for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', allow: true, answers: { '用哪个库？': 'Vue', '要哪些页？': ['首页', '设置'] } }]);
+  await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='都不要，纯 HTML';t.dispatchEvent(new Event('input'));document.querySelector('.pane.on .go').click(); })()");
+  for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', allow: false, text: '都不要，纯 HTML' }]);
+  sdkState = { busy: true, since: Date.now() - 5000 };
+  await until("document.querySelector('.pane.on .live .busy')?.textContent.startsWith('Claude 正在回复 · ')");
+  await evaluate("document.querySelector('.pane.on .go').click()"); // 停止: nothing written
+  for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sdkPosts.shift(), ['stop', { id: 'S1' }]);
+  histFeed = [...histFeed, { role: 'claude', text: '整理好了', at: Date.now() }];
+  sdkState = { busy: false, err: 'API Error: 403 这把 key（join-x）没开 API 额度' };
+  await until("document.querySelector('.pane.on .hNew .hm.claude')?.textContent.includes('整理好了') && document.querySelector('.pane.on .live').textContent.includes('没答完：API Error: 403')");
+  assert.equal(await evaluate("document.querySelector('.pane.on .go').dataset.m"), 'send');
+  await evaluate('closeConv(focusG.active)'); histFeed = null; historyId = 'A'; sdkState = { busy: false }; delete state.usage.accounts[0].api;
+  console.log('browser API 额度 ok');
   // a table's cell with math in it: the formula, not its stand-in
   assert.equal(await evaluate("(() => { const h = md('| 算法 | 复杂度 |\\n|---|---|\\n| 快排 | $O(n \\\\log n)$ |'); return [h.includes('|0|'), /<td>[^|]*katex/.test(h)].join(); })()"), 'false,true');
   // a reply's code block in its language's colors, by the fence's word (py, m: MATLAB; none or an unknown one: as it is), its

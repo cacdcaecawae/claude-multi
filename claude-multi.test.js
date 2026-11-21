@@ -1393,9 +1393,12 @@ if (SESSION0) {
   let mirrored = null;
   const open = vm.runInNewContext(api('open', 'switch'), {
     load: () => ({ profiles: [{ configDir: 'acct' }] }), sessions: () => [{ id: 'A', pid: 11, acct: 0, file: 'A.jsonl' }],
-    where: () => null, mirror: (pid, dir) => (mirrored = { key: 'w11', kind: 'pc', pid, dir })
+    where: () => null, mirror: (pid, dir) => (mirrored = { key: 'w11', kind: 'pc', pid, dir }), sdk: { busy: (id) => id === 'S' }
   });
   await open(null, { id: 'A' }); assert.equal(mirrored.dir, 'acct');
+  // an API 额度 one answering here (its Claude the Agent SDK's) isn't opened in a terminal beside it: two writers on one record
+  const openS = vm.runInNewContext(api('open', 'switch'), { load: () => ({ profiles: [] }), sessions: () => [{ id: 'S', pid: 12, acct: 0, sdk: true }], sdk: { busy: (id) => id === 'S' } });
+  await assert.rejects(openS(null, { id: 'S' }), /API 额度/);
   let marker = 'B', files = [], corrupt = false;
   const recordOf = vm.runInNewContext(fn(js, 'recordOf', '  ') + ';recordOf;', {
     terms: new Map([['w11', mirrored]]), path, ls: () => ['project'], sessions: () => [],
@@ -1574,6 +1577,11 @@ if (SESSION0) {
     ['demo-sim', 'F', 'my-proj-s', 'x', '论文-返修']);
   fs.writeFileSync(path.join(dir, 'live.json'), '[]');
   assert.equal(listSessions(reg).find((x) => x.id === id).pid, null); // ended there
+  // an API 额度 one: begun by the Agent SDK (entrypoint sdk-ts, sdk-py for Python's); claude -p's (sdk-cli) is Claude Code's own
+  const ep = (n, e) => { const f = `${n}f1e2d3c-4b5a-4968-8776-655443322110`; fs.writeFileSync(path.join(dir, 'projects', '-Users-me-Desktop-mine', `${f}.jsonl`),
+    JSON.stringify({ type: 'user', cwd: '/Users/me/Desktop/mine', entrypoint: e, message: { role: 'user', content: 'hi' } }) + '\n' + JSON.stringify({ type: 'last-prompt', lastPrompt: e }) + '\n'); return f; };
+  const eps = [['5', 'sdk-ts'], ['6', 'sdk-py'], ['7', 'sdk-cli'], ['8', 'cli']].map(([n, e]) => ep(n, e)), all = listSessions(reg);
+  assert.deepEqual(eps.map((f) => all.find((x) => x.id === f)?.sdk ?? false), [true, true, false, false]);
   const py = require('child_process').spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "watch", "exec")'],
     { input: `DIR = "~"\nCFG = None\nHAVE = {}\n${MAC_WATCH}`, encoding: 'utf8' });
   if (py.error) console.log('(no python here: the Mac watcher not compiled)'); else assert.equal(py.status, 0, py.stderr);
