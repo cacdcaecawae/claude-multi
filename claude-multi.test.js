@@ -541,6 +541,8 @@ if (SESSION0) {
   assert.ok(fk && fk[1] === fk[2] && fk[1] !== fk[3], fl);
   // one written in `code` is shown as written (a reply about such links); a link's words in code still a link, its code kept
   assert.equal(md('写的是 `[当前进展.md](file:///D:/a/…)` 这种'), '写的是 <code>[当前进展.md](file:///D:/a/…)</code> 这种');
+  // a path cut short (… or ...) names no file: as written, linked or in code
+  assert.equal(md('[当前进展.md](file:///D:/paper/…) `D:\\a\\...\\b.md`'), '[当前进展.md](file:///D:/paper/…) <code>D:\\a\\...\\b.md</code>');
   assert.ok(/^<a class="peek" data-peek="D:\/a\.md" [^>]+>(<svg.*?<\/svg>)<code>a\.md<\/code><\/a> \*\*$/.test(md('[`a.md`](file:///D:/a.md) **')), md('[`a.md`](file:///D:/a.md) **'));
   const t = md('看这个\n| 方案 | 快不快 |\n|---|:--:|\n| **A. 离线** | `x` 快 |\n| c \\| d | <e> |\n后面');
   assert.ok(t.includes('<thead><tr><th>方案</th><th>快不快</th></tr></thead>'), t);
