@@ -628,6 +628,7 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
   .ask .pick .box.on::after { content: '✓'; color: var(--onInk); font-size: 10px; line-height: 1; }
   .ask .hint2 { font-size: 12px; color: var(--accent); padding: 2px; }
   .ask pre.sdkWhat { margin: 0; max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px var(--mono); padding: 6px 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); } /* API 额度's: what a tool would do */
+  .row.doze { opacity: .5; } /* 休眠: still in 运行中, its Claude ended for now */
   .apiTag { display: inline-block; margin-right: 5px; padding: 0 4px; border-radius: 4px; font-size: 10px; font-weight: 600; line-height: 14px; vertical-align: 1px; color: var(--fg2); background: var(--tint); } /* an API 额度 one's row */
   @media (hover: hover) { .ask .pick:hover { border-color: var(--fg3); } .ask .pick.own:hover { color: var(--fg); background: var(--hover); } }
   .keys { display: flex; gap: 4px; padding: 6px; overflow-x: auto; border-top: 1px solid var(--border); scrollbar-width: none; flex: none; }
@@ -1479,7 +1480,9 @@ const chatEnd = (x) => `${nd(chatMark(x))}${x.busy ? '<span class="spin" title="
 // a row's first column: its account's ring, or a Mac's one's mark in the ring's place
 const lead = (x) => (x.mac ? `<i class="ac0" title="${esc(macName(x.mac))}">${macMark(x.mac)}</i>` : ac(x.acct + 1, '', convKind(x)));
 const hint = (x, ...more) => esc([...new Set([x.title, ...more].filter(Boolean))].join('\n')); // a row's card: its title, then what's not the same
-const chatRow = (x) => `<div class="row" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.cwd)}">${lead(x)}
+// 休眠 (the service's dozable): ended after an hour left, still in 运行中, greyed; opened, it goes on at once
+const DOZE_HINT = '休眠中：一小时没动，已关掉省内存，点开接着运行';
+const chatRow = (x) => `<div class="row${x.doze ? ' doze' : ''}" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.cwd, x.doze && DOZE_HINT)}">${lead(x)}
     <div class="main"><div class="t">${x.mac ? '' : mark(convKind(x), x.acct + 1)}${apiTag(x)}${esc(x.title)}</div><div class="m">${esc(base(x.cwd))}${x.prompt ? ' · ' + esc(x.prompt) : ''}</div></div>${chatEnd(x)}</div>`;
 // conversations 删除'd (or 归档'd) from here: out of the list at once, not after the server's answer (a Mac's waits on ssh to
 // it, seconds); one that failed comes back
@@ -1488,14 +1491,14 @@ function renderChats() {
   const notes = notesOut(); // unread only: the server drops what you've read anywhere or answered since. Not the 管家's: its own mode
   const kindName = (x) => (x.gem ? 'gem' : x.gpt ? 'gpt' : 'claude'), kinds = !!(state.gpt?.length || state.gemini?.length);
   const has = { all: 1, claude: 1, gpt: state.gpt?.length, gem: state.gemini?.length }, lk = has[listKind] ? listKind : 'all'; // a kind with no accounts now: all
-  const S = state.sessions.filter((x) => !isButler(x) && !deleting.has(x.id) && (!kinds || lk === 'all' || kindName(x) === lk)), run = S.filter((x) => x.pid), bell = listMode === 'run', proj = listMode === 'proj';
+  const S = state.sessions.filter((x) => !isButler(x) && !deleting.has(x.id) && (!kinds || lk === 'all' || kindName(x) === lk)), run = S.filter((x) => x.pid || x.doze), bell = listMode === 'run', proj = listMode === 'proj';
   const groupDot = (list) => nd(list.some((x) => chatMark(x) === 'ask') ? 'ask' : list.some(chatMark) ? 'done' : ''); // a folded group's: its rows' most urgent
   $('#sideTitle').textContent = proj ? '项目' : '对话';
   // with a GPT account: 全部 / Claude / GPT over the list (kept in this browser)
   // each mark in its logo's own colour (OpenAI's: black, white on dark)
   const kindBar = kinds ? `<div class="kinds">${[['all', '全部'], ['claude', SPARK, 'Claude', '#d97757'], state.gpt?.length && ['gpt', OPENAI, 'GPT', 'var(--fgHi)'], state.gemini?.length && ['gem', AGY_LOGO, 'Gemini']].filter(Boolean)
     .map(([k, l, name, c]) => `<button data-kind="${k}"${k === lk ? ' class="on"' : ''}${name ? ` title="${name}" aria-label="${name}"` : ''}${c ? ` style="color:${c}"` : ''}>${l}</button>`).join('')}</div>` : '';
-  const line = (x) => `<div class="row one" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.prompt, x.cwd)}">${lead(x)}
+  const line = (x) => `<div class="row one${x.doze ? ' doze' : ''}" data-open="${esc(x.id)}" tabindex="0" role="button" draggable="${FINE}" title="${hint(x, x.prompt, x.cwd, x.doze && DOZE_HINT)}">${lead(x)}
     <div class="main t">${x.mac ? '' : mark(convKind(x), x.acct + 1)}${apiTag(x)}${esc(x.title)}</div>${chatEnd(x)}</div>`;
   const sec = (k, head, body, cls = '') => `<details class="sec ${cls}" data-sec="${esc(k)}"${folded.has(k) ? '' : ' open'}><summary>${head}</summary>${body}</details>`;
   $('#sideActs').html = `<button class="ico${proj ? ' on' : ''}" data-proj title="${proj ? '回到按文件夹' : '按项目'}">${svg(I.grid)}</button><button class="ico" data-find title="搜索对话（Ctrl+K）">${svg(I.find)}</button><button class="ico${bell ? ' on' : ''}" data-bell title="${bell ? '回到按文件夹' : '提示和运行中的对话'}">${svg(I.bell)}${notes.length && !bell ? '<i class="bdot"></i>' : ''}</button>
@@ -2522,7 +2525,7 @@ async function openSession(id, where) {
   if (s && s === state.sessions.find(isButler)) return butler ? unpeek() : setButler(true); // the 管家 itself: its mode, not a second pane of it
   if (!s) return toast('这个对话已经不在列表里了');
   // a running one stays where it runs (a GPT 聊天 one, a Mac's: no account here; an API 额度 one: on its own)
-  const fixed = s.pid || s.oai || s.mac || s.sdk;
+  const fixed = s.pid || s.oai || s.mac || s.sdk || s.doze; // (休眠: on its own account again, at once)
   if (butler) { const acct = fixed ? s.acct + 1 : await pickAcct(s); if (acct || s.oai || s.mac) peekAt(s, acct); return; } // in 管家 mode it stays: the conversation in the 管家's place
   if (have) return where && where !== 'aside' && where !== have.g ? moveConv(have, where) : activate(have.g, have); // open already: that tab
   const acct = fixed ? s.acct + 1 : await pickAcct(s);
@@ -3285,7 +3288,7 @@ function makeConv(body, title) {
   async function resume() { // 接着聊: like opening it from the list
     const s = state?.sessions.find((x) => x.id === c.id);
     if (!s) return toast('这个对话已经不在列表里了');
-    const acct = s.pid || s.mac ? s.acct + 1 : await pickAcct(s);
+    const acct = s.pid || s.mac || s.doze ? s.acct + 1 : await pickAcct(s);
     if ((!acct && !s.mac) || c.closed) return;
     body = { id: s.id, acct, gpt: c.gpt, gem: c.gem, mac: c.mac }; c.acct = s.mac ? null : acct; start();
   }
@@ -3348,7 +3351,7 @@ function makeConv(body, title) {
       if (n) { c.id = session.id = n.id; markRows(); save(); if (c.joins) { for (const p of c.joins) post('/api/project', { op: 'add', id: p, conv: [n.id] }).catch(() => {}); c.joins = null; } }
     }
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null;
-    if (s) { c.title = s.title; c.acct = s.pid ? s.acct + 1 : body.acct ?? s.acct + 1; }
+    if (s) { c.title = s.title; c.acct = s.pid ? s.acct + 1 : body.acct ?? s.acct + 1; if (!s.doze) c.waking = false; }
     // its folder: a button, what's in it shown while the mouse is on it (dirPop), a click opens it in 预览; a Mac's own
     // folder (not one of this PC's: its files are there), its name only
     const cwd = s?.cwd ?? body.dir ?? '', name = isButler({ cwd }) ? '管家' : base(cwd) || cwd, pc = /^[A-Za-z]:[\\/]/.test(cwd) && !isButler({ cwd });
@@ -3364,11 +3367,12 @@ function makeConv(body, title) {
   };
   c.wake = () => { // shown: started if it should be, its stream and record going again
     shown = true; el.classList.add('on'); readNote(c.id);
+    const s = c.id && state?.sessions.find((x) => x.id === c.id);
     if (!c.started) {
-      const s = c.id && state?.sessions.find((x) => x.id === c.id);
-      if (body.acct || body.open || s?.pid) { if (!body.acct && !body.open) body = { id: c.id, acct: s.acct + 1, gpt: c.gpt, gem: c.gem }; return start(); }
+      if (body.acct || body.open || s?.pid || s?.doze) { if (!body.acct && !body.open) body = { id: c.id, acct: s.acct + 1, gpt: c.gpt, gem: c.gem }; c.waking = !!s?.doze; return start(); }
       notice('idle', '这个对话没有在运行'); c.sync();
-    } else if (!c.ended && !es && key) connect();
+    } else if (s?.doze && !c.waking) { c.waking = true; resume(); } // 休眠 while it was out of sight: on again now (once)
+    else if (!c.ended && !es && key) connect();
     setView(view);
   };
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(histTimer); gen++; es?.close(); es = null; c.live = ''; readNote(c.id); };

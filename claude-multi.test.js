@@ -1750,6 +1750,28 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual(head.match(/\x1b\[\?\d+[hl]/g).sort(), ['\x1b[?1003h', '\x1b[?1006h', '\x1b[?1049h', '\x1b[?2004h']); // enabled at the cut; the retained output turns paste off
   console.log('replay modes ok');
 }
+// 休眠: which conversations running in the web service are ended to free memory, and the shells that keep one going
+{
+  const { dozable, shellsIn } = require('./claude-multi'), H = 3600e3, now = 10 * H;
+  const t = (o = {}) => ({ kind: 'pty', pid: 7, clients: new Set(), outAt: now - 2 * H, dir: 'C:/acct', ...o });
+  const idle = { status: 'idle', statusUpdatedAt: now - 2 * H }, none = new Set();
+  assert.equal(dozable(t(), idle, none, now), true); // a Claude idle by its own word for two hours, nobody looking, nothing typed
+  for (const [why, x, j, sh] of [
+    ['a page shows it', t({ clients: new Set([1]) }), idle, none], ['idle for half an hour', t(), { ...idle, statusUpdatedAt: now - H / 2 }, none],
+    ['at work', t(), { ...idle, status: 'busy' }, none], ['running a command', t(), { ...idle, status: 'shell' }, none],
+    ['asking you', t(), { ...idle, status: 'waiting' }, none], ['its state unread', t(), null, none],
+    ['a shell of its own under it (a background command)', t(), idle, new Set([7])], ['which shells: unknown', t(), idle, null],
+    ['typed in ten minutes ago', t({ typed: now - H / 6 }), idle, none], ['a Mac\'s', t({ mac: 'mac' }), idle, none],
+    ['switching accounts', t({ switching: true }), idle, none], ['ended already', t({ gone: true }), idle, none],
+    ['a terminal window\'s (its reader)', t({ kind: 'pc' }), idle, none], ['no pid yet', t({ pid: 0 }), idle, none],
+  ]) assert.equal(dozable(x, j, sh, now), false, why);
+  // a GPT or Gemini one (no session file): by what it last showed
+  assert.deepEqual([dozable(t({ dir: undefined }), null, none, now), dozable(t({ dir: undefined, outAt: now - H / 2 }), null, none, now)], [true, false]);
+  // Win32_Process's "<parent> <name>" and ps's "<ppid> <path>": the shells' parents, not MCP's cmd or node
+  assert.deepEqual([...shellsIn('  4 System\r\n 54336 bash.exe\r\n 54336 cmd.exe\r\n 811 powershell.exe\r\n 812 pwsh.exe\r\n 9 node.exe\r\n 10 bashful.exe\r\n')], [54336, 811, 812]);
+  assert.deepEqual([...shellsIn('  501 /bin/zsh\n  502 -zsh\n  503 /bin/sh\n  504 /usr/bin/ssh\n')], [501, 503]);
+  console.log('休眠 ok');
+}
 // A file sent in a conversation, opened from the page: a PDF shown (no sandbox: it'd get no viewer), text and pictures
 // shown sandboxed, the page's own kinds (HTML, SVG) and anything else downloaded; its name as sent; only a saved upload's name
 {
