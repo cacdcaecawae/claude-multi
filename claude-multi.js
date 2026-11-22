@@ -463,8 +463,9 @@ async function fetchUsage(p) {
       if ((await ask('/v1/models')).status === 401) return { api: true, err: '接入已失效，可在设置里重新申请' };
     } catch {}
     // sdk: whether the gateway lets this key use API 额度 (its /_sdk, {on}); none where it doesn't say (a gateway
-    // without one), and 新对话 offers it there as before
-    if (p.api.baseURL) try { const r = await ask('/_sdk'), j = r.ok ? await r.json() : (await r.body?.cancel(), null); if (typeof j?.on === 'boolean') sdk = j.on; } catch {}
+    // without one), and 新对话 offers it there as before. Not asked with no key in its settings (本地代理's comes from
+    // apiKeyHelper): an empty one is only a refusal logged there
+    if (p.api.baseURL && key) try { const r = await ask('/_sdk'), j = r.ok ? await r.json() : (await r.body?.cancel(), null); if (typeof j?.on === 'boolean') sdk = j.on; } catch {}
     return { api: true, ...(sdk !== undefined && { sdk }) };
   }
   let c;
