@@ -2237,7 +2237,8 @@ function newSheet(kind) {
     $('#sheet').classList.toggle('wide', !!pick);
     if (pick) return drawPick();
     // the Macs last among Claude's accounts (acct: a Mac's id): its own folder there, no folder to pick here
-    const gpt = gptOn && !chat, oai = gptOn && chat, mac = gptOn || gemOn ? null : macOf(acct) ?? null, api = !gptOn && !gemOn && !mac && !!u.accounts[acct - 1]?.api;
+    // api: API 额度 offered, on an API account its gateway didn't say no to (sdk false: not on its list)
+    const gpt = gptOn && !chat, oai = gptOn && chat, mac = gptOn || gemOn ? null : macOf(acct) ?? null, api = !gptOn && !gemOn && !mac && !!u.accounts[acct - 1]?.api && u.accounts[acct - 1].sdk !== false;
     const accts = gemOn ? gm.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">A${i + 1} · ${esc(g.label)}${g.on && gm.length > 1 ? ' · 在线' : ''}</button>`)
       : gpt ? gp.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">G${i + 1} · ${esc(g.label)}</button>`)
       : [...u.accounts.map((a, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}">
