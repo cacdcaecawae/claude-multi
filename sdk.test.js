@@ -42,6 +42,14 @@ test('a new one: its own id up front (sessionId), on the API provider, every tie
   s.send({ id, configDir: 'C:/acct', cwd: 'C:/work', text: '再来', model: 'gpt-6' }); // a model not offered: the first one
   await until(() => calls.length === 2 && !s.view(id).busy);
   assert.deepEqual([calls[1].options.resume, calls[1].options.sessionId, calls[1].options.model], [id, undefined, 'anthropic/claude-opus-5-5']);
+  // 思考强度: Claude Code's default (xhigh) unless one of its levels is asked; one it hasn't: the default
+  assert.deepEqual([calls[0].options.effort, calls[1].options.effort], ['xhigh', 'xhigh']);
+  for (const [asked, sent] of [['low', 'low'], ['max', 'max'], ['turbo', 'xhigh']]) {
+    const n = calls.length;
+    s.send({ id, configDir: 'C:/acct', cwd: 'C:/work', text: '再来', effort: asked });
+    await until(() => calls.length === n + 1 && !s.view(id).busy);
+    assert.deepEqual([calls[n].options.effort, s.view(id).effort], [sent, sent], asked);
+  }
   assert.throws(() => s.send({ id: null, text: ' ' }), /空的/);
   assert.deepEqual(s.view('nobody'), { busy: false });
 });

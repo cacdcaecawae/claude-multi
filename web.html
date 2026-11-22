@@ -3548,14 +3548,17 @@ function makeSdk(body, title) {
   // till the record has it; picks: AskUserQuestion's answers so far, by question
   let shown = false, timer = null, st = { busy: false }, sending = false, atts = [], end = null, oldest = null, reading = false, older = false, sent = '', liveHtml = '', picks = {}, askKey = '';
   const models = state?.sdkModels ?? [['claude-opus-5-5', 'Opus 5.5', '']];
-  let model = models[0][0], picked = false;
-  try { const m = localStorage.getItem('cm-sdk-model'); if (m) { model = m; picked = !c.id; } } catch {}
-  go.insertAdjacentHTML('beforebegin', '<div class="bsel"><button class="bset" data-sset title="模型"></button></div>');
-  const drawModel = () => { $p('.bset').innerHTML = `<span>${esc(models.find((m) => m[0] === model)?.[1] ?? model)}</span>`; };
+  // its model and 思考强度 (Claude Code's own default, 很高, for a new one), as last picked in this browser
+  let model = models[0][0], effort = 'xhigh', picked = false;
+  try { const m = localStorage.getItem('cm-sdk-model'), e = localStorage.getItem('cm-sdk-effort'); if (m) model = m; if (e) effort = e; picked = !c.id && !!(m || e); } catch {}
+  go.insertAdjacentHTML('beforebegin', '<div class="bsel"><button class="bset" data-sset title="模型、思考强度"></button></div>');
+  const drawModel = () => { $p('.bset').innerHTML = `<span>${esc(models.find((m) => m[0] === model)?.[1] ?? model)} · ${esc(effortName(effort))}</span>`; };
   function pickModel(btn) {
     const pop = popOver(btn);
     if (!pop) return;
-    pop.innerHTML = `<div class="h">模型 · 每百万 token 输入 / 输出</div><div class="seg">${models.map(([v, l, p]) => `<button class="${v === model ? 'on' : ''}" data-sm="${v}">${esc(l)}<small>${esc(p)}</small></button>`).join('')}</div>`;
+    pop.innerHTML = `<div class="h">模型 · 每百万 token 输入 / 输出</div><div class="seg">${models.map(([v, l, p]) => `<button class="${v === model ? 'on' : ''}" data-sm="${v}">${esc(l)}<small>${esc(p)}</small></button>`).join('')}</div>
+      ${effortRow(EFFORTS, effort)}`;
+    effortSlide(pop, EFFORTS, (v) => { effort = v; picked = true; try { localStorage.setItem('cm-sdk-effort', v); } catch {} drawModel(); });
     pop.onclick = (e) => {
       const b = e.target.closest('[data-sm]');
       if (!b) return;
@@ -3635,7 +3638,7 @@ function makeSdk(body, title) {
     try { r = await (await fetch(`/api/sdk?id=${encodeURIComponent(c.id)}`)).json(); } catch { return; }
     if (!('busy' in r)) return;
     st = r;
-    if (!picked && r.model) model = r.model; // the conversation's own, unless picked here
+    if (!picked) { if (r.model) model = r.model; if (r.effort) effort = r.effort; } // the conversation's own, unless picked here
     if (!st.busy && !sending) sent = '';
     drawModel(); goMode(); drawLive();
   }
@@ -3694,7 +3697,7 @@ function makeSdk(body, title) {
     if (text == null) { going = v; line.value = ''; atts = []; grow(); drawAtts(); }
     sent = [v, ...files.map((a) => `附件：${a.name ?? '图片'}`)].filter(Boolean).join('\n'); drawLive(); hist.scrollTop = hist.scrollHeight;
     try {
-      const r = await post('/api/sdk/send', { id: c.id, acct: c.acct, dir: body.dir, text: v, paths: await Promise.all(files.map((a) => a.up)), model });
+      const r = await post('/api/sdk/send', { id: c.id, acct: c.acct, dir: body.dir, text: v, paths: await Promise.all(files.map((a) => a.up)), model, effort });
       if (!c.id) { c.id = r.id; c.title = (v.split('\n')[0] || title || '新对话').slice(0, 40); save(); markRows(); if (c.g) drawTabs(c.g); c.sync(); }
       st = { busy: true, since: Date.now(), note: '正在启动' }; sending = false;
       await readState(); load(); // the list and the tab: it's answering
