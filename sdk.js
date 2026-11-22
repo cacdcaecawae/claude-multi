@@ -75,8 +75,10 @@ function killTree(p) {
 }
 
 // a message of yours, as the SDK takes one: origin human, as a host passing on what you typed must say (the record's
-// queued_command line has it then, and the page shows that one as yours)
-const said = (text, priority) => ({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, session_id: '', origin: { kind: 'human' }, ...(priority && { priority }) });
+// queued_command line has it then, and the page shows that one as yours). images: the API's image blocks, before the
+// words, as Claude Code puts pictures pasted into its window
+const said = (text, priority, images = []) => ({ type: 'user', message: { role: 'user', content: images.length ? [...images, ...(text ? [{ type: 'text', text }] : [])] : text },
+  parent_tool_use_id: null, session_id: '', origin: { kind: 'human' }, ...(priority && { priority }) });
 // a query's input: the messages as they're pushed, over at end()
 function feed() {
   const q = [], wake = [];
@@ -95,20 +97,20 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
     signal?.addEventListener('abort', () => ask.answer({ behavior: 'deny', message: 'The user stopped this.' }), { once: true });
   });
   // {id} one to go on with (null: a new one), on the account in configDir, in folder cwd: the turn starts, answered at once
-  function send({ id, configDir, cwd, text, model, effort }) {
+  function send({ id, configDir, cwd, text, images = [], model, effort }) {
     text = String(text ?? '').trim();
-    if (!text) throw new Error('消息是空的');
+    if (!text && !images.length) throw new Error('消息是空的');
     const was = id && runs.get(id);
     if (was?.busy) { // 插入
       if (was.stopping) throw new Error('正在停止，停下来再发');
-      if (was.input.over()) was.later.push(text); else was.input.push(said(text, 'next'));
+      if (was.input.over()) was.later.push({ text, images }); else was.input.push(said(text, 'next', images));
       return { id };
     }
     const m = MODELS.find((x) => x[0] === model)?.[0] ?? MODELS[0][0], e = EFFORTS.includes(effort) ? effort : EFFORT, fresh = !id;
     id ??= crypto.randomUUID();
     const run = { id, model: m, effort: e, busy: true, since: Date.now(), at: 0, ask: null, err: '', note: '正在启动', ac: new AbortController(), input: feed(), later: [] };
     runs.set(id, run);
-    run.input.push(said(text));
+    run.input.push(said(text, null, images));
     (async () => {
       const { query } = await lib();
       for await (const msg of query({ prompt: run.input, options: {
@@ -122,7 +124,7 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
     })().catch((e) => { if (!run.stopping) run.err = String(e?.message ?? e).slice(0, 500); }) // (停止's: no error)
       .finally(() => {
         run.input.end(); run.ask?.answer({ behavior: 'deny', message: 'The conversation stopped.' }); Object.assign(run, { busy: false, note: '', at: Date.now() }); done(run);
-        if (run.later.length && !run.stopping) try { send({ id, configDir, cwd, text: run.later.join('\n\n'), model: m, effort: e }); } catch {}
+        if (run.later.length && !run.stopping) try { send({ id, configDir, cwd, text: run.later.map((x) => x.text).filter(Boolean).join('\n\n'), images: run.later.flatMap((x) => x.images), model: m, effort: e }); } catch {}
       });
     return { id };
   }
@@ -153,7 +155,7 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
   // waiting here (what waits in claude's own queue is in its record)
   function view(id) {
     const r = runs.get(id);
-    return r ? { busy: r.busy, since: r.since, model: r.model, effort: r.effort, err: r.err, note: r.note, ask: r.ask && askView(r.ask), later: r.busy ? r.later : [] } : { busy: false };
+    return r ? { busy: r.busy, since: r.since, model: r.model, effort: r.effort, err: r.err, note: r.note, ask: r.ask && askView(r.ask), later: r.busy ? r.later.map((x) => x.text).filter(Boolean) : [] } : { busy: false };
   }
   return { send, answer, stop, view, busy, waits: (id) => !!runs.get(id)?.ask };
 }

@@ -3549,7 +3549,8 @@ function makeOai(id, title) {
 // An API 额度 one: Claude Code run here by the Agent SDK on an API account (sdk.js), paid from the API credits. Its record
 // is a Claude one's, read the same way (/api/history: what's new every second while shown, older pieces as you scroll
 // up); how it stands (answering, a question or a permission waiting, why a turn failed) from /api/sdk. A message goes
-// with /api/sdk/send, not while it answers (停止 first), its pictures and files uploaded first and sent as their paths;
+// with /api/sdk/send (while it answers: into that answer), its pictures and files uploaded first (the service sends a
+// picture as one, a file as its path);
 // written while it asks you something, the words are the answer. No terminal. body: {id} a listed one, {acct, dir} a
 // new one, its id from its first message. The model is the button's by the box (kept in this browser), as GPT 聊天's mode.
 function makeSdk(body, title) {
@@ -3563,7 +3564,7 @@ function makeSdk(body, title) {
   // st: /api/sdk's last word; end, oldest: where the record read so far ends and begins; sent: a message on its way, shown
   // till the record has it; queued: the ones sent while it answered that Claude hasn't taken in yet (its record's queue);
   // picks: AskUserQuestion's answers so far, by question
-  let shown = false, timer = null, st = { busy: false }, sending = false, atts = [], end = null, oldest = null, reading = false, older = false, sent = '', queued = [], liveHtml = '', picks = {}, askKey = '';
+  let shown = false, timer = null, st = { busy: false }, sending = false, atts = [], end = null, oldest = null, reading = false, older = false, sent = '', sentQ = false, queued = [], liveHtml = '', picks = {}, askKey = '';
   const models = state?.sdkModels ?? [['claude-opus-5-5', 'Opus 5.5', '']];
   // its model and 思考强度 (Claude Code's own default, 很高, for a new one), as last picked in this browser
   let model = models[0][0], effort = 'xhigh', picked = false;
@@ -3677,9 +3678,11 @@ function makeSdk(body, title) {
   function drawLive() {
     const a = st.ask, key = a ? JSON.stringify(a) : '';
     if (key !== askKey) { askKey = key; picks = {}; }
-    // 排队中: in Claude's queue (taken in between its steps, or as its next turn), or here till its input takes more
-    const Q = '<span class="lab">排队中</span>', waits = [...queued.map((x) => x.text), ...(st.later ?? [])].map(shownText).filter(Boolean);
-    const h = (sent ? `<div class="hm user pending">${userBody(sent, [], true)}</div>` : '')
+    // 排队中: in Claude's queue (taken in between its steps, or as its next turn), or here till its input takes more. One
+    // sent from here into its answer stays till the record has it: one with a picture isn't in the record's queue
+    const Q = '<span class="lab">排队中</span>', flat = (s) => s.replace(/\s+/g, '');
+    const waits = [...queued.map((x) => x.text), ...(st.later ?? [])].map(shownText).filter((t) => t && !(sent && flat(t) === flat(sent)));
+    const h = (sent ? `<div class="hm user pending">${sentQ ? Q : ''}${userBody(sent, [], true)}</div>` : '')
       + waits.map((t) => `<div class="hm user pending">${Q}${userBody(t, [], true)}</div>`).join('')
       + (a ? askCard(a) : st.busy ? `<div class="busy"><i></i>${esc(st.note || 'Claude 正在回复')} · ${dur(Date.now() - (st.since ?? Date.now()))}</div>`
         : !sending && st.err ? `<div class="hm note">没答完：${esc(st.err)}</div>` : '');
@@ -3719,12 +3722,12 @@ function makeSdk(body, title) {
     const into = st.busy;
     sending = true;
     if (text == null) { going = v; line.value = ''; atts = []; grow(); drawAtts(); }
-    sent = [v, ...files.map((a) => `附件：${a.name ?? '图片'}`)].filter(Boolean).join('\n'); drawLive(); hist.scrollTop = hist.scrollHeight;
+    sent = [v, ...files.map((a) => `附件：${a.name ?? '图片'}`)].filter(Boolean).join('\n'); sentQ = into; drawLive(); hist.scrollTop = hist.scrollHeight;
     try {
       const r = await post('/api/sdk/send', { id: c.id, acct: c.acct, dir: body.dir, text: v, paths: await Promise.all(files.map((a) => a.up)), model, effort });
       if (!c.id) { c.id = r.id; c.title = (v.split('\n')[0] || title || '新对话').slice(0, 40); save(); markRows(); if (c.g) drawTabs(c.g); c.sync(); }
       sending = false;
-      if (into) { sent = ''; await readState(); await readHist(); return true; } // (its queue in the record now)
+      if (into) { await readState(); await readHist(); return true; }
       st = { busy: true, since: Date.now(), note: '正在启动' };
       await readState(); load(); // the list and the tab: it's answering
       return true;
@@ -3735,12 +3738,15 @@ function makeSdk(body, title) {
       return false;
     } finally { sending = false; if (going) { going = ''; grow(); } goMode(); drawLive(); }
   }
-  // 停止: what it hasn't taken in yet goes with it, so it comes back to the box, as a Claude one's does
+  // 停止: what it hasn't taken in yet goes with it, so it comes back to the box (its words: a picture with it is gone), as
+  // a Claude one's does
   async function stop() {
+    const words = sent && sentQ ? sent.replace(/^附件：.*$/gm, '').trim() : '', flat = (s) => s.replace(/\s+/g, '');
     const back = [...queued.map((x) => x.text), ...(st.later ?? [])];
+    if (words && !back.some((t) => flat(shownText(t)) === flat(words))) back.unshift(words);
     try { await post('/api/sdk/stop', { id: c.id }); } catch (e) { toast(e.message, 4000); return readState(); }
     if (back.length) {
-      line.value = [...back, line.value.trim()].filter(Boolean).join('\n'); queued = []; grow(); goMode();
+      line.value = [...back, line.value.trim()].filter(Boolean).join('\n'); queued = []; sent = ''; grow(); goMode();
       toast('已停止。还没执行的消息回到了输入框，可以改了再发', 4000);
     }
     await readState(); load();

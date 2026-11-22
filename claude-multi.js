@@ -3433,6 +3433,20 @@ function recordImage(file, pos, k) {
 // into a terminal does, and Claude attaches it ([Image #1]) and copies it into its record. Any other file (name: its
 // own) keeps its name, after the time: its path goes in the message, for Claude to read. Kept a week.
 const UPLOADS = path.join(ROOT, 'uploads');
+// An API 额度 message's pictures and files: a picture sent from the page (one of ours in uploads) goes as a picture, as
+// one pasted into Claude's window (the record has it, so the 对话 view shows it); a file, or a picture too big for the
+// API (5 MB in base64), as its path, for Claude to read
+const PIC_TYPE = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+function sdkParts(paths, up = UPLOADS) {
+  const images = [], files = [];
+  for (const p of paths) {
+    const type = sameDir(path.dirname(p), up) && PIC_TYPE[/^\d{8}T\d{6}-[0-9a-f]{6}\.(\w+)$/.exec(path.basename(p))?.[1]];
+    let data = null;
+    try { if (type && fs.statSync(p).size <= 3.5 * 2 ** 20) data = fs.readFileSync(p).toString('base64'); } catch {}
+    if (data) images.push({ type: 'image', source: { type: 'base64', media_type: type, data } }); else files.push(p);
+  }
+  return { images, files };
+}
 function saveUpload(data, ext, dir = UPLOADS, name = null) {
   fs.mkdirSync(dir, { recursive: true });
   for (const f of fs.readdirSync(dir)) try { if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 7 * 864e5) fs.unlinkSync(path.join(dir, f)); } catch {}
@@ -4807,7 +4821,7 @@ async function web() {
     'GET /api/sdk': (q) => sdk.view(q.get('id') ?? ''),
     'POST /api/sdk/send': (q, b) => {
       const reg = load(), paths = (Array.isArray(b.paths) ? b.paths : []).filter((p) => typeof p === 'string' && p);
-      const text = [String(b.text ?? '').trim(), ...paths.map((p) => `附件：${p}`)].filter(Boolean).join('\n');
+      const { images, files } = sdkParts(paths), text = [String(b.text ?? '').trim(), ...files.map((p) => `附件：${p}`)].filter(Boolean).join('\n');
       let p, cwd;
       if (b.id) { // not while a Claude runs it elsewhere, nor while it's renamed, deleted or switched: one writer on a record
         sessCache = null;
@@ -4823,7 +4837,7 @@ async function web() {
         cwd = path.resolve(String(b.dir).trim());
       }
       shareMemory([[p.configDir, projectFolder(cwd)]]); shareMcp(p.configDir); // as a Claude started here has them
-      return sdk.send({ id: b.id || null, configDir: p.configDir, cwd, text, model: b.model, effort: b.effort });
+      return sdk.send({ id: b.id || null, configDir: p.configDir, cwd, text, images, model: b.model, effort: b.effort });
     },
     'POST /api/sdk/stop': (q, b) => sdk.stop(String(b.id ?? '')),
     'POST /api/sdk/answer': (q, b) => sdk.answer({ id: String(b.id ?? ''), allow: !!b.allow, answers: b.answers, text: b.text }),
@@ -5715,7 +5729,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
