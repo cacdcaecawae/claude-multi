@@ -4,12 +4,14 @@
 const { test } = require('node:test'), assert = require('node:assert/strict');
 const { createSdk, askView, answersOf, tierEnv } = require('./sdk');
 
-// a query() that records its call and then does what the test's script says: each step a message to yield, or a
-// function given the options (to call canUseTool and wait on it)
+// a query() that records its call and the messages its input gives (msgs; over: the input ended), then does what the
+// test's script says: each step a message to yield, or a function given the options (to call canUseTool and wait on it)
 function fakeLib(script) {
   const calls = [];
   const query = ({ prompt, options }) => {
-    calls.push({ prompt, options });
+    const call = { options, msgs: [], over: false };
+    calls.push(call);
+    (async () => { for await (const m of prompt) call.msgs.push(m); call.over = true; })();
     return (async function* () {
       for (const step of script()) {
         if (options.abortController.signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
@@ -31,11 +33,10 @@ test('a new one: its own id up front (sessionId), on the API provider, every tie
   assert.equal(s.view(id).busy, true); assert.equal(s.view(id).note, '正在启动');
   await until(() => calls.length && s.view(id).note === '');
   const o = calls[0].options;
-  assert.equal(calls[0].prompt, '你好');
+  assert.deepEqual(calls[0].msgs, [{ type: 'user', message: { role: 'user', content: '你好' }, parent_tool_use_id: null, session_id: '', origin: { kind: 'human' } }]);
   assert.deepEqual([o.sessionId, o.resume, o.model, o.pathToClaudeCodeExecutable, o.cwd, o.env], [id, undefined, 'anthropic/claude-haiku-5-5', 'C:/x/claude.exe', 'C:/work', { CLAUDE_CONFIG_DIR: 'C:/acct' }]);
   assert.deepEqual(o.settings, { env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'anthropic/claude-opus-5-5', ANTHROPIC_DEFAULT_SONNET_MODEL: 'anthropic/claude-sonnet-5-5',
     ANTHROPIC_DEFAULT_HAIKU_MODEL: 'anthropic/claude-haiku-5-5', ANTHROPIC_DEFAULT_FABLE_MODEL: 'anthropic/claude-fable-5-2' } });
-  assert.throws(() => s.send({ id, configDir: 'C:/acct', cwd: 'C:/work', text: '再来' }), /还在回答/);
   gate();
   await until(() => !s.view(id).busy);
   assert.deepEqual([s.view(id).err, ended], ['', [id]]);
@@ -52,6 +53,34 @@ test('a new one: its own id up front (sessionId), on the API provider, every tie
   }
   assert.throws(() => s.send({ id: null, text: ' ' }), /空的/);
   assert.deepEqual(s.view('nobody'), { busy: false });
+});
+
+test('插入: one sent while it answers goes into its input (priority next, yours); after its result, one waits here and goes as the next message, on its model and effort; not while it stops, nor after 停止', async () => {
+  const gates = [], gate = () => new Promise((r) => gates.push(() => r(INIT)));
+  const { lib, calls } = fakeLib(() => [INIT, gate, () => OK, gate, () => INIT]); // its result, then claude still at what it had queued
+  const s = createSdk({ lib, exe: 'claude', envOf: () => ({}) });
+  const { id } = s.send({ id: null, configDir: 'C:/a', cwd: 'C:/w', text: '先做这个', model: 'claude-haiku-5-5', effort: 'low' });
+  await until(() => gates.length === 1);
+  assert.deepEqual(s.send({ id, configDir: 'C:/a', cwd: 'C:/w', text: ' 还有这个 ' }), { id });
+  await until(() => calls[0].msgs.length === 2);
+  assert.deepEqual(calls[0].msgs.map((m) => [m.message.content, m.priority, m.origin.kind]), [['先做这个', undefined, 'human'], ['还有这个', 'next', 'human']]);
+  gates[0]();
+  await until(() => calls[0].over && gates.length === 2); // its result: its input over
+  s.send({ id, text: '最后一条' }); s.send({ id, text: '再加一条' });
+  assert.deepEqual([calls.length, calls[0].msgs.length, s.view(id).later, s.view(id).busy], [1, 2, ['最后一条', '再加一条'], true]);
+  gates[1]();
+  await until(() => calls.length === 2 && gates.length === 3);
+  const o = calls[1].options;
+  assert.deepEqual([calls[1].msgs[0].message.content, o.resume, o.cwd, o.model, o.effort, s.view(id).later], ['最后一条\n\n再加一条', id, 'C:/w', 'anthropic/claude-haiku-5-5', 'low', []]);
+  // 停止 with one waiting here: it doesn't go; one sent while it stops is refused
+  gates[2]();
+  await until(() => gates.length === 4);
+  s.send({ id, text: '不要了' }); s.stop(id);
+  assert.throws(() => s.send({ id, text: '还要' }), /正在停止/);
+  gates[3]();
+  await until(() => !s.view(id).busy);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(calls.length, 2);
 });
 
 test('a permission: shown with what it would run; allowed as asked, or turned down with the words typed; nothing waiting: refused', async () => {

@@ -325,6 +325,23 @@ const press = async (key, shift = false) => {
   await evaluate("document.querySelector('.pane.on .go').click()"); // 停止: nothing written
   for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(sdkPosts.shift(), ['stop', { id: 'S1' }]);
+  // 插入: written while it answers, 发送 sends it into that answer (not refused); 排队中 till Claude takes it in (its
+  // record's queue, or one waiting at the service); Esc stops it, and what it hadn't taken in comes back to the box
+  await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='再加一句';t.dispatchEvent(new Event('input')); })()");
+  assert.equal(await evaluate("document.querySelector('.pane.on .go').dataset.m"), 'send');
+  await evaluate("document.querySelector('.pane.on .go').click()");
+  for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
+  const [ins, insB] = sdkPosts.shift();
+  assert.deepEqual([ins, insB.id, insB.text], ['send', 'S1', '再加一句']);
+  sdkState = { busy: true, since: Date.now(), later: ['晚到的一句'] }; histQueue = [{ text: '再加一句', at: Date.now() }];
+  await until("[...document.querySelectorAll('.pane.on .live .hm.user.pending')].map((e) => e.textContent).join('|') === '排队中再加一句|排队中晚到的一句'");
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .send textarea').value, document.querySelector('#toast').textContent.includes('还在回答')]"), ['', false]);
+  await evaluate("document.querySelector('.pane.on .send textarea').focus()"); await press('Escape');
+  for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sdkPosts.shift(), ['stop', { id: 'S1' }]);
+  await until("document.querySelector('.pane.on .send textarea').value === '再加一句\\n晚到的一句'");
+  sdkState = { busy: true, since: Date.now() }; histQueue = null;
+  await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='';t.dispatchEvent(new Event('input')); })()");
   histFeed = [...histFeed, { role: 'claude', text: '整理好了', at: Date.now() }];
   sdkState = { busy: false, err: 'API Error: 403 这把 key（join-x）没开 API 额度' };
   await until("document.querySelector('.pane.on .hNew .hm.claude')?.textContent.includes('整理好了') && document.querySelector('.pane.on .live').textContent.includes('没答完：API Error: 403')");

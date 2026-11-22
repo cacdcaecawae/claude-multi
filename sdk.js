@@ -7,6 +7,10 @@
 // list, the 对话 view, rename, delete and the token counts read it as any other (its lines say entrypoint sdk-ts).
 // A message is one query(), the conversation resumed by its id; a question or a permission Claude asks for (canUseTool)
 // waits for the page's answer; 停止 aborts the query. A turn going when the web service ends is cut there.
+// 插入: one sent while it answers goes into that query's input (streaming input) as Claude Code takes one typed in its
+// window: into the turn between its steps (priority next), else its own turn once that one's done. Its input ends with
+// its first result (claude still runs what it has queued, then ends: tried 2026-11-22 on Claude Code 2.1.322); one sent
+// after that, while it still runs, waits here (later) and goes as the next message.
 const fs = require('fs'), path = require('path'), crypto = require('crypto'), { exec } = require('child_process'), { pathToFileURL } = require('url');
 
 const NAME = '@anthropic-ai/claude-agent-sdk', VER = '0.3.330';
@@ -70,8 +74,20 @@ function killTree(p) {
   else try { process.kill(-p.pid, 'SIGKILL'); } catch { p.kill('SIGKILL'); } // its own group (detached)
 }
 
+// a message of yours, as the SDK takes one: origin human, as a host passing on what you typed must say (the record's
+// queued_command line has it then, and the page shows that one as yours)
+const said = (text, priority) => ({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, session_id: '', origin: { kind: 'human' }, ...(priority && { priority }) });
+// a query's input: the messages as they're pushed, over at end()
+function feed() {
+  const q = [], wake = [];
+  let over = false;
+  const kick = () => wake.splice(0).forEach((f) => f());
+  return { push: (m) => { q.push(m); kick(); }, end: () => { over = true; kick(); }, over: () => over,
+    async *[Symbol.asyncIterator]() { for (;;) { while (q.length) yield q.shift(); if (over) return; await new Promise((ok) => wake.push(ok)); } } };
+}
+
 function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill = killTree }) {
-  const runs = new Map(); // conversation id → { id, model, busy, since, at, ask, err, note, ac, proc, stopping }
+  const runs = new Map(); // conversation id → { id, model, busy, since, at, ask, err, note, ac, proc, stopping, input, later }
   const busy = (id) => !!runs.get(id)?.busy;
   const asked = (run, tool, input, signal) => new Promise((ok) => {
     const ask = { tool, input, at: Date.now(), answer: (r) => { if (run.ask === ask) run.ask = null; ok(r); } };
@@ -82,22 +98,32 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
   function send({ id, configDir, cwd, text, model, effort }) {
     text = String(text ?? '').trim();
     if (!text) throw new Error('消息是空的');
-    if (id && busy(id)) throw new Error('它还在回答上一条，答完再发，或者先停止');
+    const was = id && runs.get(id);
+    if (was?.busy) { // 插入
+      if (was.stopping) throw new Error('正在停止，停下来再发');
+      if (was.input.over()) was.later.push(text); else was.input.push(said(text, 'next'));
+      return { id };
+    }
     const m = MODELS.find((x) => x[0] === model)?.[0] ?? MODELS[0][0], e = EFFORTS.includes(effort) ? effort : EFFORT, fresh = !id;
     id ??= crypto.randomUUID();
-    const run = { id, model: m, effort: e, busy: true, since: Date.now(), at: 0, ask: null, err: '', note: '正在启动', ac: new AbortController() };
+    const run = { id, model: m, effort: e, busy: true, since: Date.now(), at: 0, ask: null, err: '', note: '正在启动', ac: new AbortController(), input: feed(), later: [] };
     runs.set(id, run);
+    run.input.push(said(text));
     (async () => {
       const { query } = await lib();
-      for await (const msg of query({ prompt: text, options: {
+      for await (const msg of query({ prompt: run.input, options: {
         pathToClaudeCodeExecutable: exe, env: envOf(configDir), cwd, abortController: run.ac, spawnClaudeCodeProcess: (o) => (run.proc = spawn(o)),
         model: `${API}/${m}`, effort: e, settings: { env: tierEnv() }, ...(fresh ? { sessionId: id } : { resume: id }),
         canUseTool: (tool, input, o) => asked(run, tool, input, o?.signal) } })) {
         if (msg.type === 'system' && msg.subtype === 'init') run.note = '';
         if (msg.type === 'result' && !run.stopping) run.err = msg.is_error ? String(msg.result || (msg.errors ?? []).join('；') || msg.subtype).slice(0, 500) : '';
+        if (msg.type === 'result') run.input.end();
       }
     })().catch((e) => { if (!run.stopping) run.err = String(e?.message ?? e).slice(0, 500); }) // (停止's: no error)
-      .finally(() => { run.ask?.answer({ behavior: 'deny', message: 'The conversation stopped.' }); Object.assign(run, { busy: false, note: '', at: Date.now() }); done(run); });
+      .finally(() => {
+        run.input.end(); run.ask?.answer({ behavior: 'deny', message: 'The conversation stopped.' }); Object.assign(run, { busy: false, note: '', at: Date.now() }); done(run);
+        if (run.later.length && !run.stopping) try { send({ id, configDir, cwd, text: run.later.join('\n\n'), model: m, effort: e }); } catch {}
+      });
     return { id };
   }
   // the question waiting: allow (or a tool's no), the picks of AskUserQuestion's questions, or words typed instead: a
@@ -123,10 +149,11 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
     else { p.once('exit', abort); setTimeout(abort, 5000).unref?.(); kill(p); }
     return {};
   }
-  // for the page: how it stands (none: idle, nothing asked since the service started)
+  // for the page: how it stands (none: idle, nothing asked since the service started); later: sent after its input ended,
+  // waiting here (what waits in claude's own queue is in its record)
   function view(id) {
     const r = runs.get(id);
-    return r ? { busy: r.busy, since: r.since, model: r.model, effort: r.effort, err: r.err, note: r.note, ask: r.ask && askView(r.ask) } : { busy: false };
+    return r ? { busy: r.busy, since: r.since, model: r.model, effort: r.effort, err: r.err, note: r.note, ask: r.ask && askView(r.ask), later: r.busy ? r.later : [] } : { busy: false };
   }
   return { send, answer, stop, view, busy, waits: (id) => !!runs.get(id)?.ask };
 }
