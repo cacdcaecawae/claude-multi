@@ -12,6 +12,7 @@ const state = { me: 'isolated test', butlerOn: true, sessions: [{ id: 'A', title
 const long = 'Full answer '.repeat(2500) + 'END_MARKER';
 let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 聊天 one as the service has it, and the message it got
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
+let restarts = 0; // 设置's 重启网页服务 asked
 let termGem = '', gemRes = null; // one whose screen shows agy's (these rows), and its stream, to show more on it later
 const inputs = []; // what was typed into the terminals (/api/input), in order
 const openBodies = []; // what each open asked for
@@ -38,6 +39,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/input') { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { inputs.push(JSON.parse(b).data); } catch {} }); }
   if (url.pathname === '/api/open') { opens++; let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { try { openBodies.push(JSON.parse(b)); } catch {} }); }
+  if (url.pathname === '/api/restart') restarts++;
   if (url.pathname === '/api/history') { histReads.push(Date.now()); histUrls.push(url.search); if (histUrls.length > 50) histUrls.shift(); }
   if (url.pathname === '/api/history' && histHang) { histHang = false; hung = res; return; } // left open, never answered
   if (url.pathname.startsWith('/api/peek') && /missing/.test(url.searchParams.get('path'))) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('没有这个文件：' + url.searchParams.get('path')); }
@@ -969,6 +971,19 @@ const press = async (key, shift = false) => {
     window.fetch = real; btn('close').click(); return out.join(' | '); })()`),
     '4 | true | # 注释 | """多 | 行""" | false | pre | copy+wrap | true | true | pre-wrap | true | % 中文 | 2 | "% 中文\\nx = 1;" | Get-Date | 标题 | copy+src | 3 | true | copy+src+wrap');
   console.log('browser 预览 code ok');
+  // 设置's 重启网页服务: asked once you say yes; the service still here when it ended (it failed): why; a new one answering
+  // (another up): the page reloaded. Last, as the reload starts the page anew
+  state.up = 1; await evaluate('load()');
+  const tap = "window.confirm = () => true; document.querySelector('#gear').click(); document.querySelector('[data-restart]').click()";
+  await evaluate(tap); await until('rstFrom === 1'); assert.equal(restarts, 1);
+  state.restartErr = '旧的网页服务 15 秒还没退出'; await evaluate('load()');
+  assert.deepEqual(await evaluate("[rstFrom, document.querySelector('#toast').textContent]"), [null, '重启没成功：旧的网页服务 15 秒还没退出']);
+  state.restartErr = null; await evaluate(tap); await until('rstFrom === 1'); assert.equal(restarts, 2);
+  await evaluate('window.before = 1'); state.up = 2;
+  let anew = false; // the old page's context goes as it reloads: an evaluate then throws
+  for (let i = 0; i < 200 && !anew; i++) { try { anew = await evaluate("!window.before && document.readyState === 'complete'"); } catch {} if (!anew) await new Promise((r) => setTimeout(r, 50)); }
+  assert.ok(anew, 'reloaded');
+  console.log('browser 重启网页服务 ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(async () => {
   if (socket?.readyState === WebSocket.OPEN) { await call('Browser.close').catch(() => {}); socket.close(); }
   if (proc && proc.exitCode === null) { proc.kill(); await new Promise((resolve) => { proc.once('exit', resolve); setTimeout(resolve, 3000); }); }
