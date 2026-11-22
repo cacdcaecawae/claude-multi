@@ -904,6 +904,8 @@ while True:
         except Exception: pass
     if not more: time.sleep(0.3) # an answer here within a second of its end (the page waits on it)
 `;
+// its {sys} as the page draws it: those numbers only (a Mac's line is that Mac's word, and the page puts them in its HTML)
+const macSysOf = (s) => Object.fromEntries(['cpu', 'cpuClaude', 'mem', 'memClaude', 'memAll', 'n'].map((k) => [k, s?.[k]]).filter(([, v]) => Number.isFinite(v)));
 // A file ConvertFrom-SecureString wrote (DPAPI, this Windows user, as hex) read back by .NET alone, no PowerShell module:
 // a 预热 started by the web service once found ConvertTo-SecureString's module failing to load ("The member AuditToString
 // is already present"), the Mac skipped
@@ -1904,9 +1906,11 @@ async function oaiSend(b) {
     const r = await oaiApi('responses', { model: OAI_MODEL, reasoning: opts, tools: [{ type: 'web_search' }], input: [{ role: 'user', content: oaiInput(text, ups) }],
       previous_response_id: old?.resp ?? undefined, background: true, store: true, truncation: 'auto' }); // a chat grown past its window: its oldest dropped there, not this message refused
     const c = old ? oaiRead(id) : { id, title: (text.split('\n')[0] || oaiName(ups[0])).slice(0, 40), msgs: [], resp: null }, now = Date.now();
+    // its files into the chat's folder; one that won't go (sent twice in one message, held open) stays where it was: the
+    // answer is under way at OpenAI, paid for, and must be kept
     const dir = path.join(OAI, id), files = ups.map((p) => path.join(dir, path.basename(p)));
-    if (ups.length) fs.mkdirSync(dir, { recursive: true });
-    ups.forEach((p, k) => fs.renameSync(p, files[k]));
+    if (ups.length) try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    ups.forEach((p, k) => { try { fs.renameSync(p, files[k]); } catch { if (!fs.existsSync(files[k])) files[k] = p; } });
     c.msgs.push({ role: 'user', text, files, at: now });
     Object.assign(c, { opts, pending: r.id, since: now, at: now });
     oaiSave(c);
@@ -2547,7 +2551,9 @@ function copyTo(s, p) {
   if (fs.existsSync(side)) fs.cpSync(side, path.join(dst, s.id), { recursive: true });
   log('session_copied', { profile_id: p.id, session_id: s.id });
   // then the old one goes (a month of switches left 1.1 GB of them), its tokens counted first as a delete does. Copied,
-  // not renamed: a rename keeps the birth time, and usage gives a tie to the older file's account
+  // not renamed: a rename keeps the birth time, and usage gives a tie to the older file's account.
+  // shortcut: the count stops the web service 0.2–0.4 s (all its records, 2026-11-22); counted in a child instead, the old
+  // copy would have to stay till that's done, or the switch wait for it, each a new gap in its one-writer steps
   try { tokenStats(); fs.rmSync(side, { recursive: true, force: true }); fs.rmSync(s.file, { force: true }); } catch {} // not counted (a full disk), held open: it stays
 }
 
@@ -3559,14 +3565,16 @@ function peekHead(name, office = false) {
 // only if it wasn't running before. Word and Excel are instances of their own, quit once ours are closed
 const PEEK_DIR = path.join(ROOT, 'peek');
 const OFFICE_APP = { ppt: 'PowerPoint', doc: 'Word', xls: 'Excel' };
+// Their macros never run: a file opened by automation runs them by default (AutomationSecurity low), and a file only
+// named in a reply is made into a PDF here unasked. 3: msoAutomationSecurityForceDisable. PowerPoint's (yours too) put back
 const OFFICE_PS = { // each job ({k, in, out}) said done (ok k) or not (fail k why), as it goes
-  ppt: `$was = [bool](Get-Process POWERPNT -ErrorAction SilentlyContinue); $app = New-Object -ComObject PowerPoint.Application
+  ppt: `$was = [bool](Get-Process POWERPNT -ErrorAction SilentlyContinue); $app = New-Object -ComObject PowerPoint.Application; $sec = $app.AutomationSecurity; $app.AutomationSecurity = 3
 try { foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { try { $p = $app.Presentations.Open($j.in, -1, 0, 0); try { $p.SaveAs($j.out, 32) } finally { $p.Close() }; "ok $($j.k)" } catch { "fail $($j.k) $($_.Exception.Message)" } } }
-finally { if (-not $was -and $app.Presentations.Count -eq 0) { $app.Quit() } }`,
-  doc: `$app = New-Object -ComObject Word.Application; $app.Visible = $false; $app.DisplayAlerts = 0
+finally { if (-not $was -and $app.Presentations.Count -eq 0) { $app.Quit() } else { $app.AutomationSecurity = $sec } }`,
+  doc: `$app = New-Object -ComObject Word.Application; $app.Visible = $false; $app.DisplayAlerts = 0; $app.AutomationSecurity = 3
 try { foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { try { $d = $app.Documents.Open($j.in, $false, $true, $false); try { $d.ExportAsFixedFormat($j.out, 17) } finally { $d.Close(0) }; "ok $($j.k)" } catch { "fail $($j.k) $($_.Exception.Message)" } } }
 finally { if ($app.Documents.Count -eq 0) { $app.Quit() } }`,
-  xls: `$app = New-Object -ComObject Excel.Application; $app.Visible = $false; $app.DisplayAlerts = $false
+  xls: `$app = New-Object -ComObject Excel.Application; $app.Visible = $false; $app.DisplayAlerts = $false; $app.AutomationSecurity = 3
 try { foreach ($j in ($env:CM_JOBS | ConvertFrom-Json)) { try { $b = $app.Workbooks.Open($j.in, 0, $true); try { $b.ExportAsFixedFormat(0, $j.out) } finally { $b.Close($false) }; "ok $($j.k)" } catch { "fail $($j.k) $($_.Exception.Message)" } } }
 finally { if ($app.Workbooks.Count -eq 0) { $app.Quit() } }`,
 };
@@ -4117,6 +4125,8 @@ async function web() {
       resume: args[0] === '--resume' ? args[1] : null };
     proc.onData((d) => {
       if (!t.listed && proc.pid) { t.listed = true; saveTerms(); }
+      // its session file written: in web-running.json now, not at the next 10 s look, so a restart right after continues it
+      if (!t.ran && proc.pid && fs.existsSync(path.join(p.configDir, 'sessions', `${proc.pid}.json`))) { t.ran = true; sessCache = null; saveRun(); }
       keepOut(t, d); send(t, 'data', d);
     });
     // ended to go on with another account (switching): its pages are sent to the new one instead of told it's gone
@@ -4273,7 +4283,7 @@ async function web() {
     } else if (o.gone) {
       fs.rmSync(o.gone.endsWith('/') ? path.join(macPath(home, o.gone), 'custom-title.json') : macPath(home, o.gone), { force: true });
     } else if (o.sys) {
-      macSys.set(m.host, { ...o.sys, at: Date.now() });
+      macSys.set(m.host, { ...macSysOf(o.sys), at: Date.now() });
     } else if (o.live) {
       const was = new Map(macLive(m).map((j) => [j.sessionId, j.status])), going = (st) => st === 'busy' || st === 'shell';
       fs.mkdirSync(home, { recursive: true });
@@ -4822,25 +4832,30 @@ async function web() {
     'POST /api/sdk/send': (q, b) => {
       const reg = load(), paths = (Array.isArray(b.paths) ? b.paths : []).filter((p) => typeof p === 'string' && p);
       const { images, files } = sdkParts(paths), text = [String(b.text ?? '').trim(), ...files.map((p) => `附件：${p}`)].filter(Boolean).join('\n');
-      let p, cwd;
+      let configDir, cwd, fresh = false;
       if (b.id) { // not while a Claude runs it elsewhere, nor while it's renamed, deleted or switched: one writer on a record
         sessCache = null;
-        const s = sessions().find((x) => x.id === b.id);
-        if (!s?.sdk) throw new Error('找不到这个对话');
-        if (resuming(s.id) || (s.pid && !sdk.busy(s.id))) throw new Error('它在终端里运行着：先在那里结束它');
-        if (doing.get(s.id)) throw new Error('这个对话正在改名、删除或换账号，稍等一下');
-        p = reg.profiles[s.acct]; cwd = s.cwd;
+        const s = sessions().find((x) => x.id === b.id), o = !s && sdk.origin(String(b.id));
+        if (o) ({ configDir, cwd } = o, fresh = true); // started here, no record yet: its first moments (into that turn), or its first message failed (anew)
+        else {
+          if (!s?.sdk) throw new Error('找不到这个对话');
+          if (resuming(s.id) || (s.pid && !sdk.busy(s.id))) throw new Error('它在终端里运行着：先在那里结束它');
+          if (doing.get(s.id)) throw new Error('这个对话正在改名、删除或换账号，稍等一下');
+          const p = reg.profiles[s.acct];
+          if (!p?.api) throw new Error('它被换到了订阅账号上：API 额度要用 API 账号，换回去再发'); // (the island, swap: they move any)
+          ({ configDir } = p); cwd = s.cwd;
+        }
       } else {
-        p = reg.profiles[Number(b.acct) - 1];
+        const p = reg.profiles[Number(b.acct) - 1];
         if (!p?.api) throw new Error('API 额度要用 API 账号（申请接入来的，或者连着网关的）');
         if (!isDir(b.dir)) throw new Error('文件夹不存在');
-        cwd = path.resolve(String(b.dir).trim());
+        ({ configDir } = p); cwd = path.resolve(String(b.dir).trim());
       }
-      shareMemory([[p.configDir, projectFolder(cwd)]]); shareMcp(p.configDir); // as a Claude started here has them
-      return sdk.send({ id: b.id || null, configDir: p.configDir, cwd, text, images, model: b.model, effort: b.effort });
+      shareMemory([[configDir, projectFolder(cwd)]]); shareMcp(configDir); // as a Claude started here has them
+      return sdk.send({ id: b.id || null, fresh, configDir, cwd, text, images, model: b.model, effort: b.effort });
     },
     'POST /api/sdk/stop': (q, b) => sdk.stop(String(b.id ?? '')),
-    'POST /api/sdk/answer': (q, b) => sdk.answer({ id: String(b.id ?? ''), allow: !!b.allow, answers: b.answers, text: b.text }),
+    'POST /api/sdk/answer': (q, b) => sdk.answer({ id: String(b.id ?? ''), n: b.n, allow: !!b.allow, answers: b.answers, text: b.text }),
     // open a conversation's terminal: {id, acct?} continues one (its window here if it runs in one),
     // {dir, acct} starts one. acct is 1-based; the page proposes it like the island does. One started (or starting) here
     // comes back with its Claude's pid, once the pseudo-terminal knows it (a moment): the 管家's chat new and say find
@@ -5729,7 +5744,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { macSysOf, dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

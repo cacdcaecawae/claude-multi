@@ -1756,6 +1756,32 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   assert.deepEqual(head.match(/\x1b\[\?\d+[hl]/g).sort(), ['\x1b[?1003h', '\x1b[?1006h', '\x1b[?1049h', '\x1b[?2004h']); // enabled at the cut; the retained output turns paste off
   console.log('replay modes ok');
 }
+// a Mac's CPU and memory as the page draws them: its numbers only (the page puts them in its HTML)
+{
+  const { macSysOf } = require('./claude-multi');
+  assert.deepEqual(macSysOf({ cpu: 12, cpuClaude: 3, mem: 8e9, memClaude: 2e9, memAll: 16e9, n: 2 }), { cpu: 12, cpuClaude: 3, mem: 8e9, memClaude: 2e9, memAll: 16e9, n: 2 });
+  assert.deepEqual(macSysOf({ cpu: '<img src=x onerror=alert(1)>', n: '3', mem: NaN, memAll: 16e9, evil: 1 }), { memAll: 16e9 });
+  assert.deepEqual(macSysOf(null), {});
+  console.log('mac sys ok');
+}
+// GPT 聊天: its answer under way at OpenAI is kept in the chat though a file of the message won't move into the chat's
+// folder (sent twice in one message): the second stays where the first went
+(async () => {
+  const fs = require('fs'), path = require('path'), { oaiSend, oaiRead } = require('./claude-multi');
+  const root = path.join(TEST_HOME, '.claude-multi'), up = path.join(root, 'uploads'), f = path.join(up, '20261122T000000-abcdef-笔记.txt');
+  fs.writeFileSync(path.join(root, 'openai-key.txt'), 'sk-test'); fs.mkdirSync(up, { recursive: true }); fs.writeFileSync(f, '内容');
+  const real = globalThis.fetch, asked = [];
+  globalThis.fetch = async (u, o) => { // (another test's, running meanwhile: the real one)
+    if (!String(u).startsWith('https://api.openai.com/')) return real(u, o);
+    asked.push(JSON.parse(o.body)); return { ok: true, json: async () => ({ id: 'resp_1' }) };
+  };
+  try {
+    const { id } = await oaiSend({ text: '看看', paths: [f, f], mode: 'standard', effort: 'low' });
+    const c = oaiRead(id), moved = path.join(root, 'oai', id, path.basename(f));
+    assert.deepEqual([asked.length, c.pending, c.msgs[0].files, fs.existsSync(moved), fs.existsSync(f)], [1, 'resp_1', [moved, moved], true, false]);
+  } finally { globalThis.fetch = real; }
+  console.log('gpt chat files ok');
+})().catch((e) => { console.error(e); process.exitCode = 1; });
 // 休眠: which conversations running in the web service are ended to free memory, and the shells that keep one going
 {
   const { dozable, shellsIn } = require('./claude-multi'), H = 3600e3, now = 10 * H;
