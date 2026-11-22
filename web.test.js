@@ -326,6 +326,25 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate("document.querySelector('.pane.on .go').dataset.m"), 'send');
   await evaluate('closeConv(focusG.active)'); histFeed = null; historyId = 'A'; sdkState = { busy: false }; delete state.usage.accounts[0].api;
   console.log('browser API 额度 ok');
+  // a folder's ＋ and a conversation's ⋯ 新对话 on an API account: Claude, then Claude Code or API 额度 (a second sheet);
+  // one whose gateway says no (sdk false): Claude Code at once
+  state.usage.accounts[0].api = true; await evaluate('load()');
+  assert.equal(await evaluate(`(async () => {
+    const out = [], wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+    const how = () => [...document.querySelectorAll('#sheetIn [data-s]')].map((b) => b.dataset.s + (b.textContent.includes('API 额度') ? 'api' : b.textContent.includes('Claude Code') ? 'cc' : '?')).join('/');
+    const plus = () => { menuAt = 0; listMode = 'dirs'; renderChats(); document.querySelector('#view [data-newin="C:/test"]').click(); document.querySelector('#sheet.on #sheetIn [data-k="claude"]')?.click(); };
+    plus(); out.push(document.querySelector('#sheetIn .stitle').textContent, how());
+    document.querySelector('#sheetIn [data-s="1"]').click(); await wait(50);
+    out.push([focusG.active.sdk === true, document.querySelector('.pane.on .path').textContent, document.querySelector('#sheet').classList.contains('on')].join());
+    closeConv(focusG.active);
+    const c = makeConv({ id: 'A' }, 'A'); addConv(focusG, c); c.fresh('claude'); out.push(how());
+    document.querySelector('#sheetIn [data-s=""]').click(); await wait(50); out.push(String(focusG.active !== c && !focusG.active.sdk));
+    closeConv(focusG.active); closeConv(c);
+    state.usage.accounts[0].sdk = false; plus(); await wait(50); out.push(String(document.querySelector('#sheet').classList.contains('on') || !!focusG.active.sdk));
+    closeConv(focusG.active); delete state.usage.accounts[0].sdk;
+    return out.join(' | '); })()`), '在「test」开新对话 | cc/1api | true,API 额度 · test,false | cc/1api | true | false');
+  delete state.usage.accounts[0].api; await evaluate('load()'); openBodies.length = 0;
+  console.log('browser API 额度 entries ok');
   // a table's cell with math in it: the formula, not its stand-in
   assert.equal(await evaluate("(() => { const h = md('| 算法 | 复杂度 |\\n|---|---|\\n| 快排 | $O(n \\\\log n)$ |'); return [h.includes('|0|'), /<td>[^|]*katex/.test(h)].join(); })()"), 'false,true');
   // a reply's code block in its language's colors, by the fence's word (py, m: MATLAB; none or an unknown one: as it is), its
@@ -423,7 +442,9 @@ const press = async (key, shift = false) => {
   }
   // 用量: each Mac's records (listed last) under its name and its mark (Apple's; the old rainbow one for the MacBook), not
   // as one more 账号 n; a Gemini account's and a GPT one's under theirs (A1, G1)
+  // (the Macs set again here: the page's own load every 5 s puts back the service's, which has none of them)
   assert.equal(await evaluate(`(() => {
+    state.macs = [{ id: 'mac', label: 'Mac mini', dir: '~/Desktop/mine', host: 'mini' }, { id: 'la-a1', label: 'Mac a1', dir: '~/work', host: 'mymac', icon: 'rainbow' }];
     tokens = { accounts: [{ label: 'a@x', total: 1, usd: 0 }, { label: 'Mac mini', total: 1, usd: 0, mac: 'mac' }, { label: 'Mac a1', total: 1, usd: 0, mac: 'la-a1' }, { label: 'g@x', total: 1, usd: 0, gem: 1 }, { label: 'o@x', total: 1, usd: 0, gpt: 1 }], days: [], total: 5, usd: 0, today: '2000-01-02' }; renderTokens();
     const h = [...document.querySelectorAll('#view .cardHead')];
     return h.map((x) => x.querySelector('b').textContent + (x.querySelector('.mk svg linearGradient stop[stop-color="#61BB46"]') ? '+rainbow' : x.querySelector('.mk svg') ? '+apple' : /^[AG]1$/.test(x.querySelector('.ac')?.textContent) ? '+' + x.querySelector('.ac').textContent : '')).join(' | '); })()`),
