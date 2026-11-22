@@ -4724,8 +4724,11 @@ async function web() {
       const { t, file } = recordOf(q);
       // its terminal on a conversation with no record yet (a /clear typed there): id null, for the page to let the other go
       if (!file) { if (t) return { items: [], start: 0, end: 0, ...(t.file === null && { id: null }) }; throw new Error('找不到这个对话'); }
-      // running, the newest piece: what waits in its queue too
-      return { ...history(file, { from: q.get('from') || undefined, end: q.get('end') || undefined }), id: path.basename(file, '.jsonl'), ...(t?.pid && !t.gone && !q.get('end') && { queue: queueNow(file) }) };
+      // running, the newest piece: what waits in its queue too. An API 额度 one's (its turn here): only what was sent in
+      // this turn, as its record never says a turn ended (one left by a turn stopped there would wait forever)
+      const id = path.basename(file, '.jsonl'), run = sdk.view(id);
+      return { ...history(file, { from: q.get('from') || undefined, end: q.get('end') || undefined }), id,
+        ...(((t?.pid && !t.gone) || run.busy) && !q.get('end') && { queue: queueNow(file).filter((x) => !run.busy || x.at >= run.since) }) };
     },
     'POST /api/read': (q, b) => { // {id} one conversation's notifications, {all: true} every one; the island drops them too
       const id = b.all ? '*' : /^[\w-]{1,80}$/.test(b.id ?? '') ? b.id : null;
