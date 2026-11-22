@@ -117,7 +117,9 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
     runs.set(id, run);
     run.input.push(said(text, null, images));
     (async () => {
-      const { query } = await lib();
+      // the SDK's install (its first use: under a minute) not waited for by 停止: the turn ends at once, the install goes on
+      // for the next one
+      const { query } = await Promise.race([lib(), new Promise((_, no) => run.ac.signal.addEventListener('abort', () => no(new Error('stopped')), { once: true }))]);
       for await (const msg of query({ prompt: run.input, options: {
         pathToClaudeCodeExecutable: exe, env: envOf(configDir), cwd, abortController: run.ac, spawnClaudeCodeProcess: (o) => (run.proc = spawn(o)),
         model: `${API}/${m}`, effort: e, settings: { env: tierEnv() }, ...(fresh ? { sessionId: id } : { resume: id }),

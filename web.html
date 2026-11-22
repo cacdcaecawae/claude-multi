@@ -3739,9 +3739,10 @@ function makeSdk(body, title) {
     } finally { sending = false; if (going) { going = ''; grow(); } goMode(); drawLive(); }
   }
   // 停止: what it hasn't taken in yet goes with it, so it comes back to the box (its words: a picture with it is gone), as
-  // a Claude one's does
+  // a Claude one's does: one sent into its answer, and the one that started it while it's still starting (the SDK being
+  // installed, claude not up: it never had it)
   async function stop() {
-    const words = sent && sentQ ? sent.replace(/^附件：.*$/gm, '').trim() : '', flat = (s) => s.replace(/\s+/g, '');
+    const words = sent && (sentQ || st.note === '正在启动') ? sent.replace(/^附件：.*$/gm, '').trim() : '', flat = (s) => s.replace(/\s+/g, '');
     const back = [...queued.map((x) => x.text), ...(st.later ?? [])];
     if (words && !back.some((t) => flat(shownText(t)) === flat(words))) back.unshift(words);
     try { await post('/api/sdk/stop', { id: c.id }); } catch (e) { toast(e.message, 4000); return readState(); }

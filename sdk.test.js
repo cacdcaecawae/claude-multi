@@ -108,6 +108,19 @@ test('one whose first message made no record (the SDK didn\'t load): where it ru
   assert.deepEqual([calls[0].options.sessionId, calls[0].options.resume, calls[0].options.cwd, s.view(id).err], [id, undefined, 'C:/w', '']);
 });
 
+test('停止 while the SDK is still being installed: the turn ends at once, no error; the install goes on for the next', async () => {
+  let done; const installing = new Promise((r) => (done = r)), { lib } = fakeLib(() => [INIT, OK]);
+  const s = createSdk({ lib: () => installing.then(lib), exe: 'claude', envOf: () => ({}) }), { id } = s.send({ id: null, text: 'hi' });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual([s.view(id).busy, s.view(id).note], [true, '正在启动']);
+  s.stop(id);
+  await until(() => !s.view(id).busy);
+  assert.equal(s.view(id).err, '');
+  done(); s.send({ id, fresh: true, text: 'hi' });
+  await until(() => !s.view(id).busy);
+  assert.equal(s.view(id).err, '');
+});
+
 test('a permission: shown with what it would run; allowed as asked, or turned down with the words typed; nothing waiting: refused', async () => {
   const got = [];
   const { lib } = fakeLib(() => [INIT, async (o) => { got.push(await o.canUseTool('Bash', { command: 'rm -rf build', description: '清理' }, { signal: o.abortController.signal })); return INIT; },
