@@ -640,14 +640,14 @@ if (SESSION0) {
 }
 
 // One thing at a time for a conversation in the web service: no rename or delete during a switch or another one, no
-// switch during a rename or delete; a second switch goes on without a hold of its own, the first one's end lets go
+// switch during a rename or delete; a second switch holds it too, let go by the last one's end whichever ends first (F4)
 {
   const { hold } = require('./claude-multi'), id = 'c-1';
-  const switched = hold(id, 'switch');
+  const switched = hold(id, 'switch'), second = hold(id, 'switch');
   assert.throws(() => hold(id, 'change'), /换账号/);
-  hold(id, 'switch')(); // the second one's end lets nothing go
+  switched(); // the first one's end (its later gave up: the second took the switch) lets nothing go
   assert.throws(() => hold(id, 'change'), /换账号/);
-  switched();
+  second();
   const changed = hold(id, 'change');
   assert.throws(() => hold(id, 'switch'), /改名或删除/);
   assert.throws(() => hold(id, 'change'), /改名或删除/);

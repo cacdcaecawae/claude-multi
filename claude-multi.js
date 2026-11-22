@@ -3795,13 +3795,19 @@ const MANIFEST = JSON.stringify({ name: 'Claude 多账号', short_name: 'Claude'
 // What the web service is doing to a conversation, by id: 'switch' (asked, till its new Claude has started) or 'change'
 // (a rename or a delete, till its command is done). A change is refused while anything goes on, a start or a switch
 // while a change does: a deletion between a switch's two Claudes, or a start between a deletion's checks and its
-// PowerShell, would lose the record. A second switch (the island and the page both) goes on as before, the first lets go.
+// PowerShell, would lose the record. A second switch (the island and the page both) holds it too: it's let go by the
+// last one's end, not the first's (the first's later may give up while the second's is still copying the record and
+// starting the new Claude: a delete or an API 额度 message then had the gap, F4 in verify-conversation-owner).
 // ponytail: the service's own doings only; `claude-multi delete` typed meanwhile in a terminal isn't held off
-const doing = new Map();
+const doing = new Map(), switches = new Map(); // switches: how many switch requests hold it, by id
 function hold(id, what) {
   const was = doing.get(id);
   if (was === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
   if (was && what === 'change') throw new Error('这个对话正在换账号，换完再改');
+  if (what === 'switch' && (!was || was === 'switch')) {
+    doing.set(id, 'switch'); switches.set(id, (switches.get(id) ?? 0) + 1);
+    return () => { const k = switches.get(id) - 1; if (k > 0) switches.set(id, k); else { switches.delete(id); doing.delete(id); } };
+  }
   if (was) return () => {};
   doing.set(id, what);
   return () => doing.delete(id);
@@ -4944,6 +4950,8 @@ async function web() {
         if (r) return opened(r);
         if (b.live) throw new Error('这个对话已经不在运行了'); // the page reconnecting: an ended one isn't started anew
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
+        // between a switch's old Claude ending and its new one starting (~0.1 s): not started here too (F1)
+        if (doing.get(s.id) === 'switch') throw new Error('这个对话正在换账号，过一两秒再点开');
         if (sameDir(s.cwd, BUTLER) && !butlerOn()) throw new Error(BUTLER_SHUT);
         const p = reg.profiles[b.acct - 1] ?? reg.profiles[s.acct];
         copyTo(s, p); sessCache = null; // listed a moment ago at the old copy, gone now
@@ -4973,6 +4981,7 @@ async function web() {
       if (!p) throw new Error('没有这个账号');
       const args = ['--resume', s.id];
       if (!s.pid && resuming(s.id)) throw new Error('这个对话还在启动，等它起来再换'); // a second Claude on the record, or the page told it switched
+      if (!s.pid && doing.get(s.id) === 'switch') throw new Error('这个对话正在换账号，换好了再换'); // another's gap (F1): not started here too
       const free = hold(s.id, 'switch');
       let later = null; // a switch still to happen: held till it has
       try {
