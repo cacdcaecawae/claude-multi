@@ -1365,10 +1365,12 @@ async function load(fresh) {
 }
 // 有新版本 (state.update: commits on GitHub this copy hasn't): said once a version as it comes, and 有更新 in the status bar
 // by the computer's name (this copy's, not the conversation's: away from its words on the right; not on a phone). 更新 pulls them and restarts the web service: this page, which asked, reloaded once it runs the new code
-let updSaid = null, updFrom = null;
+let updSaid = null, updFrom = null, rstFrom = null;
 function drawUpdate() {
   const u = state.update;
   if (updFrom && state.head !== updFrom) return location.reload();
+  if (rstFrom && state.up !== rstFrom) return location.reload();
+  if (rstFrom && state.restartErr) { toast(`重启没成功：${state.restartErr}`, 8000); rstFrom = null; }
   $('#sUpd').hidden = !u?.n; $('#sUpd').textContent = u?.busy ? '正在更新…' : `有更新`; $('#sUpd').title = u?.n ? `GitHub 上有 ${u.n} 个更新` : '';
   if (updFrom && !u?.busy && (u?.err || !u?.n)) { toast(u?.err ? `更新没成功：${u.err}` : '已经是最新的', 8000); updFrom = null; }
   if (!u?.n || u.busy || updFrom || updSaid === u.to) return;
@@ -1382,6 +1384,13 @@ async function upgrade() {
   catch (e) { toast('更新没开始：' + e.message, 4000); }
 }
 $('#sUpd').onclick = upgrade;
+// 设置's 重启网页服务 (claude-multi web restart): this page reloaded once a new service answers (state.up: when it started)
+async function restartWeb() {
+  if (rstFrom) return toast('正在重启…');
+  if (!confirm('重启网页服务？\n正在回复的对话会被打断，服务起来后接回来。')) return;
+  try { await post('/api/restart', {}); rstFrom = state.up; toast('正在重启，好了网页会自己刷新', 60000); }
+  catch (e) { toast('重启没开始：' + e.message, 4000); }
+}
 // A note for you, not looked at: one you set going that answers, or asks you something (the 管家's turns there don't: it
 // tells you itself); the 管家's own answer to what you asked it (not to a [系统通知]), or its question: its newest
 // conversation's only (an older one's is never opened again, its dot would stay for good)
@@ -2004,6 +2013,8 @@ function openSettings() {
       <div class="setting"><span>备注</span><input type="text" id="joinNote" maxlength="100" placeholder="选填，比如微信名"></div>
       <div class="setting"><span></span><button class="btn primary" data-joinsend>提交申请</button></div>`
       : '<div class="setting"><span>申请接入</span><button class="btn" data-join>申请…</button></div>'}
+      <h3>网页服务</h3>
+      <div class="setting"><span>重启网页服务</span><button class="btn" data-restart>重启</button></div>
       <h3>开发功能</h3>
       <div class="setting"><span>管家</span><button class="switch${state?.butlerOn ? ' on' : ''}" data-butler title="${state?.butlerOn ? '关闭：正在运行的管家会停下，菊花图标收起' : '打开'}"></button></div>
       <div class="m" style="white-space:normal">还在开发中：替你看着所有对话、给它们派工单。打开后长按菊花图标进入。</div>`;
@@ -2027,6 +2038,7 @@ function openSettings() {
     }
     if (b.matches('[data-push]')) return (pushOn ? pushDisable() : pushEnable()).then(draw); // enabling asks the permission: straight from this tap
     if (b.matches('[data-pushtest]')) return pushTest();
+    if (b.matches('[data-restart]')) return restartWeb();
     if (b.matches('[data-island]')) return post('/api/island', { on: !island }).then((j) => { island = j.on; draw(); }).catch((err) => toast(`没改成：${err.message}`));
     if (b.matches('[data-butler]')) return post('/api/butler', { on: !state?.butlerOn }).then((j) => { state.butlerOn = j.on; butlerShown(); draw(); }).catch((err) => toast(`没改成：${err.message}`));
     if (b.matches('[data-join]')) { joinForm = true; draw(); return $('#joinUrl').focus(); }

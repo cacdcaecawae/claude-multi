@@ -3880,8 +3880,11 @@ async function web() {
   };
   setInterval(() => { if (readJoins().some((j) => j.state === 'pending')) joinRound().catch(() => {}); }, 60000);
   // 有新版本 (updateCheck): asked a minute after the start, then every hour. head: the code this service runs, for a page
-  // that asked to update to see it's on the new one. updBusy, updErr: the page's 更新 running, how it ended if not restarted
-  let upd = null, updBusy = false, updErr = null;
+  // that asked to update to see it's on the new one. updBusy, updErr: the page's 更新 running, how it ended if not restarted.
+  // up: when this service started, for a page that asked to restart it to see it's a new one; rst: that restart running
+  // ({busy}), or how it ended with this service still here ({err})
+  let upd = null, updBusy = false, updErr = null, rst = {};
+  const up = Date.now();
   const head = spawnSync('git', ['-C', __dirname, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', windowsHide: true }).stdout?.trim() || null;
   const checkUpd = () => updateCheck().then((u) => { upd = u; }, () => {});
   setTimeout(checkUpd, 60000); setInterval(checkUpd, 3600000);
@@ -4508,25 +4511,36 @@ async function web() {
   // settings.json
   const butlerSet = (k) => { for (const n of ['settings.local.json', 'settings.json']) try { const m = JSON.parse(fs.readFileSync(path.join(BUTLER, '.claude', n), 'utf8'))[k]; if (m) return m; } catch {} return null; };
   const asks = new Map(); // conversation id → its question as last read off its screen {at, menu (a promise)}
+  // 更新, 重启网页服务: claude-multi update / web restart on its own (detached), to outlive this service when it's restarted,
+  // and not as a Claude conversation's (one that started this service), which setup would leave unrestarted and web
+  // restart refuses. Its words in <name>.log; when it ends with this service still here (it failed, or found nothing
+  // new), its code and last line
+  const alone = (args, name, done) => {
+    const f = path.join(ROOT, `${name}.log`), out = fs.openSync(f, 'w'), { CLAUDECODE, ...env } = process.env;
+    const p = require('child_process').spawn(process.execPath, [__filename, ...args], { detached: true, stdio: ['ignore', out, out], env, windowsHide: true });
+    fs.closeSync(out);
+    p.on('exit', (code) => {
+      let last = '';
+      try { last = fs.readFileSync(f, 'utf8').trim().split('\n').pop(); } catch {}
+      done(code, last);
+    }).unref();
+  };
   const api = {
     ...ext?.api,
     // claude-multi web restart: this service ends, as any stop ends it (a conversation answering is cut; wakeUp takes it up
     // on the next start), with its exit handlers run: the tunnel's ssh goes too. The command starts the next one
     'POST /api/quit': () => { log('web_quit', {}); setTimeout(() => process.exit(0), 200); return { ok: true }; },
-    // 更新: claude-multi update on its own (detached), to outlive this service when its setup restarts it, and not as a
-    // Claude conversation's (one that started this service), which setup would leave unrestarted. Its words in update.log;
-    // when it ends with this service still here (it failed, or found nothing new), its last line for the page
     'POST /api/update': () => {
       if (updBusy) return { ok: true };
-      const f = path.join(ROOT, 'update.log'), out = fs.openSync(f, 'w'), { CLAUDECODE, ...env } = process.env;
-      const p = require('child_process').spawn(process.execPath, [__filename, 'update'], { detached: true, stdio: ['ignore', out, out], env, windowsHide: true });
-      fs.closeSync(out);
+      alone(['update'], 'update', (code, last) => { updBusy = false; updErr = code ? last || `更新退出了（${code}）` : null; checkUpd(); });
       updBusy = true; updErr = null; log('web_update', {});
-      p.on('exit', (code) => {
-        let last = '';
-        try { last = fs.readFileSync(f, 'utf8').trim().split('\n').pop(); } catch {}
-        updBusy = false; updErr = code ? last || `更新退出了（${code}）` : null; checkUpd();
-      }).unref();
+      return { ok: true };
+    },
+    // 设置's 重启网页服务: as claude-multi web restart in a terminal (that one asks this service to quit, then starts the next)
+    'POST /api/restart': () => {
+      if (rst.busy) return { ok: true };
+      alone(['web', 'restart'], 'restart', (code, last) => { rst = { err: last || `重启退出了（${code}）` }; });
+      rst = { busy: true }; log('web_restart', {});
       return { ok: true };
     },
     // 代理额度: read when its view is shown (a minute's cache); one account, or all, asked again by hand (30 s apart)
@@ -4590,7 +4604,7 @@ async function web() {
       const reg = load(), macs = macList(reg).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
       return { user: reg.user ?? null, usage: usageCache, sdkModels: SDK.MODELS, gpt: gptState(), gemini: geminiAccounts(reg).map((g) => ({ label: g.label, on: g.id === reg.geminiOn, ...gemUsage(g) })), oai: fs.existsSync(OAI_KEY), quota: quotaOn(reg), macs, sessions: list, notes: unreadNotes([...all, ...gemSessions()]).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
         tickets: ticketsNow([...all, ...gptSessions(), ...gemSessions()]), timeline: timeline(), waits: waitsNow(), projects: readProjects(), win: WIN,
-        head, update: upd || updBusy || updErr ? { ...upd, busy: updBusy, err: updErr } : null };
+        head, update: upd || updBusy || updErr ? { ...upd, busy: updBusy, err: updErr } : null, up, restartErr: rst.err ?? null };
     },
     'POST /api/project': (q, b) => editProjects((all) => projectOp(all, b)),
     'GET /api/dirs': (q) => dirsIn(q.get('path') ?? ''),
