@@ -1644,7 +1644,11 @@ $('#side').onclick = (e) => {
       const mac = state.sessions.find((x) => x.mac && x.cwd === dir)?.mac ?? 'mac';
       return addConv(focusG, makeConv({ mac, open: true }, macName(mac)));
     }
-    return kindSheet(`在「${base(dir) || dir}」开新对话`, (k) => addConv(focusG, makeConv({ dir, acct: kindAcct(k), gpt: k === 'gpt', gem: k === 'gem' }, base(dir) || '新对话')), true);
+    const title = `在「${base(dir) || dir}」开新对话`;
+    return kindSheet(title, (k) => {
+      const acct = kindAcct(k), start = (sdk) => addConv(focusG, sdk ? makeSdk({ acct, dir }, base(dir) || '新对话') : makeConv({ dir, acct, gpt: k === 'gpt', gem: k === 'gem' }, base(dir) || '新对话'));
+      return k === 'claude' ? sdkPick(title, acct, start) : start(false);
+    }, true);
   }
   if (b.matches('[data-newoai]')) { e.preventDefault(); return addConv(focusG, makeOai(null, '新对话')); }
   if (b.matches('[data-bell]')) { listMode = listMode === 'run' ? 'dirs' : 'run'; save(); return renderChats(); }
@@ -2191,6 +2195,16 @@ function kindSheet(title, then, folder = false) {
   $('#sheetIn').innerHTML = `<div class="stitle">${esc(title)}</div><div class="kindPick">${KINDS.map(([k, logo, name, c]) =>
     `<button data-k="${k}"${ok[k] ? '' : ' disabled'}><i${c ? ` style="color:${c}"` : ''}>${logo}</i>${name}${ok[k] ? '' : '<small>没有账号</small>'}</button>`).join('')}</div>`;
   $('#sheetIn').onclick = (e) => { const b = e.target.closest('[data-k]'); if (b && !b.disabled) { sheetOff(); then(b.dataset.k); } };
+  $('#sheet').classList.add('on', 'mid');
+}
+// Claude on an API account its gateway didn't say no to (sdk false): Claude Code or API 额度 (the Agent SDK), the
+// choice 新对话 has under Claude, as a second sheet for a folder's ＋ and a conversation's ⋯. then(sdk)
+function sdkPick(title, acct, then) {
+  const a = state.usage.accounts[acct - 1];
+  if (!a?.api || a.sdk === false) return then(false);
+  $('#sheetIn').innerHTML = `<div class="stitle">${esc(title)}</div><div class="kindPick">${[['', 'Claude Code', ''], ['1', 'API 额度', 'Agent SDK，按用量计费']]
+    .map(([v, l, n]) => `<button data-s="${v}"><i style="color:#d97757">${SPARK}</i>${l}${n ? `<small>${n}</small>` : ''}</button>`).join('')}</div>`;
+  $('#sheetIn').onclick = (e) => { const b = e.target.closest('[data-s]'); if (b) { sheetOff(); then(!!b.dataset.s); } };
   $('#sheet').classList.add('on', 'mid');
 }
 // the account a new one of that kind starts on: Claude's recommended, GPT's first, Gemini's the one on
@@ -3367,12 +3381,15 @@ function makeConv(body, title) {
   // ⋯'s 新对话: another one beside it, in its folder: which of them first, then on its account if it's the same kind, else
   // that kind's first (a Mac's: that Mac, its folder here if it has one, Claude only)
   c.dir = () => (c.id && state?.sessions.find((x) => x.id === c.id)?.cwd) || body.dir || '';
-  c.fresh = (k) => {
+  // (sdk: Claude Code or API 额度 asked on an API account, sdkPick)
+  c.fresh = (k, sdk) => {
     const s = c.id ? state?.sessions.find((x) => x.id === c.id) : null, cwd = c.dir(), mac = c.mac || s?.mac, here = cwd && !cwd.startsWith('/');
-    if (!mac && !k) return kindSheet(`在「${base(cwd) || cwd}」开新对话`, c.fresh, true);
-    const same = k === (c.gem ? 'gem' : c.gpt ? 'gpt' : 'claude');
+    const title = `在「${base(cwd) || cwd}」开新对话`;
+    if (!mac && !k) return kindSheet(title, c.fresh, true);
+    const same = k === (c.gem ? 'gem' : c.gpt ? 'gpt' : 'claude'), acct = same ? c.acct ?? (s ? s.acct + 1 : 1) : kindAcct(k);
+    if (!mac && k === 'claude' && sdk === undefined) return sdkPick(title, acct, (x) => c.fresh(k, x));
     const n = mac ? makeConv({ mac, open: true, ...(here && { dir: cwd }) }, here ? base(cwd) : macName(mac)) // not for a folder here: the Mac's own folder
-      : makeConv({ dir: cwd, acct: same ? c.acct ?? (s ? s.acct + 1 : 1) : kindAcct(k), gpt: k === 'gpt', gem: k === 'gem' }, base(cwd) || '新对话');
+      : sdk ? makeSdk({ acct, dir: cwd }, base(cwd) || '新对话') : makeConv({ dir: cwd, acct, gpt: k === 'gpt', gem: k === 'gem' }, base(cwd) || '新对话');
     n.joins = (state?.projects ?? []).filter((p) => c.id && p.ids.includes(c.id)).map((p) => p.id); // added once it has a record
     addConv(c.g, n);
   };
@@ -3593,6 +3610,7 @@ function makeSdk(body, title) {
       const r = await histGet(end == null ? '' : `&from=${end}`), first = end == null;
       const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
       if (first) oldest = r.start;
+      if (c.joins) { for (const p of c.joins) post('/api/project', { op: 'add', id: p, conv: [c.id] }).catch(() => {}); c.joins = null; } // ⋯'s 新对话: in its origin's 项目, once it has a record
       end = r.end;
       if (r.items.length) { addItems($p('.hNew'), r.items); if (r.items.some((m) => m.role === 'user')) sent = ''; }
       topNote(); drawLive();
