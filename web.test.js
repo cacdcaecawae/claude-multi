@@ -357,6 +357,16 @@ const press = async (key, shift = false) => {
   sdkState = { busy: false, err: 'API Error: 403 这把 key（join-x）没开 API 额度' };
   await until("document.querySelector('.pane.on .hNew .hm.claude')?.textContent.includes('整理好了') && document.querySelector('.pane.on .live').textContent.includes('没答完：API Error: 403')");
   assert.equal(await evaluate("document.querySelector('.pane.on .go').dataset.m"), 'send');
+  // stopped while still starting (the SDK being installed, claude not up yet): the message it never had back in the box
+  await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='再试一次';t.dispatchEvent(new Event('input'));document.querySelector('.pane.on .go').click(); })()");
+  for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sdkPosts.shift()[1].text, '再试一次');
+  await until("document.querySelector('.pane.on .live .busy')?.textContent.startsWith('正在启动') && document.querySelector('.pane.on .send textarea').value === ''");
+  await evaluate("document.querySelector('.pane.on .send textarea').focus()"); await press('Escape');
+  for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sdkPosts.shift(), ['stop', { id: 'S1' }]);
+  sdkState = { busy: false };
+  await until("document.querySelector('.pane.on .send textarea').value === '再试一次' && !document.querySelector('.pane.on .live .hm.user')");
   await evaluate('closeConv(focusG.active)'); histFeed = null; historyId = 'A'; sdkState = { busy: false }; delete state.usage.accounts[0].api;
   console.log('browser API 额度 ok');
   // a folder's ＋ and a conversation's ⋯ 新对话 on an API account: Claude, then Claude Code or API 额度 (a second sheet);
