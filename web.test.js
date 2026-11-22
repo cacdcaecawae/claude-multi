@@ -714,6 +714,11 @@ const press = async (key, shift = false) => {
   // a picture it was sent (as a file: 附件：its path): itself in the bubble, small, its name under it
   assert.deepEqual(await evaluate("(() => { const a = focusG.active.el.querySelector('.hm.user a.att.pic'); return a && [a.querySelector('img').getAttribute('src'), a.textContent]; })()"),
     [`/api/file?n=${encodeURIComponent('20261121T010203-abcdef-猫.png')}`, '附件：猫.png']);
+  // one picked for it: shown small in the box too (it still goes as a file, by its path), any other file by its name
+  assert.deepEqual(await evaluate(`(() => { focusG.active.attach([new File([new Uint8Array([137, 80, 78, 71])], 'a.png', { type: 'image/png' }), new File(['x'], '论文.pdf', { type: 'application/pdf' })]);
+    const box = focusG.active.el.querySelector('.send .atts'), out = [...box.querySelectorAll('.att')].map((x) => [x.className, !!x.querySelector('img'), x.textContent]);
+    box.querySelectorAll('[data-unatt]').forEach(() => box.querySelector('[data-unatt]').click());
+    return [out, box.querySelectorAll('.att').length]; })()`), [[['att', true, ''], ['att file', false, '论文.pdf']], 0]);
   // agy at work on its screen: 正在回复 at once (the list's word comes seconds later), its tab turning too
   await until("focusG.active.live === 'busy'");
   assert.match(await evaluate("focusG.active.el.querySelector('.live .busy')?.textContent"), /^Gemini 正在回复 · \d+s$/); // how long: since the page saw it start (agy's screen says none)

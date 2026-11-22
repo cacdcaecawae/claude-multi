@@ -2712,14 +2712,15 @@ function makeConv(body, title) {
       // GPT one's pictures too: Codex is given the path)
       const pic = /^image\//.test(f.type) && !c.gpt && !c.gem;
       if (!pic && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
-      const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name };
-      a.up = a.file ? sendFile(f, c.mac) : shrink(f).then((b) => upload(b, c.mac), () => { a.file = true; a.name = f.name; drawAtts(); return sendFile(f, c.mac); });
+      // (a GPT or Gemini one's picture, sent by its path: still shown small here, as the bubble shows it once sent)
+      const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name, ...(/^image\/(png|jpeg|gif|webp|bmp)$/.test(f.type) && { url: URL.createObjectURL(f) }) };
+      a.up = a.file ? sendFile(f, c.mac) : shrink(f).then((b) => upload(b, c.mac), () => { a.file = true; a.name = f.name; a.url = null; drawAtts(); return sendFile(f, c.mac); });
       a.up.catch((e) => { a.failed = true; toast(`${a.file ? '文件' : '图片'}没传上去：${e.message}`, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
       atts.push(a);
     }
     drawAtts();
   };
-  const drawAtts = () => { attsEl.innerHTML = atts.map((a, i) => `<div class="att${a.file ? ' file' : ''}">${a.file ? `${svg(I.clip)}<span>${esc(a.name)}</span>` : `<img src="${a.url}" alt="">`}<button data-unatt="${i}" title="不发这个">${svg(I.close, 2)}</button></div>`).join(''); goMode(); };
+  const drawAtts = () => { attsEl.innerHTML = atts.map((a, i) => `<div class="att${a.url ? '' : ' file'}">${a.url ? `<img src="${a.url}" alt="">` : `${svg(I.clip)}<span>${esc(a.name)}</span>`}<button data-unatt="${i}" title="不发这个">${svg(I.close, 2)}</button></div>`).join(''); goMode(); };
   $p('.pic').onclick = () => pick.click();
   pick.onchange = () => { c.attach([...pick.files]); pick.value = ''; };
   line.addEventListener('paste', (e) => { // a screenshot pasted, as into Claude itself
