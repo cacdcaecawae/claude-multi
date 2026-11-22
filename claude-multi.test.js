@@ -397,11 +397,15 @@ if (SESSION0) {
   const fresh = { five_hour: { utilization: 10, resets_at: null } };
   keepLast([{ id: 'b' }], [{ u: fresh }], cache, now);
   assert.deepEqual(cache.b, { at: now, u: fresh }); // a good read is kept for next time
-  // an API account (本地代理): no quota asked for (no sign-in to ask with), no error either; nothing kept for it
-  require('./claude-multi').fetchUsage({ id: 'local', configDir: 'C:/nowhere', api: { baseURL: 'http://127.0.0.1:3425' } }).then((r) => {
-    assert.deepEqual(r, { api: true }); assert.deepEqual(keepLast([{ id: 'local' }], [r], cache, now), [{ api: true }]); assert.ok(!cache.local);
-    console.log('quota of an API account ok');
-  }, (e) => { console.error(e); process.exitCode = 1; });
+  // an API account (本地代理): no quota asked for (no sign-in to ask with), no error either; nothing kept for it. With no
+  // key in its settings (apiKeyHelper's), its gateway isn't asked anything
+  let asked = 0;
+  const gw = require('http').createServer((q, s) => { asked++; s.end('{}'); }).listen(0, '127.0.0.1', () => {
+    require('./claude-multi').fetchUsage({ id: 'local', configDir: 'C:/nowhere', api: { baseURL: `http://127.0.0.1:${gw.address().port}` } }).then((r) => {
+      assert.deepEqual(r, { api: true }); assert.equal(asked, 0); assert.deepEqual(keepLast([{ id: 'local' }], [r], cache, now), [{ api: true }]); assert.ok(!cache.local);
+      console.log('quota of an API account ok');
+    }, (e) => { console.error(e); process.exitCode = 1; }).finally(() => gw.close());
+  });
   console.log('quota ok');
 }
 // Notes (projects\<folder>\memory) shared by every account: a real one merged into ~/.claude's and made a junction to
