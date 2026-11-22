@@ -299,14 +299,14 @@ const press = async (key, shift = false) => {
   assert.deepEqual(sdkPosts.shift(), ['send', { id: null, acct: 1, dir: 'C:/test', text: '整理一下', paths: [], model: 'claude-sonnet-5-5', effort: 'medium' }]);
   assert.deepEqual(await evaluate("[focusG.active.id, document.querySelector('.pane.on .go').dataset.m, document.querySelector('.pane.on .live .hm.user').textContent]"), ['S1', 'stop', '整理一下']);
   historyId = 'S1'; histFeed = [{ role: 'user', text: '整理一下', at: Date.now() }];
-  sdkState = { busy: true, since: Date.now(), ask: { tool: 'Bash', what: 'rm -rf build', why: '清理旧的构建' } };
+  sdkState = { busy: true, since: Date.now(), ask: { n: 7, tool: 'Bash', what: 'rm -rf build', why: '清理旧的构建' } };
   await until("document.querySelector('.pane.on .live pre.sdkWhat')?.textContent === 'rm -rf build'");
   assert.deepEqual(await evaluate("[document.querySelector('.pane.on .live .ask .head').textContent, document.querySelector('.pane.on .live .ask .q').textContent, [...document.querySelectorAll('.pane.on .live .ask .pick')].map((b) => b.textContent), !!document.querySelector('.pane.on .live .hm.user'), document.querySelector('.pane.on .hNew .hm.user').textContent]"),
     ['要用 Bash', '清理旧的构建', ['1允许', '2不允许'], false, '整理一下']);
   await evaluate("document.querySelector('.pane.on .live .pick[data-sa=\"1\"]').click()");
   for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
-  assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', allow: true }]);
-  sdkState = { busy: true, since: Date.now(), ask: { tool: 'AskUserQuestion', questions: [{ question: '用哪个库？', header: '库', multi: false, options: [{ label: 'React', desc: '组件' }, { label: 'Vue', desc: '' }] },
+  assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', n: 7, allow: true }]); // (n: the question shown)
+  sdkState = { busy: true, since: Date.now(), ask: { n: 8, tool: 'AskUserQuestion', questions: [{ question: '用哪个库？', header: '库', multi: false, options: [{ label: 'React', desc: '组件' }, { label: 'Vue', desc: '' }] },
     { question: '要哪些页？', header: '页面', multi: true, options: [{ label: '首页', desc: '' }, { label: '设置', desc: '' }] }] } };
   await until("document.querySelectorAll('.pane.on .live .ask .q').length === 2");
   assert.equal(await evaluate("document.querySelector('.pane.on .live [data-sgo]').disabled"), true);
@@ -316,10 +316,10 @@ const press = async (key, shift = false) => {
   assert.deepEqual(await evaluate("[document.querySelector('.pane.on .live [data-sq=\"0\"][data-sn=\"1\"]').classList.contains('on'), document.querySelectorAll('.pane.on .live .box.on').length, document.querySelector('.pane.on .live [data-sgo]').disabled]"), [true, 2, false]);
   await evaluate("document.querySelector('.pane.on .live [data-sgo]').click()");
   for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
-  assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', allow: true, answers: { '用哪个库？': 'Vue', '要哪些页？': ['首页', '设置'] } }]);
+  assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', n: 8, allow: true, answers: { '用哪个库？': 'Vue', '要哪些页？': ['首页', '设置'] } }]);
   await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='都不要，纯 HTML';t.dispatchEvent(new Event('input'));document.querySelector('.pane.on .go').click(); })()");
   for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
-  assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', allow: false, text: '都不要，纯 HTML' }]);
+  assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', n: 8, allow: false, text: '都不要，纯 HTML' }]);
   sdkState = { busy: true, since: Date.now() - 5000 };
   await until("document.querySelector('.pane.on .live .busy')?.textContent.startsWith('Claude 正在回复 · ')");
   await evaluate("document.querySelector('.pane.on .go').click()"); // 停止: nothing written
@@ -380,6 +380,13 @@ const press = async (key, shift = false) => {
   console.log('browser API 额度 entries ok');
   // a table's cell with math in it: the formula, not its stand-in
   assert.equal(await evaluate("(() => { const h = md('| 算法 | 复杂度 |\\n|---|---|\\n| 快排 | $O(n \\\\log n)$ |'); return [h.includes('|0|'), /<td>[^|]*katex/.test(h)].join(); })()"), 'false,true');
+  // a path in a reply with an address or a formula in it stays one 预览 link, its attributes whole: nothing in it becomes
+  // the link's own (an onmouseover= after an address once did, run on hovering it)
+  const evil = 'D:/a/http://x/onmouseover=document.title=1//';
+  assert.deepEqual(await evaluate(`(() => ${JSON.stringify([`看 \`${evil}\``, `[报告](file:///${evil})`, '[式子](D:/a/$x$/b.md)'])}.map((t) => {
+    const d = document.createElement('div'); d.innerHTML = md(t);
+    return [[...d.querySelectorAll('*')].some((e) => [...e.attributes].some((a) => /^on/i.test(a.name))), d.querySelector('a.peek')?.dataset.peek ?? null];
+  }))()`), [[false, evil], [false, evil], [false, null]]);
   // a reply's code block in its language's colors, by the fence's word (py, m: MATLAB; none or an unknown one: as it is), its
   // words as they are for 复制; one still coming in colored too. As VS Code: if/import apart, a call (print() and a bare name
   // marked (&lt; left be), in MATLAB a name( a variable

@@ -95,21 +95,62 @@ test('a picture: before the words, as Claude Code puts one pasted; a picture alo
   assert.throws(() => s.send({ id, text: ' ', images: [] }), /空的/);
 });
 
+test('one whose first message made no record (the SDK didn\'t load): where it runs is kept, and it starts anew under its own id', async () => {
+  const { lib, calls } = fakeLib(() => [INIT, OK]);
+  let fail = true;
+  const s = createSdk({ lib: async () => { if (fail) throw new Error('Agent SDK 没装上：npm ERR! network'); return lib(); }, exe: 'claude', envOf: () => ({}) });
+  const { id } = s.send({ id: null, configDir: 'C:/a', cwd: 'C:/w', text: 'hi' });
+  await until(() => !s.view(id).busy);
+  assert.deepEqual([s.view(id).err, s.origin(id), s.origin('nobody')], ['Agent SDK 没装上：npm ERR! network', { configDir: 'C:/a', cwd: 'C:/w' }, null]);
+  fail = false;
+  s.send({ id, fresh: true, ...s.origin(id), text: '再来' });
+  await until(() => calls.length === 1 && !s.view(id).busy);
+  assert.deepEqual([calls[0].options.sessionId, calls[0].options.resume, calls[0].options.cwd, s.view(id).err], [id, undefined, 'C:/w', '']);
+});
+
 test('a permission: shown with what it would run; allowed as asked, or turned down with the words typed; nothing waiting: refused', async () => {
   const got = [];
   const { lib } = fakeLib(() => [INIT, async (o) => { got.push(await o.canUseTool('Bash', { command: 'rm -rf build', description: '清理' }, { signal: o.abortController.signal })); return INIT; },
     async (o) => { got.push(await o.canUseTool('Write', { file_path: 'C:/w/a.txt', content: 'x' }, { signal: o.abortController.signal })); return OK; }]);
   const s = createSdk({ lib, exe: 'claude', envOf: () => ({}) }), { id } = s.send({ id: null, text: '清理一下' });
   await until(() => s.view(id).ask);
-  assert.deepEqual(s.view(id).ask, { tool: 'Bash', what: 'rm -rf build', why: '清理' });
+  assert.deepEqual(s.view(id).ask, { n: 1, tool: 'Bash', what: 'rm -rf build', why: '清理' });
   assert.equal(s.waits(id), true);
-  s.answer({ id, allow: true });
+  s.answer({ id, n: 1, allow: true });
   await until(() => s.view(id).ask?.tool === 'Write');
   assert.equal(s.view(id).ask.what, 'C:/w/a.txt');
-  s.answer({ id, allow: true, text: '别写，先给我看' });
+  // a card still showing the one answered (another device's): refused, never taken for the one asked since
+  assert.throws(() => s.answer({ id, n: 1, allow: true }), /已经变了/);
+  assert.throws(() => s.answer({ id, allow: true }), /已经变了/);
+  s.answer({ id, n: 2, allow: true, text: '别写，先给我看' });
   await until(() => !s.view(id).busy);
   assert.deepEqual(got, [{ behavior: 'allow', updatedInput: { command: 'rm -rf build', description: '清理' } }, { behavior: 'deny', message: '别写，先给我看' }]);
   assert.throws(() => s.answer({ id, allow: true }), /没在问你/);
+});
+
+test('two tools asked for at once: each waits its turn, the first shown first; 停止 turns down every one waiting', async () => {
+  const got = {};
+  const both = async (o) => {
+    const a = o.canUseTool('Read', { file_path: 'C:/notes.txt' }, { signal: o.abortController.signal }).then((r) => (got.Read = r.behavior));
+    const b = o.canUseTool('Bash', { command: 'rm -rf D:/work' }, { signal: o.abortController.signal }).then((r) => (got.Bash = r.behavior));
+    await Promise.all([a, b]); return INIT;
+  };
+  const { lib } = fakeLib(() => [INIT, both, OK]);
+  const s = createSdk({ lib, exe: 'claude', envOf: () => ({}) }), { id } = s.send({ id: null, text: '看看' });
+  await until(() => s.view(id).ask);
+  assert.deepEqual([s.view(id).ask.tool, s.view(id).ask.n], ['Read', 1]);
+  s.answer({ id, n: 1, allow: true });
+  assert.deepEqual([got, s.view(id).ask?.tool, s.view(id).ask?.n, s.waits(id)], [{}, 'Bash', 2, true]); // (Read's answer on its way)
+  s.answer({ id, n: 2, allow: false });
+  await until(() => !s.view(id).busy);
+  assert.deepEqual(got, { Read: 'allow', Bash: 'deny' });
+  // 停止 with two waiting: both turned down, the turn over
+  const t = createSdk({ lib: fakeLib(() => [INIT, both, OK]).lib, exe: 'claude', envOf: () => ({}) }), u = t.send({ id: null, text: '再看' }).id;
+  for (const k in got) delete got[k];
+  await until(() => t.view(u).ask);
+  t.stop(u);
+  await until(() => !t.view(u).busy);
+  assert.deepEqual([got, t.view(u).ask, t.waits(u)], [{ Read: 'deny', Bash: 'deny' }, null, false]);
 });
 
 test('AskUserQuestion: the picks of its own questions only (a label, or several), words typed as a reply, or no answer at all', async () => {
@@ -119,14 +160,14 @@ test('AskUserQuestion: the picks of its own questions only (a label, or several)
   const { lib } = fakeLib(() => [INIT, ask, ask, ask, OK]);
   const s = createSdk({ lib, exe: 'claude', envOf: () => ({}) }), { id } = s.send({ id: null, text: '做个网站' });
   await until(() => s.view(id).ask);
-  assert.deepEqual(s.view(id).ask, { tool: 'AskUserQuestion', questions: [
+  assert.deepEqual(s.view(id).ask, { n: 1, tool: 'AskUserQuestion', questions: [
     { question: '用哪个库？', header: '库', multi: false, options: [{ label: 'React', desc: '组件' }, { label: 'Vue', desc: '' }] },
     { question: '要哪些页？', header: '页面', multi: true, options: [{ label: '首页', desc: '' }, { label: '设置', desc: '' }] }] });
-  s.answer({ id, allow: true, answers: { '用哪个库？': 'Vue', '要哪些页？': ['首页', '设置'], '别的？': 'x', bad: 3 } });
+  s.answer({ id, n: 1, allow: true, answers: { '用哪个库？': 'Vue', '要哪些页？': ['首页', '设置'], '别的？': 'x', bad: 3 } });
   await until(() => got.length === 1 && s.view(id).ask);
-  s.answer({ id, allow: false, text: '都不要，用纯 HTML' });
+  s.answer({ id, n: 2, allow: false, text: '都不要，用纯 HTML' });
   await until(() => got.length === 2 && s.view(id).ask);
-  s.answer({ id, allow: false });
+  s.answer({ id, n: 3, allow: false });
   await until(() => !s.view(id).busy);
   assert.deepEqual(got, [
     { behavior: 'allow', updatedInput: { ...Q, answers: { '用哪个库？': 'Vue', '要哪些页？': ['首页', '设置'] } } },

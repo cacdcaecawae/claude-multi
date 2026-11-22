@@ -3693,8 +3693,8 @@ function makeSdk(body, title) {
     $p('.live').innerHTML = liveHtml = h;
     if (atEnd) hist.scrollTop = hist.scrollHeight;
   }
-  async function answer(b) {
-    try { await post('/api/sdk/answer', { id: c.id, ...b }); } catch (e) { toast(e.message, 4000); }
+  async function answer(b) { // (n: the question shown, so an answer never goes to one asked since)
+    try { await post('/api/sdk/answer', { id: c.id, n: st.ask?.n, ...b }); } catch (e) { toast(e.message, 4000); }
     await readState();
   }
   el.addEventListener('click', (e) => {
@@ -3995,6 +3995,9 @@ const table = (rows) => {
 // Last: an address in a `code` or **bold** is a link in it, and neither is cut across a link's markup. A formula's
 // \0 mark ends an address (math is put back after links: KaTeX's own markup holds an http:// address)
 const LINK = /\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()<`\0]|\([^\s()<`\0]*\))+)\)|https?:\/\/(?:[^\s<&`\0\u3000-\u9fff\uff00-\uffef]|&amp;)+/g;
+// as md() runs it: on the words only, a tag made before it (a path's \u9884\u89c8 link) stepped over: an address in its attribute
+// made into a link there put quotes in it, and what followed became the tag's own (onmouseover=\u2026)
+const TAG_LINK = new RegExp(`<[^>]*>|${LINK.source}`, 'g');
 const anchor = (u, words) => `<a href="${u}" target="_blank" rel="noopener">${words}</a>`;
 const link = (m, words, u) => {
   if (u) return anchor(u, words);
@@ -4009,10 +4012,11 @@ const link = (m, words, u) => {
 const MATH = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?=\S)([^$\n]*?[^$\s])\$(?!\d)/g; // no lookbehind: an older Safari fails to read the whole script on one
 const tex = (s, block) => { try { return katex.renderToString(s, { displayMode: block, throwOnError: false }); } catch { return esc(block ? `$$${s}$$` : `$${s}$`); } };
 // a path of this PC as Claude writes one in `code` (D:\… or D:/…): opened by 预览 (preview). Not one with a stand-in in it
-// (runs/<id>: its < > here as &lt; &gt;, the code being escaped already) nor a ". A Mac's service: its own paths too
+// (runs/<id>: its < > here as &lt; &gt;, the code being escaped already) nor a ", nor a formula's \0 mark (KaTeX's
+// markup, quotes and all, goes there last: in an attribute it would end it). A Mac's service: its own paths too
 // (/Users/…; under its usual tops, not a /command); on Windows one of those is a Mac's, out of reach. One cut short with
 // … or ... (D:\…\a.md) names no file: shown as written
-const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, MAC_PEEKABLE = /^\/(?:Users|Volumes|private|tmp|Applications|Library|opt)\/(?!.*&(?:lt|gt|quot);)[^<>|?*\n]*$/, peekable = (c) => !/…|\.{3}/.test(c) && (PEEKABLE.test(c) || (typeof state !== 'undefined' && state?.win === false && MAC_PEEKABLE.test(c)));
+const PEEKABLE = /^[A-Za-z]:[\\/](?!.*&(?:lt|gt|quot);)[^<>|?*\n\0]*$/, MAC_PEEKABLE = /^\/(?:Users|Volumes|private|tmp|Applications|Library|opt)\/(?!.*&(?:lt|gt|quot);)[^<>|?*\n\0]*$/, peekable = (c) => !/…|\.{3}/.test(c) && (PEEKABLE.test(c) || (typeof state !== 'undefined' && state?.win === false && MAC_PEEKABLE.test(c)));
 // as Codex shows one: its kind's mark and its name (a folder's: one ending in \ or /, or with no .ext), the whole path on hover
 const peekLink = (c, words) => { const n = c.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || c, dir = /[\\/]$/.test(c) || !/\.\w{1,8}$/.test(n);
   return `<a class="peek" data-peek="${c}" title="${c}">${svg(dir ? I.folder : I.file)}${words ?? n}</a>`; };
@@ -4056,7 +4060,7 @@ function md(t) {
     const math = [];
     p = p.replace(MATH, (m, d1, d2, i1, i2) => (m[0] === '`' ? m : `\u0000${math.push([d1 ?? d2 ?? i1 ?? i2, d1 != null || d2 != null]) - 1}\u0000`));
     return esc(p).replace(/((?:^\|.*\n?)+)/gm, table).replace(BLOCKS, block).replace(FILE_LINK, fileLink).replace(/`([^`\n]+)`/g, (m, c) => (peekable(c) ? peekLink(c) : `<code>${c}</code>`))
-      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(LINK, link)
+      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} +(.*)$/gm, '<b class="h">$1</b>').replace(TAG_LINK, (m, ...a) => (m[0] === '<' ? m : link(m, ...a)))
       .replace(/\u0000(\d+)\u0000/g, (_, k) => tex(...math[k]));
   }).join('');
 }

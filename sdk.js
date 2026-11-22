@@ -89,15 +89,20 @@ function feed() {
 }
 
 function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill = killTree }) {
-  const runs = new Map(); // conversation id → { id, model, busy, since, at, ask, err, note, ac, proc, stopping, input, later }
+  // conversation id → { id, model, busy, since, at, asks, err, note, ac, proc, stopping, input, later, configDir, cwd }
+  const runs = new Map();
   const busy = (id) => !!runs.get(id)?.busy;
+  // its questions, in turn: two tools asked for at once each wait theirs (the page shows the first). n: which one, as the
+  // page answers it: a card one device still shows after another answered it never answers the next one
+  let asks = 0;
   const asked = (run, tool, input, signal) => new Promise((ok) => {
-    const ask = { tool, input, at: Date.now(), answer: (r) => { if (run.ask === ask) run.ask = null; ok(r); } };
-    run.ask = ask;
+    const ask = { n: ++asks, tool, input, at: Date.now(), answer: (r) => { run.asks = run.asks.filter((x) => x !== ask); ok(r); } };
+    run.asks.push(ask);
     signal?.addEventListener('abort', () => ask.answer({ behavior: 'deny', message: 'The user stopped this.' }), { once: true });
   });
-  // {id} one to go on with (null: a new one), on the account in configDir, in folder cwd: the turn starts, answered at once
-  function send({ id, configDir, cwd, text, images = [], model, effort }) {
+  // {id} one to go on with (null: a new one; fresh: one whose first message made no record, started anew), on the account
+  // in configDir, in folder cwd: the turn starts, answered at once
+  function send({ id, fresh = false, configDir, cwd, text, images = [], model, effort }) {
     text = String(text ?? '').trim();
     if (!text && !images.length) throw new Error('消息是空的');
     const was = id && runs.get(id);
@@ -106,9 +111,9 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
       if (was.input.over()) was.later.push({ text, images }); else was.input.push(said(text, 'next', images));
       return { id };
     }
-    const m = MODELS.find((x) => x[0] === model)?.[0] ?? MODELS[0][0], e = EFFORTS.includes(effort) ? effort : EFFORT, fresh = !id;
-    id ??= crypto.randomUUID();
-    const run = { id, model: m, effort: e, busy: true, since: Date.now(), at: 0, ask: null, err: '', note: '正在启动', ac: new AbortController(), input: feed(), later: [] };
+    const m = MODELS.find((x) => x[0] === model)?.[0] ?? MODELS[0][0], e = EFFORTS.includes(effort) ? effort : EFFORT;
+    fresh ||= !id; id ??= crypto.randomUUID();
+    const run = { id, model: m, effort: e, busy: true, since: Date.now(), at: 0, asks: [], err: '', note: '正在启动', ac: new AbortController(), input: feed(), later: [], configDir, cwd };
     runs.set(id, run);
     run.input.push(said(text, null, images));
     (async () => {
@@ -123,16 +128,17 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
       }
     })().catch((e) => { if (!run.stopping) run.err = String(e?.message ?? e).slice(0, 500); }) // (停止's: no error)
       .finally(() => {
-        run.input.end(); run.ask?.answer({ behavior: 'deny', message: 'The conversation stopped.' }); Object.assign(run, { busy: false, note: '', at: Date.now() }); done(run);
+        run.input.end(); for (const a of [...run.asks]) a.answer({ behavior: 'deny', message: 'The conversation stopped.' }); Object.assign(run, { busy: false, note: '', at: Date.now() }); done(run);
         if (run.later.length && !run.stopping) try { send({ id, configDir, cwd, text: run.later.map((x) => x.text).filter(Boolean).join('\n\n'), images: run.later.flatMap((x) => x.images), model: m, effort: e }); } catch {}
       });
     return { id };
   }
-  // the question waiting: allow (or a tool's no), the picks of AskUserQuestion's questions, or words typed instead: a
-  // tool turned down with them (Claude reads why), a question answered with them
-  function answer({ id, allow, answers, text }) {
-    const a = runs.get(id)?.ask;
+  // the question waiting (n: the one the page showed): allow (or a tool's no), the picks of AskUserQuestion's questions,
+  // or words typed instead: a tool turned down with them (Claude reads why), a question answered with them
+  function answer({ id, n, allow, answers, text }) {
+    const a = runs.get(id)?.asks[0];
     if (!a) throw new Error('它现在没在问你');
+    if (n !== a.n) throw new Error('它问的已经变了，看一下现在的问题再答');
     text = String(text ?? '').trim();
     if (a.tool === 'AskUserQuestion') {
       if (!allow && !text) a.answer({ behavior: 'deny', message: 'The user chose not to answer.' });
@@ -154,10 +160,13 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
   // for the page: how it stands (none: idle, nothing asked since the service started); later: sent after its input ended,
   // waiting here (what waits in claude's own queue is in its record)
   function view(id) {
-    const r = runs.get(id);
-    return r ? { busy: r.busy, since: r.since, model: r.model, effort: r.effort, err: r.err, note: r.note, ask: r.ask && askView(r.ask), later: r.busy ? r.later.map((x) => x.text).filter(Boolean) : [] } : { busy: false };
+    const r = runs.get(id), a = r?.asks[0];
+    return r ? { busy: r.busy, since: r.since, model: r.model, effort: r.effort, err: r.err, note: r.note, ask: a ? { ...askView(a), n: a.n } : null, later: r.busy ? r.later.map((x) => x.text).filter(Boolean) : [] } : { busy: false };
   }
-  return { send, answer, stop, view, busy, waits: (id) => !!runs.get(id)?.ask };
+  // where one started here runs (its account's folder, its folder): for one whose record isn't there (yet, or ever: its
+  // first message failed before claude wrote it), till this service ends
+  const origin = (id) => { const r = runs.get(id); return r ? { configDir: r.configDir, cwd: r.cwd } : null; };
+  return { send, answer, stop, view, busy, origin, waits: (id) => !!runs.get(id)?.asks.length };
 }
 
 module.exports = { createSdk, loader, askView, answersOf, tierEnv, MODELS, API, VER };
