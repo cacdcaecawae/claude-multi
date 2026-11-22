@@ -3822,7 +3822,26 @@ function keepOut(t, d) {
     t.modeTail = '\x1b[?' + modeParams(p).join(';') + (p.split(';', 33).length > 32 ? ';' : '');
   }
   t.buf = out.slice(cut);
+  t.outAt = Date.now(); // (休眠: when it last showed anything)
 }
+// 休眠: a conversation running in the web service, left for an hour, is ended to free its memory (300–450 MB a Claude)
+// and kept in 运行中, greyed, for a day (dozed.json): opened again, it goes on at once. Not one a page shows, the
+// 管家's (its own folder: the caller leaves it out), a Mac's, one switching accounts, one typed in within the hour; a
+// Claude only when idle by its own word (its session file j: status, since when) for the hour, never asking or at work;
+// a GPT or Gemini one (no such file) when it showed nothing for the hour; none with a shell of its own running under it
+// (a command, a background one: shells, the pids that have one; null: unknown, so none)
+const DOZE_AFTER = 3600e3, DOZE_KEEP = 24 * 3600e3;
+function dozable(t, j, shells, now = Date.now()) {
+  if (t.kind !== 'pty' || t.gone || t.mac || t.switching || t.clients.size || !(t.pid > 0) || !shells || shells.has(t.pid)) return false;
+  if (now - (t.typed ?? 0) < DOZE_AFTER) return false;
+  if (t.dir) return j?.status === 'idle' && now - (j.statusUpdatedAt ?? now) >= DOZE_AFTER;
+  return now - (t.outAt ?? now) >= DOZE_AFTER;
+}
+// the parent pids of the shells in a process list ("<parent pid> <name or path>" a line, Win32_Process's or ps's)
+const shellsIn = (out) => new Set([...String(out).matchAll(/^\s*(\d+)\s+(?:.*[\\/])?(?:bash|sh|zsh|powershell|pwsh)(?:\.exe)?\s*$/gim)].map((m) => +m[1]));
+const shellParents = () => new Promise((ok) => require('child_process').execFile(...(WIN
+  ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ParentProcessId) $($_.Name)" }']]
+  : ['ps', ['-A', '-o', 'ppid=,comm=']]), { windowsHide: true, timeout: 30000, maxBuffer: 16 << 20 }, (e, out) => ok(e ? null : shellsIn(out))));
 const replayPty = (t) => [...(t.modes ?? [])].map(([n, v]) => `\x1b[?${n}${v}`).join('') + (t.modeTail ?? '') + t.buf;
 
 async function web() {
@@ -3871,6 +3890,12 @@ async function web() {
   const codex = codexCmd(); // GPT conversations: none started without it
   const sshExe = whereIs('ssh') || 'ssh'; // the Mac's
   const terms = new Map(); // key -> { kind: 'pty' | 'pc', sid, pid, proc, clients: Set, buf, w, h, gone }
+  // 休眠 (dozable, dozeIdle): the ones ended for it, id → when, a day at most; one continued here is off it at once
+  const DOZED = path.join(ROOT, 'dozed.json');
+  const dozed = (() => { try { return JSON.parse(fs.readFileSync(DOZED, 'utf8')); } catch { return {}; } })();
+  const dozing = () => { const now = Date.now(); for (const [id, at] of Object.entries(dozed)) if (now - at >= DOZE_KEEP) delete dozed[id]; return dozed; };
+  const saveDozed = () => { try { fs.writeFileSync(`${DOZED}.tmp`, JSON.stringify(dozing())); fs.renameSync(`${DOZED}.tmp`, DOZED); } catch {} };
+  const unDoze = (id) => { if (id && dozed[id]) { delete dozed[id]; saveDozed(); } };
   const slashCache = new Map(); // `${configDir}|${folder}` -> { at, list }: / in a conversation's box
   // the quota as the page last got it, kept on disk: after a restart the page shows it at once (read again behind it)
   let usageCache = (() => { try { return JSON.parse(fs.readFileSync(WEB_USAGE, 'utf8')); } catch { return null; } })();
@@ -3974,7 +3999,7 @@ async function web() {
     const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, gem: { id: resume ?? null, since: Date.now(), enters: [] } };
     proc.onData((d) => { keepOut(t, d); send(t, 'data', d); });
     proc.onExit(() => { t.gone = true; gemCache = null; send(t, 'gone', {}); saveRun(); setTimeout(() => terms.delete(key), 60000); }); // (ended: not started again after a restart)
-    terms.set(key, t); gemCache = null;
+    terms.set(key, t); gemCache = null; unDoze(resume);
     if (!resume) gemIdle(t); // (a page that never connects: its tab closed while this started)
     log('web_session', { profile_id: g.id, cwd, args: resume ? `--conversation ${resume}` : '' });
     return t;
@@ -4079,10 +4104,26 @@ async function web() {
     });
     // ended to go on with another account (switching): its pages are sent to the new one instead of told it's gone
     proc.onExit(() => { t.gone = true; saveTerms(); saveRun(); if (!t.switching) send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
-    terms.set(key, t);
+    terms.set(key, t); unDoze(t.resume);
     log('web_session', { profile_id: p.id, cwd, args: args.join(' ') });
     return t;
   }
+  async function dozeIdle() {
+    const live = (t) => { try { return t.dir ? JSON.parse(fs.readFileSync(path.join(t.dir, 'sessions', `${t.pid}.json`), 'utf8')) : null; } catch { return null; } };
+    const now = Date.now(), maybe = [...terms.values()].filter((t) => !sameDir(t.cwd, BUTLER) && dozable(t, live(t), new Set(), now));
+    if (!maybe.length) return;
+    const shells = await shellParents(); // asked only when one may go (a PowerShell, a second or so)
+    for (const t of maybe) {
+      const j = live(t);
+      if (!dozable(t, j, shells)) continue;
+      const id = j?.sessionId ?? t.gpt?.id ?? t.gem?.id ?? null; // none: never said anything, nothing to go on with
+      if (id) dozed[id] = Date.now();
+      log('web_doze', { id, pid: t.pid });
+      t.proc.kill();
+    }
+    saveDozed(); sessCache = null;
+  }
+  setInterval(() => dozeIdle().catch((e) => log('web_doze_fail', { err: e.message })), 60000).unref();
   // a GPT conversation started or continued here: codex in a pseudo-terminal, in its account's CODEX_HOME (acct from 1),
   // the folder trusted there first (Codex asks of a new one, and the page has no card for its question yet)
   function startGpt(acct, cwd, resume, cols = 100, rows = 30) {
@@ -4099,7 +4140,7 @@ async function web() {
       keepOut(t, d); send(t, 'data', d);
     });
     proc.onExit(() => { t.gone = true; gptCache = null; if (t.marked) gptUnmark(t.marked); saveTerms(); send(t, 'gone', {}); setTimeout(() => terms.delete(key), 60000); });
-    terms.set(key, t); gptCache = null;
+    terms.set(key, t); gptCache = null; unDoze(resume);
     log('web_session', { profile_id: g.id, cwd, args: resume ? `resume ${resume}` : '' });
     return t;
   }
@@ -4544,6 +4585,7 @@ async function web() {
       for (const c of oaiChats()) list.push({ id: c.id, title: c.title, at: c.at, cwd: '', acct: -1, gpt: true, oai: true, pid: null, busy: !!c.pending,
         prompt: c.msgs.findLast((m) => m.role === 'user')?.text.split('\n')[0].slice(0, 80) ?? '' });
       list.sort((a, b) => b.at - a.at);
+      for (const s of list) if (!s.pid && dozing()[s.id]) s.doze = true; // 休眠: ended for it, kept in 运行中 (greyed)
       // the Macs (the Mac mini, more): 新对话 offers them
       const reg = load(), macs = macList(reg).map((m) => ({ id: m.id, label: m.label, dir: m.dir, host: m.host, icon: m.icon ?? null }));
       return { user: reg.user ?? null, usage: usageCache, sdkModels: SDK.MODELS, gpt: gptState(), gemini: geminiAccounts(reg).map((g) => ({ label: g.label, on: g.id === reg.geminiOn, ...gemUsage(g) })), oai: fs.existsSync(OAI_KEY), quota: quotaOn(reg), macs, sessions: list, notes: unreadNotes([...all, ...gemSessions()]).map((n) => ({ ...n, by: noteBy(n) })), me: os.hostname(), butler: BUTLER, butlerOn: butlerOn(), butlerModel: butlerSet('model'), butlerEffort: butlerSet('effortLevel'), pc: pcNow(),
@@ -5656,7 +5698,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

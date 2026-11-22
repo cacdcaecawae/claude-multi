@@ -631,6 +631,24 @@ const press = async (key, shift = false) => {
   // service's, and one made in the page alone was gone with it (GEM1 not found, now and then)
   const both = (change, then = '') => { new Function('state', change)(state); return evaluate(`${change}; ${then}`); };
   openBodies.length = 0;
+  // 休眠: one ended after an hour left stays in 运行中, greyed; opened, it goes on at once on its own account (none asked).
+  // A tab of one that went to rest out of sight: shown again, it goes on, once (a page reconnecting asks live: not counted)
+  const fresh = async () => { for (let i = 0; i < 200; i++) { const k = openBodies.findIndex((b) => !b.live); if (k >= 0) return openBodies.splice(k, 1)[0]; await new Promise((r) => setTimeout(r, 50)); } };
+  await both("state.sessions.push({ id: 'DZ1', title: '休眠的', acct: 0, cwd: 'C:/test', at: Date.now(), pid: null, doze: true })", "listMode = 'run'; folded.delete('run'); renderChats()");
+  assert.deepEqual(await evaluate(`(() => { const r = document.querySelector('#view [data-sec="run"] [data-open="DZ1"]'); return [!!r, r?.classList.contains('doze'), r?.title.includes('休眠中')]; })()`), [true, true, true]);
+  historyId = 'DZ1'; // the fake's record says whose it is: the pane keeps its id
+  await evaluate("menuAt = 0; document.querySelector('#view [data-open=\"DZ1\"]').click()");
+  const dz = await fresh();
+  assert.deepEqual([dz?.id, dz?.acct], ['DZ1', 1]);
+  await both("Object.assign(state.sessions.find((x) => x.id === 'DZ1'), { doze: false, pid: 77 })", "convOf('DZ1').sync()");
+  await both("Object.assign(state.sessions.find((x) => x.id === 'DZ1'), { doze: true, pid: null })", "{ const c = convOf('DZ1'); c.sleep(); c.wake(); c.sleep(); c.wake(); }");
+  const dz2 = await fresh();
+  assert.deepEqual([dz2?.id, dz2?.acct], ['DZ1', 1]);
+  await new Promise((r) => setTimeout(r, 400)); assert.equal(openBodies.filter((b) => !b.live).length, 0); // once
+  await evaluate("closeConv(convOf('DZ1'))"); historyId = 'A';
+  await both("state.sessions = state.sessions.filter((x) => x.id !== 'DZ1')", "listMode = 'dirs'; renderChats()");
+  openBodies.length = 0;
+  console.log('browser 休眠 ok');
   await both("state.gemini = [{ label: 'g@example.com', on: true }]; state.sessions.push({ id: 'GEM1', gem: true, title: 'Gemini 对话', acct: 0, cwd: 'C:/test', at: Date.now(), pid: null })", "listKind = 'all'; renderChats()");
   assert.deepEqual(await evaluate(`(() => { const r = document.querySelector('#view [data-open="GEM1"]');
     return [r.querySelector('.ac').textContent, r.querySelector('.mk').dataset.tip ?? r.querySelector('.mk').title, [...document.querySelectorAll('.kinds button')].map((b) => (b.querySelector('svg') ? 'mark:' : '') + (b.getAttribute('aria-label') ?? b.textContent)).join()]; })()`), ['A1', 'Gemini', '全部,mark:Claude,mark:Gemini']);
