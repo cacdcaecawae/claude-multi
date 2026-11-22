@@ -4764,7 +4764,7 @@ async function web() {
         cwd = path.resolve(String(b.dir).trim());
       }
       shareMemory([[p.configDir, projectFolder(cwd)]]); shareMcp(p.configDir); // as a Claude started here has them
-      return sdk.send({ id: b.id || null, configDir: p.configDir, cwd, text, model: b.model });
+      return sdk.send({ id: b.id || null, configDir: p.configDir, cwd, text, model: b.model, effort: b.effort });
     },
     'POST /api/sdk/stop': (q, b) => sdk.stop(String(b.id ?? '')),
     'POST /api/sdk/answer': (q, b) => sdk.answer({ id: String(b.id ?? ''), allow: !!b.allow, answers: b.answers, text: b.text }),

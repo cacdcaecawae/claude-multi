@@ -285,13 +285,16 @@ const press = async (key, shift = false) => {
   assert.deepEqual(await evaluate("[...document.querySelectorAll('#sheetIn [data-sdk]')].map((b) => b.textContent + (b.classList.contains('on') ? ' on' : ''))"), ['Claude Code on', 'API 额度：Agent SDK，按用量计费']);
   await evaluate("(() => { document.querySelector('[data-sdk=\"1\"]').click(); const d = document.querySelector('#dirIn'); d.value = 'C:/test'; d.dispatchEvent(new Event('input')); document.querySelector('#start').click(); })()");
   await until("!!document.querySelector('.pane.on.sdk')");
-  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .path').textContent, document.querySelector('.pane.on .bset').textContent, document.querySelector('.pane.on .hTop').textContent]"), ['API 额度 · test', 'Opus 5.5', '还没有消息，在下面发一条开始']);
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .path').textContent, document.querySelector('.pane.on .bset').textContent, document.querySelector('.pane.on .hTop').textContent]"), ['API 额度 · test', 'Opus 5.5 · 很高', '还没有消息，在下面发一条开始']);
   await evaluate("document.querySelector('.pane.on .bset').click()");
   await evaluate("document.querySelector('.pane.on .bPop [data-sm=\"claude-sonnet-5-5\"]').click()");
-  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .bset').textContent, localStorage.getItem('cm-sdk-model'), document.querySelector('.bPop [data-sm=\"claude-haiku-5-5\"] small').textContent]"), ['Sonnet 5.5', 'claude-sonnet-5-5', '$0.1 / $0.5']);
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .bset').textContent, localStorage.getItem('cm-sdk-model'), document.querySelector('.bPop [data-sm=\"claude-haiku-5-5\"] small').textContent]"), ['Sonnet 5.5 · 很高', 'claude-sonnet-5-5', '$0.1 / $0.5']);
+  // its 思考强度 under the models: the slider let go at 中
+  await evaluate("(() => { const r = document.querySelector('.bPop input[type=range]'); r.value = 1; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); })()");
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .bset').textContent, localStorage.getItem('cm-sdk-effort'), document.querySelector('.bPop .h b').textContent]"), ['Sonnet 5.5 · 中', 'medium', '中']);
   await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='整理一下';t.dispatchEvent(new Event('input'));document.querySelector('.pane.on .go').click(); })()");
   await until("document.querySelector('.pane.on .live .busy')?.textContent.startsWith('正在启动')");
-  assert.deepEqual(sdkPosts.shift(), ['send', { id: null, acct: 1, dir: 'C:/test', text: '整理一下', paths: [], model: 'claude-sonnet-5-5' }]);
+  assert.deepEqual(sdkPosts.shift(), ['send', { id: null, acct: 1, dir: 'C:/test', text: '整理一下', paths: [], model: 'claude-sonnet-5-5', effort: 'medium' }]);
   assert.deepEqual(await evaluate("[focusG.active.id, document.querySelector('.pane.on .go').dataset.m, document.querySelector('.pane.on .live .hm.user').textContent]"), ['S1', 'stop', '整理一下']);
   historyId = 'S1'; histFeed = [{ role: 'user', text: '整理一下', at: Date.now() }];
   sdkState = { busy: true, since: Date.now(), ask: { tool: 'Bash', what: 'rm -rf build', why: '清理旧的构建' } };

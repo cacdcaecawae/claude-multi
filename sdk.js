@@ -15,6 +15,8 @@ const API = 'anthropic';
 // [id, name, price per million tokens in / out] (the Claude API's, 2026-11-21); the first is a new one's
 const MODELS = [['claude-opus-5-5', 'Opus 5.5', '$4 / $20'], ['claude-fable-5-2', 'Fable 5.2', '$8 / $40'],
   ['claude-sonnet-5-5', 'Sonnet 5.5', '$2 / $10'], ['claude-haiku-5-5', 'Haiku 5.5', '$0.1 / $0.5']];
+// 思考强度: Claude Code's levels (its --effort, the SDK's effort); a new one's is Claude Code's own default
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'], EFFORT = 'xhigh';
 // the models Claude Code picks by itself (a subagent's sonnet, a small task's haiku) on the API provider too. As flag
 // settings: they win over the account's settings.json, whose env names the subscription's (claude/…), where the SDK's
 // own env loses to it (tried 2026-11-21 on Claude Code 2.1.322)
@@ -77,19 +79,19 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
     signal?.addEventListener('abort', () => ask.answer({ behavior: 'deny', message: 'The user stopped this.' }), { once: true });
   });
   // {id} one to go on with (null: a new one), on the account in configDir, in folder cwd: the turn starts, answered at once
-  function send({ id, configDir, cwd, text, model }) {
+  function send({ id, configDir, cwd, text, model, effort }) {
     text = String(text ?? '').trim();
     if (!text) throw new Error('消息是空的');
     if (id && busy(id)) throw new Error('它还在回答上一条，答完再发，或者先停止');
-    const m = MODELS.find((x) => x[0] === model)?.[0] ?? MODELS[0][0], fresh = !id;
+    const m = MODELS.find((x) => x[0] === model)?.[0] ?? MODELS[0][0], e = EFFORTS.includes(effort) ? effort : EFFORT, fresh = !id;
     id ??= crypto.randomUUID();
-    const run = { id, model: m, busy: true, since: Date.now(), at: 0, ask: null, err: '', note: '正在启动', ac: new AbortController() };
+    const run = { id, model: m, effort: e, busy: true, since: Date.now(), at: 0, ask: null, err: '', note: '正在启动', ac: new AbortController() };
     runs.set(id, run);
     (async () => {
       const { query } = await lib();
       for await (const msg of query({ prompt: text, options: {
         pathToClaudeCodeExecutable: exe, env: envOf(configDir), cwd, abortController: run.ac, spawnClaudeCodeProcess: (o) => (run.proc = spawn(o)),
-        model: `${API}/${m}`, settings: { env: tierEnv() }, ...(fresh ? { sessionId: id } : { resume: id }),
+        model: `${API}/${m}`, effort: e, settings: { env: tierEnv() }, ...(fresh ? { sessionId: id } : { resume: id }),
         canUseTool: (tool, input, o) => asked(run, tool, input, o?.signal) } })) {
         if (msg.type === 'system' && msg.subtype === 'init') run.note = '';
         if (msg.type === 'result' && !run.stopping) run.err = msg.is_error ? String(msg.result || (msg.errors ?? []).join('；') || msg.subtype).slice(0, 500) : '';
@@ -124,7 +126,7 @@ function createSdk({ lib, exe, envOf, done = () => {}, spawn = spawnClaude, kill
   // for the page: how it stands (none: idle, nothing asked since the service started)
   function view(id) {
     const r = runs.get(id);
-    return r ? { busy: r.busy, since: r.since, model: r.model, err: r.err, note: r.note, ask: r.ask && askView(r.ask) } : { busy: false };
+    return r ? { busy: r.busy, since: r.since, model: r.model, effort: r.effort, err: r.err, note: r.note, ask: r.ask && askView(r.ask) } : { busy: false };
   }
   return { send, answer, stop, view, busy, waits: (id) => !!runs.get(id)?.ask };
 }
