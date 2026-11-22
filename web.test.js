@@ -272,6 +272,13 @@ const press = async (key, shift = false) => {
   // API 额度: on an API account, 新对话 under Claude offers Claude Code or the Agent SDK; the SDK one's pane sends with the
   // model on its button, says it's starting, then asks: a permission (允许), AskUserQuestion's two questions (one a
   // multi-select: 提交 once both are picked), words typed answering one; its record as a Claude one's; 停止; why a turn failed
+  // one whose gateway says its key isn't on API 额度's list (sdk false): Claude Code only
+  Object.assign(state.usage.accounts[0], { api: true, sdk: false }); await evaluate('load()');
+  await evaluate("document.querySelector('[data-new]').click()");
+  await evaluate("document.querySelector('[data-k=\"claude\"]').click()");
+  assert.equal(await evaluate("document.querySelectorAll('#sheetIn [data-sdk]').length"), 0);
+  await evaluate("document.querySelector('#cancel').click()");
+  delete state.usage.accounts[0].sdk;
   state.usage.accounts[0].api = true; await evaluate('load()');
   await evaluate("document.querySelector('[data-new]').click()");
   await evaluate("document.querySelector('[data-k=\"claude\"]').click()");

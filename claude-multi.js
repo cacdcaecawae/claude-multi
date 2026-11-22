@@ -456,12 +456,16 @@ function list() {
 // no refresh: refreshing would race a running Claude writing the same .credentials.json.
 async function fetchUsage(p) {
   if (p.api) { // an API account (本地代理, or one 申请接入 got): billed by what it uses, no 5-hour or weekly window to read
+    let key, sdk;
+    try { key = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8')).env?.ANTHROPIC_AUTH_TOKEN; } catch {}
+    const ask = (what) => fetch(`${p.api.baseURL}${what}`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
     if (p.api.join) try { // the gateway took its key back: 401
-      const key = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8')).env?.ANTHROPIC_AUTH_TOKEN;
-      const r = await fetch(`${p.api.baseURL}/v1/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
-      if (r.status === 401) return { api: true, err: '接入已失效，可在设置里重新申请' };
+      if ((await ask('/v1/models')).status === 401) return { api: true, err: '接入已失效，可在设置里重新申请' };
     } catch {}
-    return { api: true };
+    // sdk: whether the gateway lets this key use API 额度 (its /_sdk, {on}); none where it doesn't say (a gateway
+    // without one), and 新对话 offers it there as before
+    if (p.api.baseURL) try { const r = await ask('/_sdk'), j = r.ok ? await r.json() : (await r.body?.cancel(), null); if (typeof j?.on === 'boolean') sdk = j.on; } catch {}
+    return { api: true, ...(sdk !== undefined && { sdk }) };
   }
   let c;
   try { c = JSON.parse(fs.readFileSync(path.join(p.configDir, '.credentials.json'), 'utf8')).claudeAiOauth; } catch {}
@@ -2836,7 +2840,7 @@ async function usageState(reg = load(), { macFresh = false } = {}) {
   const cols = WINDOWS.filter(([k]) => !k.startsWith('seven_day_') || ok.some((r) => r.u[k]?.utilization));
   const json = { rec: api >= 0 ? api : rec?.i ?? null, open: open.length > 0 || api >= 0,
     ready: !open.length && rec ? until(readyAt(rec.u)) : null,
-    accounts: reg.profiles.map((p, i) => ({ label: p.label, dir: p.configDir, err: res[i].err ?? null, api: !!res[i].api,
+    accounts: reg.profiles.map((p, i) => ({ label: p.label, dir: p.configDir, err: res[i].err ?? null, api: !!res[i].api, ...(res[i].sdk !== undefined && { sdk: res[i].sdk }),
       runway: res[i].u ? Math.round(runway(res[i].u) * 10) / 10 : null,
       windows: cols.filter(([k]) => res[i].u?.[k]).map(([k]) => ({ k, pct: Math.round(res[i].u[k].utilization),
         reset: res[i].u[k].resets_at ? until(res[i].u[k].resets_at) : '' })), sub: subscription(p, states[i]),
