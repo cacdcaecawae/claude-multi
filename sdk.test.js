@@ -83,6 +83,18 @@ test('插入: one sent while it answers goes into its input (priority next, your
   assert.equal(calls.length, 2);
 });
 
+test('a picture: before the words, as Claude Code puts one pasted; a picture alone is a message too, and one sent while it answers', async () => {
+  const img = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBO' } }, gates = [];
+  const { lib, calls } = fakeLib(() => [INIT, () => new Promise((r) => gates.push(() => r(OK)))]);
+  const s = createSdk({ lib, exe: 'claude', envOf: () => ({}) }), { id } = s.send({ id: null, text: '看这张', images: [img] });
+  await until(() => gates.length === 1);
+  s.send({ id, text: '', images: [img] });
+  await until(() => calls[0].msgs.length === 2);
+  assert.deepEqual(calls[0].msgs.map((m) => m.message.content), [[img, { type: 'text', text: '看这张' }], [img]]);
+  gates[0](); await until(() => !s.view(id).busy);
+  assert.throws(() => s.send({ id, text: ' ', images: [] }), /空的/);
+});
+
 test('a permission: shown with what it would run; allowed as asked, or turned down with the words typed; nothing waiting: refused', async () => {
   const got = [];
   const { lib } = fakeLib(() => [INIT, async (o) => { got.push(await o.canUseTool('Bash', { command: 'rm -rf build', description: '清理' }, { signal: o.abortController.signal })); return INIT; },

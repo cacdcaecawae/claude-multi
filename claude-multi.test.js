@@ -855,7 +855,7 @@ if (SESSION0) {
 // it back. A picture from the page is saved under a new name; ones older than a week go.
 {
   const fs = require('fs'), path = require('path'), os = require('os');
-  const { history, recordImage, saveUpload } = require('./claude-multi');
+  const { history, recordImage, saveUpload, sdkParts } = require('./claude-multi');
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-img-')), f = path.join(d, 'r.jsonl');
   const png = Buffer.from('89504e470d0a1a0a', 'hex'), ts = new Date().toISOString();
   const line = (content) => JSON.stringify({ type: 'user', timestamp: ts, message: { role: 'user', content } });
@@ -900,6 +900,12 @@ if (SESSION0) {
   const doc = saveUpload(Buffer.from('pdf'), null, up, '..\\..\\报告 v1.pdf');
   assert.ok(path.dirname(doc) === up && /^\d{8}T\d{6}-[0-9a-f]{6}-报告 v1\.pdf$/.test(path.basename(doc)));
   assert.ok(/-a_b_\.txt$/.test(saveUpload(Buffer.from(''), null, up, 'a<b>.txt')) && /[0-9a-f]{6}\.bin$/.test(saveUpload(Buffer.from(''), null, up, '..')));
+  // API 额度: a picture saved here goes as a picture; a file, a picture-named one elsewhere, a missing one, one too big
+  // for the API: each as its path
+  const big = saveUpload(Buffer.alloc(4 << 20), 'png', up), away = path.join(d, '20261122T000000-abcdef.png'), gone = path.join(up, '20261122T000000-000000.png');
+  fs.writeFileSync(away, png);
+  assert.deepEqual(sdkParts([saved, doc, away, big, gone], up),
+    { images: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') } }], files: [doc, away, big, gone] });
   fs.rmSync(d, { recursive: true, force: true });
   console.log('image ok');
 }

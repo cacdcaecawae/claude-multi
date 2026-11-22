@@ -238,7 +238,7 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 - Max、Ultra、Team 订阅每月送一笔 Claude API 额度（在 Console 里领，Max 每月 100 美元）。这笔钱付 Claude API 和 [Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)，**不付 Claude Code**。这种对话由 Agent SDK 来跑，用的是这笔额度。
 - 要一个连着网关的 API 账号（申请接入来的，或者你自己接了网关的），网关里要有一个用 Console 的 API key 的 provider，名字叫 `anthropic`（Magpie 里加「Anthropic」就是它）。「新对话」选 Claude、选这个账号，下面选「API 额度」。文件夹旁的 ＋ 和对话 ⋯ 里的「新对话」，在这种账号上选了 Claude 以后也会问一次：Claude Code 还是 API 额度。网关可以只给一部分 key 开 API 额度：它的 `<接入地址>/_sdk` 回答 `{"on": false}` 的账号，「新对话」里没有这一项（网关没有 `/_sdk` 就照常显示）。
 - 模型名都写成 `anthropic/…`，所以网关只会用那把 API key，不会用到订阅账号；Claude Code 自己挑的模型（子任务的 Sonnet、小活的 Haiku）也一样。输入框旁边的按钮选模型（Opus 5.5、Fable 5.2、Sonnet 5.5、Haiku 5.5，写着每百万 token 的价格）和思考强度（低到最高，和 Claude Code 的 `/effort` 一样），默认 Opus 5.5 · 很高，按浏览器记住。
-- 跑的是你电脑上的 `claude`，记录就是 Claude Code 的记录，所以列表、「对话」视图、改名、删除、用量统计都和 Claude 对话一样。列表里标着 `API`。没有「终端」视图，也不能换账号。
+- 跑的是你电脑上的 `claude`，记录就是 Claude Code 的记录，所以列表、「对话」视图、改名、删除、用量统计都和 Claude 对话一样。列表里标着 `API`。没有「终端」视图，也不能换账号。发的图片和在 Claude Code 里粘贴的一样，直接放进消息，「对话」里显示成图片（超过 3.5 MB 的图片和其他文件发的是路径，Claude 自己去读）。
 - 权限照账号的设置来。它要你确认（比如要不要跑一条命令），或者问你选择题时，「对话」里出一张卡片：点允许、不允许，或者点选项；也可以直接在输入框里写，发出去就是你的回答（不允许时它会照你写的改做法）。
 - 回复时发送按钮变成停止（按 Esc 也能停止）。这时也可以接着发：和在 Claude Code 里一样，消息先显示「排队中」，Claude 做完手上这一步就收进这一轮，赶不上的话这一轮答完接着答它。停止时还没收进去的消息会回到输入框。没答完的会写明原因（比如网关说这把 key 没开 API 额度）。
 - 第一次发消息时会自动把 Agent SDK 装进 `.claude-multi\sdk\`（npm，几十秒）。它自带的 Claude Code（390 MB）不装，用的是你电脑上的。

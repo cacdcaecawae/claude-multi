@@ -342,6 +342,17 @@ const press = async (key, shift = false) => {
   await until("document.querySelector('.pane.on .send textarea').value === '再加一句\\n晚到的一句'");
   sdkState = { busy: true, since: Date.now() }; histQueue = null;
   await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='';t.dispatchEvent(new Event('input')); })()");
+  // a picture sent into its answer: 排队中 till the record has that message (one with a picture isn't in the record's
+  // queue); then the record's picture shown as one, the words under it
+  await evaluate("(() => { focusG.active.attach([new File([new Uint8Array([137, 80, 78, 71])], 'a.png', { type: 'image/png' })]); const t = document.querySelector('.pane.on .send textarea'); t.value = '看图'; t.dispatchEvent(new Event('input')); document.querySelector('.pane.on .go').click(); })()");
+  for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
+  const [, picB] = sdkPosts.shift();
+  assert.deepEqual([picB.text, picB.paths.length], ['看图', 1]);
+  sdkState = { busy: true, since: Date.now() };
+  await new Promise((r) => setTimeout(r, 1500)); // a record read or two meanwhile: still waiting
+  assert.equal(await evaluate("(() => { const b = document.querySelector('.pane.on .live .hm.user.pending'); return !!b && b.textContent.startsWith('排队中看图'); })()"), true);
+  histFeed = [...histFeed, { role: 'img', text: '700.0', at: Date.now() }, { role: 'user', text: '看图', at: Date.now() }];
+  await until("!document.querySelector('.pane.on .live .hm.user') && document.querySelector('.pane.on .hNew a.hm.img img')?.getAttribute('src') === '/api/image?key=&id=S1&ref=700.0'");
   histFeed = [...histFeed, { role: 'claude', text: '整理好了', at: Date.now() }];
   sdkState = { busy: false, err: 'API Error: 403 这把 key（join-x）没开 API 额度' };
   await until("document.querySelector('.pane.on .hNew .hm.claude')?.textContent.includes('整理好了') && document.querySelector('.pane.on .live').textContent.includes('没答完：API Error: 403')");
