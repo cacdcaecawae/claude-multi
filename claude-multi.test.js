@@ -309,6 +309,9 @@ if (SESSION0) {
     // a background task over: a line saying so (what woke Claude), its description from the summary
     u('<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command "Wait for the plan" completed (exit code 0)</summary>'),
     u('Summary of earlier work', { isCompactSummary: true }),
+    // a reply's thinking on a line of its own: nothing shown, whatever it says; words that say thinking still are
+    a([{ type: 'thinking', thinking: 'a plan with "type":"text" and "type":"tool_use" in it', signature: 'S'.repeat(200) }]),
+    a([{ type: 'text', text: '它写了 "type":"thinking"' }]),
     a([{ type: 'text', text: '测试通过。' }]),
     // sent while Claude was at work; a background task's message delivered the same way isn't yours
     { type: 'attachment', timestamp: T, attachment: { type: 'queued_command', prompt: '顺便看看日志', origin: { kind: 'human' } } },
@@ -317,7 +320,7 @@ if (SESSION0) {
   ].map((x) => JSON.stringify(x)).join('\n') + '\n');
   const all = history(f);
   assert.deepEqual(all.items.map((x) => `${x.role}:${x.text}`),
-    ['user:/rename 新名字', 'user:修一下 bug', 'claude:好的。', 'tool:Bash  Run tests', 'note:⏳ 后台的事有结果了：Wait for the plan', 'note:更早的内容已压缩', 'claude:测试通过。', 'user:顺便看看日志', 'done:7750']);
+    ['user:/rename 新名字', 'user:修一下 bug', 'claude:好的。', 'tool:Bash  Run tests', 'note:⏳ 后台的事有结果了：Wait for the plan', 'note:更早的内容已压缩', 'claude:它写了 "type":"thinking"', 'claude:测试通过。', 'user:顺便看看日志', 'done:7750']);
   // read again from where it ended: only what was added, and a line still being written waits
   fs.appendFileSync(f, JSON.stringify(a([{ type: 'text', text: '看完了。' }])) + '\n{"type":"assistant","mess');
   const more = history(f, { from: all.end });
@@ -386,6 +389,28 @@ if (SESSION0) {
   assert.deepEqual(queueNow(f), [{ text: '还在等', at: Date.parse(T) }]);
   fs.rmSync(f);
   console.log('queue ok');
+}
+// GPT 聊天, asked every 2 s while it answers: the chat not changed since the version the page has, that alone
+{
+  const vm = require('vm'), path = require('path'), js = fs.readFileSync(path.join(__dirname, 'claude-multi.js'), 'utf8');
+  const at = js.indexOf("'GET /api/oai': "), src = js.slice(at + "'GET /api/oai': ".length, js.indexOf("\n    'POST /api/oai/send'", at)).replace(/,\s*$/, '');
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cm-oai-v-')), f = path.join(dir, 'oai-1.json'), deleting = new Set();
+  const write = (msgs, t) => { fs.writeFileSync(f, JSON.stringify({ id: 'oai-1', title: 't', msgs })); fs.utimesSync(f, t, t); };
+  const get = vm.runInNewContext(`(${src})`, { fs, path, String, OAI: dir, oaiDeleting: deleting, OAI_OPTS: {}, oaiItems: (c) => c.msgs,
+    oaiRead: (id) => { if (!/^oai-\d+$/.test(id)) throw new Error('没有这个对话'); return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } });
+  const q = (o) => new URLSearchParams(o);
+  write([], 1000);
+  const first = get(q({ id: 'oai-1' }));
+  assert.ok(first.v && Array.isArray(first.items) && !first.same);
+  assert.deepEqual(get(q({ id: 'oai-1', v: first.v })), { same: true });
+  write([{ role: 'claude', text: '答好了' }], 2000); // the answer in: the whole chat, and its new version
+  const next = get(q({ id: 'oai-1', v: first.v }));
+  assert.deepEqual([next.same, next.items.length, next.v !== first.v], [undefined, 1, true]);
+  assert.throws(() => get(q({ id: '../oai-1', v: 'null' })), /没有这个对话/); // not looked for outside its folder
+  deleting.add('oai-1'); // being deleted: no version, so never "unchanged"
+  assert.ok(!get(q({ id: 'oai-1', v: next.v })).same);
+  fs.rmSync(dir, { recursive: true, force: true });
+  console.log('oai unchanged ok');
 }
 
 // The 终端 of a window here starts at a question of yours: the record fills in from the question the first

@@ -1340,18 +1340,29 @@ async function pushDisable() {
   pushOn = false; drawSide(); toast('通知已关闭');
 }
 
+// a look at the service: an answer back after a newer one's is dropped (a name just changed came back as it was); each
+// given 15 s (one stuck held a part of the page for good); the 5 s one skipped while one is out (a slow service: they
+// piled up on the browser's few connections, what you sent waiting behind them); past the browser's cache, where the
+// same look asked again waited for the one before it to answer
+let loadSeq = 0, loadShown = 0, loadsOut = 0;
 async function load(fresh) {
+  const my = ++loadSeq;
+  loadsOut++;
   try {
     const view = document.visibilityState === 'visible' && (butler || !(NARROW.matches && sideOn)) ? shownConvs().map((c) => c.id).filter(Boolean).join(',') : '';
     const bg = document.visibilityState !== 'visible'; // in the background: for the tab's unread count, the quota not read again for it
-    const s = await (await fetch('/api/state?' + new URLSearchParams({ ...(fresh && { fresh: 1 }), ...(view && { view }), ...(bg && { bg: 1 }) }))).json();
+    const s = await (await fetch('/api/state?' + new URLSearchParams({ ...(fresh && { fresh: 1 }), ...(view && { view }), ...(bg && { bg: 1 }) }), { cache: 'no-store', signal: AbortSignal.timeout(15000) })).json();
+    if (my < loadShown) return '';
     if (s.err) throw new Error(s.err);
+    loadShown = my;
     state = s; $('#status').classList.remove('off'); $('#offline').hidden = true;
   } catch (e) {
-    $('#status').classList.add('off'); $('#conn').textContent = '连不上：' + e.message; $('#offline').hidden = false;
-    if (!state) $('#view').html = `<div class="empty">连不上<br>${esc(e.message)}</div>`;
-    return e.message;
-  }
+    if (my < loadShown) return ''; // a newer one got through
+    const why = e.name === 'TimeoutError' ? '15 秒没有回应' : e.message;
+    $('#status').classList.add('off'); $('#conn').textContent = '连不上：' + why; $('#offline').hidden = false;
+    if (!state) $('#view').html = `<div class="empty">连不上<br>${esc(why)}</div>`;
+    return why;
+  } finally { loadsOut--; }
   if (!restored) restore();
   butlerShown();
   if (openAsked) { const id = openAsked; openAsked = null; openSession(id); } // a notification tapped
@@ -3484,19 +3495,29 @@ function makeOai(id, title) {
   });
 
   let sentWith = opts; // what the answer on its way was asked with
-  async function refresh() { // its messages read again, drawn again only when something changed; kept at the end if you were there
+  // its messages read again (ver: the chat as last read: unchanged, the service says only that), drawn again only when
+  // something changed; kept at the end if you were there. An answer back after a newer one's is dropped (one that left
+  // before you sent cleared 正在思考)
+  let ver = null, asked = 0, shownAt = 0;
+  async function refresh() {
     if (!c.id) return void ($p('.hTop').textContent = '还没有消息，在下面发一条开始');
+    const my = ++asked;
     let r;
-    try { r = await (await fetch(`/api/oai?id=${encodeURIComponent(c.id)}`)).json(); } catch { return; }
+    try { r = await (await fetch(`/api/oai?id=${encodeURIComponent(c.id)}${ver ? `&v=${encodeURIComponent(ver)}` : ''}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) })).json(); } catch { return; }
+    if (my < shownAt) return;
+    shownAt = my;
     if (r.err) return void ($p('.hTop').textContent = r.err);
-    const end = hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80, now = JSON.stringify(r.items);
-    busy = r.busy; since = r.since ?? since; sentWith = r.opts; goMode();
-    if (!picked) { picked = true; opts = r.opts; drawOpts(); }
-    if (now !== drawn) {
-      drawn = now;
-      for (const m of r.items) { if (m.role === 'img') m.src = `/api/oai/file?id=${encodeURIComponent(c.id)}&ref=${m.text}`; if (m.role === 'user') { m.files = filesOf(m.text); m.text = shownText(m.text); } }
-      const box = $p('.hNew'); box.innerHTML = ''; box.$at = 0; addItems(box, r.items, true);
-      $p('.hTop').textContent = r.items.length ? '对话开头' : '还没有消息，在下面发一条开始';
+    const end = hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
+    if (!r.same) {
+      ver = r.v; busy = r.busy; since = r.since ?? since; sentWith = r.opts; goMode();
+      if (!picked) { picked = true; opts = r.opts; drawOpts(); }
+      const now = JSON.stringify(r.items);
+      if (now !== drawn) {
+        drawn = now;
+        for (const m of r.items) { if (m.role === 'img') m.src = `/api/oai/file?id=${encodeURIComponent(c.id)}&ref=${m.text}`; if (m.role === 'user') { m.files = filesOf(m.text); m.text = shownText(m.text); } }
+        const box = $p('.hNew'); box.innerHTML = ''; box.$at = 0; addItems(box, r.items, true);
+        $p('.hTop').textContent = r.items.length ? '对话开头' : '还没有消息，在下面发一条开始';
+      }
     }
     if (!sending) $p('.live').innerHTML = busy ? `<div class="busy"><i></i>GPT 正在思考（${esc(oaiName(sentWith))}）· ${dur(Date.now() - since)}</div>` : '';
     if (end) hist.scrollTop = hist.scrollHeight;
@@ -4292,7 +4313,7 @@ document.addEventListener('click', (e) => {
 focusGroup(makeGroup());
 drawSide();
 load();
-setInterval(load, 5000); // in the background too: the tab's title counts the unread (a hidden page's timer is slowed anyway)
+setInterval(() => { if (!loadsOut) load(); }, 5000); // in the background too: the tab's title counts the unread (a hidden page's timer is slowed anyway)
 </script>
 </body>
 </html>
