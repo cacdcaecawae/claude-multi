@@ -1297,7 +1297,7 @@ if (SESSION0) {
   fs.mkdirSync(dir, { recursive: true });
   const T = new Date().toISOString(), u = (content) => ({ type: 'user', timestamp: T, message: { content } });
   const a = (id, usage) => ({ type: 'assistant', timestamp: T, requestId: 'r' + id, message: { id, model: 'claude-sonnet-5', usage } });
-  fs.writeFileSync(path.join(dir, 's.jsonl'), [u('你好'), a('m1', { input_tokens: 1e6 }), a('m1', { input_tokens: 1e6 }), u('\n\n<pasted_content id="a1">\n[系统通知] 有动静\n</pasted_content id="a1">\n'), a('m2', { output_tokens: 1e5 }), // a long notice: a paste
+  fs.writeFileSync(path.join(dir, 's.jsonl'), [u('你好'), a('m1', { input_tokens: 1e6 }), a('m1', { input_tokens: 1e6 }), u('\n\n<pasted_content id="a1">\n[系统通知] 有动静\n</pasted_content id="a1">\n'), a('m2', { output_tokens: 1e5, iterations: null }), // a long notice: a paste
     u([{ type: 'tool_result', content: 'ok' }]), a('m3', { input_tokens: 5e5 }), u('<task-notification>\n<status>completed</status>'), a('m4', { input_tokens: 1e6, iterations: [{ type: 'advisor_message', model: 'claude-fable-5-2', output_tokens: 25000 }] })].map((x) => JSON.stringify(x)).join('\n'));
   const log = path.join(tmp, 'events.jsonl');
   fs.writeFileSync(log, JSON.stringify({ timestamp: T, event: 'watchdog', usd: 0.01 }) + '\n');

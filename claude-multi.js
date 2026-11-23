@@ -5432,8 +5432,8 @@ const PRICES = { 'claude-fable-5-2': [8, 40, 0.2], 'claude-fable-5-1': [10, 50, 
   // Codex's window is 258K): a long-context row once a model's window passes it
   'gpt-6.2-astra': [8, 40, 0.4], 'gpt-6-astra': [10, 50, 1], 'gpt-6.2-sol': [2, 10, 0.1], 'gpt-6.1-sol': [2, 10, 0.1],
   'gpt-6.1-terra': [1, 5, 0.05], 'gpt-6-sol': [2, 10, 0.2], 'gpt-6-luna': [0.1, 0.5, 0.01] };
-function advisorRows(x, iterations = []) {
-  return iterations.filter((t) => t.type !== 'message' && t.model).map((t, k) => [`${x[0]}:${k}`, x[1], t.input_tokens ?? 0, t.output_tokens ?? 0,
+function advisorRows(x, iterations) { // (a reply's usage can carry iterations: null)
+  return (iterations ?? []).filter((t) => t.type !== 'message' && t.model).map((t, k) => [`${x[0]}:${k}`, x[1], t.input_tokens ?? 0, t.output_tokens ?? 0,
     t.cache_creation?.ephemeral_5m_input_tokens ?? 0, t.cache_creation?.ephemeral_1h_input_tokens ?? 0, t.cache_read_input_tokens ?? 0, t.model, 0, x[9]]);
 }
 function replyCost([, day, i, o, w5, w1, r, model, fast]) {
