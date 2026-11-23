@@ -29,7 +29,7 @@ const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'C:/Users/ly/Desk
   'D:/': { path: 'D:/', up: '', dirs: ['D:/work', 'D:/.cache'], files: ['a.civa'] }, 'D:/work': { path: 'D:/work', up: 'D:/', dirs: [], files: [] } };
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
 // an API 额度 one as the service has it (/api/sdk), and what the page sent it: messages, answers, 停止
-let sdkState = { busy: false }; const sdkPosts = [];
+let rejectAnswer = false, sdkState = { busy: false }; const sdkPosts = [];
 const cmdAsks = []; // whose commands / asked for, in turn
 const CMDS = [{ name: 'usage', desc: 'Show usage', hint: '' }, { name: 'usage-credits', desc: 'Credits', hint: '' }, { name: 'clear', desc: 'Start anew', hint: '[name]' }, { name: 'status', desc: 'Status', hint: '' }];
 dirs['D:\\figs'] = { path: 'D:\\figs', up: 'D:\\', dirs: ['D:\\figs\\old'], files: ['图7.pptx', 'a.png', 'x.exe'] };
@@ -61,6 +61,9 @@ const server = http.createServer((req, res) => {
     let b = ''; req.on('data', (d) => (b += d));
     return req.on('end', () => {
       sdkPosts.push([url.pathname.slice(9), JSON.parse(b)]);
+      if (rejectAnswer && url.pathname === '/api/sdk/answer') {
+        res.writeHead(409, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ err: '它问的已经变了' }));
+      }
       if (url.pathname === '/api/sdk/send') sdkState = { busy: true, since: Date.now(), note: '正在启动', model: JSON.parse(b).model };
       res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(url.pathname === '/api/sdk/send' ? { id: 'S1' } : {}));
     });
@@ -82,6 +85,7 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/open' ? { key: 'fixture', pid: 123, kind: 'pty' }
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
       : url.pathname === '/api/history' ? { id: historyId, start: 0, end: histFeed?.length ?? 1, items: histFeed ? histFeed.slice(Number(url.searchParams.get('from') ?? 0)) : [{ role: 'claude', text: long }], ...(histQueue && { queue: histQueue }) }
+      : url.pathname === '/api/upload' ? { path: 'C:/uploads/' + decodeURIComponent(req.headers['x-name'] ?? 'picture.png') }
       : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' }
       : url.pathname === '/api/sdk' ? sdkState
       : url.pathname === '/api/commands' ? (cmdAsks.push(url.searchParams.get('id') ?? url.searchParams.get('dir') ?? url.searchParams.get('mac')), url.searchParams.get('id') === 'M' ? { commands: [{ name: 'clear', desc: 'Start anew', hint: '[name]', also: ['reset'], builtin: true }, { name: 'maintain-formal-verification-skill', desc: 'a Mac skill', hint: '', also: [], builtin: false }] } : { commands: CMDS })
@@ -320,6 +324,13 @@ const press = async (key, shift = false) => {
   await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='都不要，纯 HTML';t.dispatchEvent(new Event('input'));document.querySelector('.pane.on .go').click(); })()");
   for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(sdkPosts.shift(), ['answer', { id: 'S1', n: 8, allow: false, text: '都不要，纯 HTML' }]);
+  rejectAnswer = true;
+  await until("document.querySelector('.pane.on .send textarea').value === ''");
+  await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='保留这段回答';t.dispatchEvent(new Event('input'));document.querySelector('.pane.on .go').click(); })()");
+  await until("document.querySelector('#toast').textContent.includes('它问的已经变了')");
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on .send textarea').value, localStorage.getItem('cm-draft:S1')]"), ['保留这段回答', '保留这段回答']);
+  assert.equal(sdkPosts.shift()[1].text, '保留这段回答'); rejectAnswer = false;
+  await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='';t.dispatchEvent(new Event('input')); })()");
   sdkState = { busy: true, since: Date.now() - 5000 };
   await until("document.querySelector('.pane.on .live .busy')?.textContent.startsWith('Claude 正在回复 · ')");
   await evaluate("document.querySelector('.pane.on .go').click()"); // 停止: nothing written
@@ -327,26 +338,28 @@ const press = async (key, shift = false) => {
   assert.deepEqual(sdkPosts.shift(), ['stop', { id: 'S1' }]);
   // 插入: written while it answers, 发送 sends it into that answer (not refused); 排队中 till Claude takes it in (its
   // record's queue, or one waiting at the service); Esc stops it, and what it hadn't taken in comes back to the box
-  await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='再加一句';t.dispatchEvent(new Event('input')); })()");
+  await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');focusG.active.attach([new File(['abc'], 'notes.txt', {type:'text/plain'})]);t.value='再加一句';t.dispatchEvent(new Event('input')); })()");
   assert.equal(await evaluate("document.querySelector('.pane.on .go').dataset.m"), 'send');
   await evaluate("document.querySelector('.pane.on .go').click()");
   for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
   const [ins, insB] = sdkPosts.shift();
+  assert.deepEqual(insB.paths, ['C:/uploads/notes.txt']);
   assert.deepEqual([ins, insB.id, insB.text], ['send', 'S1', '再加一句']);
-  sdkState = { busy: true, since: Date.now(), later: ['晚到的一句'] }; histQueue = [{ text: '再加一句', at: Date.now() }];
-  await until("[...document.querySelectorAll('.pane.on .live .hm.user.pending')].map((e) => e.textContent).join('|') === '排队中再加一句|排队中晚到的一句'");
+  sdkState = { busy: true, since: Date.now(), later: ['晚到的一句'] }; histQueue = [{ text: '再加一句\n附件：C:/uploads/notes.txt', at: Date.now() }];
+  await until("[...document.querySelectorAll('.pane.on .live .hm.user.pending')].map((e) => e.textContent).join('|').includes('排队中晚到的一句') && document.querySelectorAll('.pane.on .live .hm.user.pending').length >= 2");
   assert.deepEqual(await evaluate("[document.querySelector('.pane.on .send textarea').value, document.querySelector('#toast').textContent.includes('还在回答')]"), ['', false]);
   await evaluate("document.querySelector('.pane.on .send textarea').focus()"); await press('Escape');
   for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(sdkPosts.shift(), ['stop', { id: 'S1' }]);
-  await until("document.querySelector('.pane.on .send textarea').value === '再加一句\\n晚到的一句'");
+  await until("document.querySelector('.pane.on .send textarea').value === '再加一句\\n附件：C:/uploads/notes.txt\\n晚到的一句'");
   sdkState = { busy: true, since: Date.now() }; histQueue = null;
   await evaluate("(() => { const t=document.querySelector('.pane.on .send textarea');t.value='';t.dispatchEvent(new Event('input')); })()");
   // a picture sent into its answer: 排队中 till the record has that message (one with a picture isn't in the record's
   // queue); then the record's picture shown as one, the words under it
-  await evaluate("(() => { focusG.active.attach([new File([new Uint8Array([137, 80, 78, 71])], 'a.png', { type: 'image/png' })]); const t = document.querySelector('.pane.on .send textarea'); t.value = '看图'; t.dispatchEvent(new Event('input')); document.querySelector('.pane.on .go').click(); })()");
+  await evaluate("(() => { focusG.active.attach([new File([new Uint8Array([137, 80, 78, 71])], 'a.png', { type: 'image/png' })]); window.sentPreview=document.querySelector('.pane.on .att img').src; const t = document.querySelector('.pane.on .send textarea'); t.value = '看图'; t.dispatchEvent(new Event('input')); document.querySelector('.pane.on .go').click(); })()");
   for (let i = 0; i < 100 && !sdkPosts.length; i++) await new Promise((r) => setTimeout(r, 50));
   const [, picB] = sdkPosts.shift();
+  await until("fetch(sentPreview).then(() => false, () => true)");
   assert.deepEqual([picB.text, picB.paths.length], ['看图', 1]);
   sdkState = { busy: true, since: Date.now() };
   await new Promise((r) => setTimeout(r, 1500)); // a record read or two meanwhile: still waiting
@@ -717,8 +730,10 @@ const press = async (key, shift = false) => {
   // one picked for it: shown small in the box too (it still goes as a file, by its path), any other file by its name
   assert.deepEqual(await evaluate(`(() => { focusG.active.attach([new File([new Uint8Array([137, 80, 78, 71])], 'a.png', { type: 'image/png' }), new File(['x'], '论文.pdf', { type: 'application/pdf' })]);
     const box = focusG.active.el.querySelector('.send .atts'), out = [...box.querySelectorAll('.att')].map((x) => [x.className, !!x.querySelector('img'), x.textContent]);
+    window.removedPreview = box.querySelector('img').src;
     box.querySelectorAll('[data-unatt]').forEach(() => box.querySelector('[data-unatt]').click());
     return [out, box.querySelectorAll('.att').length]; })()`), [[['att', true, ''], ['att file', false, '论文.pdf']], 0]);
+  assert.equal(await evaluate("fetch(removedPreview).then(() => false, () => true)"), true);
   // agy at work on its screen: 正在回复 at once (the list's word comes seconds later), its tab turning too
   await until("focusG.active.live === 'busy'");
   assert.match(await evaluate("focusG.active.el.querySelector('.live .busy')?.textContent"), /^Gemini 正在回复 · \d+s$/); // how long: since the page saw it start (agy's screen says none)
