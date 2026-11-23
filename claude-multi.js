@@ -57,13 +57,28 @@ function load() {
   }
 }
 
+// A Windows reader can briefly deny replacement. Each process stages its own complete file.
+function writeWhole(file, content) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, content, { mode: 0o600 });
+    for (let attempt = 0; ; attempt++) {
+      try { fs.renameSync(tmp, file); return; } catch (e) {
+        if (!WIN || attempt >= 5 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+    }
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    throw e;
+  }
+}
+
 // ponytail: no lock; two claude-multi writing in the same instant can drop one update, add a lockfile if it bites
 function update(fn) {
   const reg = load();
   fn(reg);
-  const tmp = `${REGISTRY}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(reg, null, 2) + '\n');
-  fs.renameSync(tmp, REGISTRY);
+  writeWhole(REGISTRY, JSON.stringify(reg, null, 2) + '\n');
   return reg;
 }
 
@@ -144,11 +159,10 @@ function shareMcp(dir, files = [path.join(HOME, '.claude.json'), ...load().profi
     try {
       if (!same(j.mcpServers ?? {}, set)) { // written only on a change: a Claude running there rewrites this file too
         j.mcpServers = set;
-        fs.writeFileSync(`${f}.${process.pid}.tmp`, JSON.stringify(j, null, 2));
-        fs.renameSync(`${f}.${process.pid}.tmp`, f);
+        writeWhole(f, JSON.stringify(j, null, 2));
       }
       st.seen[f] = set;
-    } catch { fs.rmSync(`${f}.${process.pid}.tmp`, { force: true }); } // held open: the next start tries again
+    } catch {} // held open: the next start tries again
   }
   try { fs.writeFileSync(stateFile, JSON.stringify(st, null, 2)); } catch {}
 }
@@ -165,8 +179,8 @@ function shareTrust(dir, files = [path.join(HOME, '.claude.json'), ...load().pro
   if (!add.length) return; // written only on a change: a Claude running there rewrites this file too
   j.projects ??= {};
   for (const k of add) j.projects[k] = { ...j.projects[k], hasTrustDialogAccepted: true };
-  try { fs.writeFileSync(`${f}.${process.pid}.tmp`, JSON.stringify(j, null, 2)); fs.renameSync(`${f}.${process.pid}.tmp`, f); }
-  catch { fs.rmSync(`${f}.${process.pid}.tmp`, { force: true }); } // held open: the next start tries again
+  try { writeWhole(f, JSON.stringify(j, null, 2)); }
+  catch {} // held open: the next start tries again
 }
 
 // What a running Claude hands everything it starts (its Bash tool, its hooks, so the island and the
@@ -229,15 +243,24 @@ function accountDir(settings) {
     dir = path.join(ACCOUNTS, id);
     try { fs.mkdirSync(dir); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
   }
-  if (settings) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings(id), null, 2) + '\n');
-  ensureLinks(dir);
-  const prefs = {};
   try {
-    const g = JSON.parse(fs.readFileSync(path.join(HOME, '.claude.json'), 'utf8'));
-    for (const k of PREF_KEYS) if (k in g) prefs[k] = g[k];
-  } catch {}
-  fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify(prefs, null, 2) + '\n');
-  return { id, dir };
+    if (settings) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings(id), null, 2) + '\n');
+    ensureLinks(dir);
+    const prefs = {};
+    try {
+      const g = JSON.parse(fs.readFileSync(path.join(HOME, '.claude.json'), 'utf8'));
+      for (const k of PREF_KEYS) if (k in g) prefs[k] = g[k];
+    } catch {}
+    if (settings) prefs.hasCompletedOnboarding = true; // a gateway account has no interactive sign-in
+    fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify(prefs, null, 2) + '\n');
+    return { id, dir };
+  } catch (e) { discardNewAccount(dir); throw e; }
+}
+
+// Only called for a directory this call just created and has not registered.
+function discardNewAccount(dir) {
+  unlinkAll(dir);
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 // 申请接入: your applications to a gateway's apply service, in join.json (never in git: each keeps its ticket, the
@@ -245,7 +268,7 @@ function accountDir(settings) {
 // the gateway's address and the key it gave. Once per application (api.join), however often it's asked.
 const JOINS = path.join(ROOT, 'join.json');
 const readJoins = () => { try { return JSON.parse(fs.readFileSync(JOINS, 'utf8')); } catch { return []; } };
-const saveJoins = (js) => { fs.writeFileSync(JOINS + '.tmp', JSON.stringify(js, null, 2)); fs.renameSync(JOINS + '.tmp', JOINS); };
+const saveJoins = (js) => writeWhole(JOINS, JSON.stringify(js, null, 2));
 const editJoin = (id, fn) => saveJoins(readJoins().flatMap((j) => (j.id === id ? fn(j) : [j])));
 const joinsShown = () => readJoins().map(({ ticket, ...j }) => j);
 // such an account's base URL: delta.js send, run by the web service, which sends each request to its gateway as what
@@ -257,7 +280,7 @@ function pointJoins(via) {
   for (const p of load().profiles.filter((x) => x.api?.join)) try {
     const f = path.join(p.configDir, 'settings.json'), s = JSON.parse(fs.readFileSync(f, 'utf8')), to = via ? viaDelta(p.id) : p.api.baseURL;
     if (s.env?.ANTHROPIC_BASE_URL === to) continue;
-    fs.writeFileSync(`${f}.tmp`, JSON.stringify({ ...s, env: { ...s.env, ANTHROPIC_BASE_URL: to } }, null, 2) + '\n'); fs.renameSync(`${f}.tmp`, f);
+    writeWhole(f, JSON.stringify({ ...s, env: { ...s.env, ANTHROPIC_BASE_URL: to } }, null, 2) + '\n');
     log('profile_base', { profile_id: p.id, via });
   } catch (e) { log('profile_base_fail', { profile_id: p.id, err: e.message }); }
 }
@@ -284,7 +307,8 @@ function quotaSource() {
 async function askApply(url, what, body) {
   const r = await fetch(`${url}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
   const j = await r.json().catch(() => null);
-  if (!j || (!r.ok && r.status !== 404)) throw Error(j?.err ?? `接入地址答 ${r.status}`);
+  if (r.status === 404) return { state: 'gone', status: 404 };
+  if (!j || !r.ok) throw Error(j?.err ?? `接入地址答 ${r.status}`);
   return { status: r.status, ...j };
 }
 function joinAccount(j, key) {
@@ -294,7 +318,7 @@ function joinAccount(j, key) {
   const same = reg.profiles.find((p) => p.api?.join && p.api.baseURL === j.url), own = same && path.join(same.configDir, 'settings.json');
   if (same && fs.existsSync(own)) {
     const s = JSON.parse(fs.readFileSync(own, 'utf8'));
-    fs.writeFileSync(own, JSON.stringify({ ...s, env: { ...s.env, ANTHROPIC_AUTH_TOKEN: key } }, null, 2) + '\n');
+    writeWhole(own, JSON.stringify({ ...s, env: { ...s.env, ANTHROPIC_AUTH_TOKEN: key } }, null, 2) + '\n');
     update((r) => { r.profiles.find((p) => p.id === same.id).api.join = j.id; });
     log('profile_rejoined', { profile_id: same.id, base_url: j.url });
     return same;
@@ -304,12 +328,10 @@ function joinAccount(j, key) {
   const env = { ...mine.env, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1' };
   delete env.ANTHROPIC_API_KEY; delete mine.apiKeyHelper; // the gateway's key only
   const { id, dir } = accountDir(() => ({ ...mine, env: { ...env, ANTHROPIC_BASE_URL: j.url } })); // pointJoins moves it to delta.js
-  // no sign-in to walk through: Claude's first-run screens (its theme, its notes) skipped, the page has no cards for them.
-  // A Claude Code just installed, never run, stopped there.
-  const cj = path.join(dir, '.claude.json');
-  fs.writeFileSync(cj, JSON.stringify({ ...JSON.parse(fs.readFileSync(cj, 'utf8')), hasCompletedOnboarding: true }, null, 2) + '\n');
   const p = { id, label: new URL(j.url).host, subscriptionType: 'API', configDir: dir, createdAt: now(), lastUsedAt: null, api: { baseURL: j.url, join: j.id } };
-  update((reg) => { reg.profiles.push(p); });
+  try { update((reg) => { reg.profiles.push(p); }); } catch (e) {
+    discardNewAccount(dir); throw e;
+  }
   log('profile_joined', { profile_id: id, base_url: j.url });
   return p;
 }
@@ -369,7 +391,7 @@ function newProfile() {
   try { // the island reads the accounts again at once (its ＋ 添加账号 opened this)
     fs.mkdirSync(INBOX, { recursive: true });
     const f = path.join(INBOX, `${Date.now()}-${process.pid}`); // whole or not at all: the island reads the inbox every 300 ms
-    fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'accounts' })); fs.renameSync(`${f}.tmp`, `${f}.json`);
+    writeWhole(`${f}.json`, JSON.stringify({ kind: 'accounts' }));
   } catch {}
   console.log(`已保存账号：${label(p)}\n当前默认账号未改变。`);
   return p;
@@ -628,20 +650,25 @@ const lastReq = (s) => {
 // and then (with its title, after a tool call), so a turn that only answered still had the prompt before it there (a
 // [系统通知] the 管家 answered in a line read as yours: noted, pushed). A background task's or a teammate's message, a
 // command, isn't typed: the one before counts. A picture alone: '[Image]'. null: none in the slice.
-function lastTyped(tail, before = Infinity) {
+function latestPrompt(tail, before, humanOnly) {
   const ls = tail.split('\n');
   for (let i = ls.length - 1; i >= 0; i--) {
     const l = ls[i];
     if ((!l.includes('"type":"user"') && !l.includes('"queued_command"')) || l.includes('"type":"tool_result"')) continue;
     let j; try { j = JSON.parse(l); } catch { continue; }
-    if (j.isMeta || j.isSidechain || j.isCompactSummary || Date.parse(j.timestamp) > before) continue;
+    if (j.isMeta || j.isSidechain || j.isCompactSummary) continue;
     if (j.type !== 'user' && !(j.attachment?.type === 'queued_command' && j.attachment.origin?.kind === 'human')) continue;
     const parts = said(j), t = parts.find((p) => p.type === 'text')?.text?.trim() || (parts.some((p) => p.type === 'image') ? '[Image]' : '');
-    if (!t || /^(?:Another Claude session sent a message|<(?:task-notification|teammate-message|local-command|command-|system-reminder))/.test(t)) continue;
-    return unwrapPaste(t);
+    const text = unwrapPaste(t);
+    if (!text || /^(?:Another Claude session sent a message|<(?:task-notification|teammate-message|local-command|command-|system-reminder))/.test(text)) continue;
+    const at = Date.parse(j.timestamp);
+    if (at > before || (humanOnly && (!at || text.startsWith('[系统通知]')))) continue;
+    return { text, at };
   }
   return null;
 }
+
+const lastTyped = (tail, before = Infinity) => latestPrompt(tail, before, false)?.text ?? null;
 
 // Start times of these pids, as sessions/<pid>.json's procStart has them: Windows' FILETIME (PowerShell), a Mac's ps's
 // lstart in UTC and C's words (as Claude Code writes it there, whatever your language); null if that failed.
@@ -692,7 +719,7 @@ const stillClaude = (js) => { const starts = procStarts(js.map((j) => j.pid)); r
 // leaves out one with nothing said yet (no record), no title, or its folder gone.
 // ponytail: one the web service has just spawned writes its file within a moment; that moment isn't covered
 const runsOn = (dir) => stillClaude(sessionFiles(dir)).length > 0;
-function listSessions(reg) {
+function listSessions(reg, heads = readHeads) {
   const live = new Map(), found = new Map(), alive = [];
   // and the Macs', as the web service copies them here (acct -1: none of this PC's accounts; mac: which one's)
   const macs = macList(reg), macBy = new Map(macs.map((m) => [m.id, m]));
@@ -702,8 +729,8 @@ function listSessions(reg) {
       for (const name of ls(path.join(dir, 'projects', folder))) {
         if (!/^[0-9a-f-]{36}\.jsonl$/.test(name)) continue;
         const file = path.join(dir, 'projects', folder, name), id = name.slice(0, -6);
-        let at; try { at = fs.statSync(file).mtimeMs; } catch { continue; } // deleted (or moved to the Recycle Bin) since the folder was read
-        if ((found.get(id)?.at ?? -1) < at) found.set(id, { id, acct, file, at, ...(mac && { mac }) });
+        let st; try { st = fs.statSync(file); } catch { continue; } // deleted (or moved to the Recycle Bin) since the folder was read
+        if ((found.get(id)?.at ?? -1) < st.mtimeMs) found.set(id, { id, acct, file, at: st.mtimeMs, size: st.size, ...(mac && { mac }) });
       }
     }
   }
@@ -713,10 +740,14 @@ function listSessions(reg) {
   const macTo = Object.fromEntries(macs.map((m) => [m.id, macFolders(m)])); // a Mac project folder's folder here
   let webPids = new Set(); // the Claudes the web service runs (web-terms.json, written by it)
   try { webPids = new Set(JSON.parse(fs.readFileSync(WEB_TERMS, 'utf8'))); } catch {}
-  const tmp = os.tmpdir().toLowerCase(), out = [];
-  for (const s of found.values()) {
-    let r = readHeads.get(s.file); // a record unchanged since the last look isn't read again (the web service asks every few seconds)
-    if (r?.at !== s.at) {
+  const tmp = os.tmpdir().toLowerCase(), out = [], dirs = new Map();
+  const exists = (cwd) => {
+    if (!dirs.has(cwd)) dirs.set(cwd, fs.existsSync(cwd));
+    return dirs.get(cwd);
+  };
+  for (const { size, ...s } of found.values()) {
+    let r = heads.get(s.file); // a record unchanged since the last look isn't read again (the web service asks every few seconds)
+    if (!r || r.at !== s.at || r.size !== size) {
       // one that can't be read now (gone a moment after its stat, held open): left out of this look, never the whole list
       // thrown away (the web service's timers list them: one throw there ended the service, its conversations with it)
       let head, tail;
@@ -731,18 +762,20 @@ function listSessions(reg) {
       let named = null; // /rename's sidecar: holds the name even once its transcript line is out of the tail
       try { named = JSON.parse(fs.readFileSync(path.join(s.file.slice(0, -6), 'custom-title.json'), 'utf8')).customTitle; } catch {}
       // sdk: an API 额度 one, begun by the Agent SDK (claude -p is sdk-cli: Claude Code's own)
-      r = { at: s.at, cwd: field(head, 'cwd') ?? field(tail, 'cwd', true), prompt, req: lastReq(tail), sdk: /^sdk-(ts|py)$/.test(field(head, 'entrypoint') ?? ''),
+      r = { at: s.at, size, cwd: field(head, 'cwd') ?? field(tail, 'cwd', true), prompt, req: lastReq(tail), sdk: /^sdk-(ts|py)$/.test(field(head, 'entrypoint') ?? ''),
         title: named || field(tail, 'customTitle', true) || field(tail, 'aiTitle', true) || field(head, 'aiTitle') || prompt };
-      readHeads.set(s.file, r);
+      heads.set(s.file, r);
     }
     const { cwd, title, prompt, req, sdk } = r;
-    if (!cwd || !title || (!s.mac && (cwd.toLowerCase().startsWith(tmp) || !fs.existsSync(cwd)))) continue; // nothing to go back to (a Mac's folder is there)
+    if (!cwd || !title || (!s.mac && (cwd.toLowerCase().startsWith(tmp) || !exists(cwd)))) continue; // nothing to go back to (a Mac's folder is there)
     const pid = live.get(s.id)?.pid ?? null, st = live.get(s.id)?.status;
     // busy: answering or running a command (its session file's status), for 换账号继续's 答完再换; wait: on a question for you
     // a Mac one: shown in the folder here its project folder is for (macCwd: where it runs there)
     out.push({ ...s, cwd: (s.mac && macPcOf(cwd, macBy.get(s.mac), macTo[s.mac])) || cwd, ...(s.mac && { macCwd: cwd }), ...(sdk && { sdk }), title, prompt: prompt === title ? null : prompt, pid, req, web: !!pid && webPids.has(pid), busy: st === 'busy' || st === 'shell', wait: st === 'waiting',
       who: s.mac ? macBy.get(s.mac).label : reg.profiles[s.acct].label.split('@')[0] });
   }
+  const files = new Set([...found.values()].map((s) => s.file));
+  for (const file of heads.keys()) if (!files.has(file)) heads.delete(file);
   return out.sort((a, b) => b.at - a.at);
 }
 
@@ -910,8 +943,8 @@ const macSysOf = (s) => Object.fromEntries(['cpu', 'cpuClaude', 'mem', 'memClaud
 // a 预热 started by the web service once found ConvertTo-SecureString's module failing to load ("The member AuditToString
 // is already present"), the Mac skipped
 const dpapiRead = (file) => spawnSync('powershell.exe', ['-NoProfile', '-Command', "[void][Reflection.Assembly]::Load('System.Security, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a'); "
-  + `$h = [IO.File]::ReadAllText('${file}').Trim(); [Text.Encoding]::Unicode.GetString([Security.Cryptography.ProtectedData]::Unprotect([byte[]]($h -split '(..)' -ne '' | ForEach-Object { [Convert]::ToByte($_, 16) }), $null, 'CurrentUser'))`],
-{ encoding: 'utf8', windowsHide: true });
+  + `$h = [IO.File]::ReadAllText($env:CM_FILE).Trim(); [Text.Encoding]::Unicode.GetString([Security.Cryptography.ProtectedData]::Unprotect([byte[]]($h -split '(..)' -ne '' | ForEach-Object { [Convert]::ToByte($_, 16) }), $null, 'CurrentUser'))`],
+{ env: { ...process.env, CM_FILE: file }, encoding: 'utf8', windowsHide: true });
 const macPwFile = (m) => m.id === 'mac' ? MAC_PW : path.join(ROOT, `mac-password-${m.host}.dpapi`);
 // a Mac's password, read once it reads (null: not saved, or not read this time: tried again the next); why not
 const macPws = new Map(), macPwWhy = new Map();
@@ -1053,7 +1086,7 @@ const GPT_LIVE = path.join(ROOT, 'gpt-live');
 function gptMark(m) {
   fs.mkdirSync(GPT_LIVE, { recursive: true });
   const f = path.join(GPT_LIVE, `${m.pid}.json`);
-  fs.writeFileSync(`${f}.tmp`, JSON.stringify(m)); fs.renameSync(`${f}.tmp`, f);
+  writeWhole(f, JSON.stringify(m));
 }
 const gptUnmark = (pid) => { try { fs.unlinkSync(path.join(GPT_LIVE, `${pid}.json`)); } catch {} };
 // what the page and the 管家 type, as a Codex (0.166, Windows) takes it: it has no paste marks (they arrive as plain
@@ -1529,7 +1562,7 @@ function removeGemini(n) {
 // asked. shortcut: plugins added later show up after the next agy update or a web restart
 let agyCmds = null;
 function agySlash() {
-  const agy = agyCmd();
+  const agy = agyCmds && fs.existsSync(agyCmds.exe) ? agyCmds.exe : agyCmd();
   if (!agy || !WIN || !load().geminiOn) return Promise.resolve([]);
   let mt = 0;
   try { mt = fs.statSync(agy).mtimeMs; } catch {}
@@ -1562,7 +1595,7 @@ function agySlash() {
       ok([...got].map(([name, x]) => ({ name, desc: x.desc, hint: '', also: x.also, builtin: true })));
     }
   });
-  agyCmds = { mt, list };
+  agyCmds = { exe: agy, mt, list };
   list.then((l) => { if (!l.length) agyCmds = null; }); // (none read: tried again next time)
   return list;
 }
@@ -1699,7 +1732,7 @@ function gemAgyConvs(pids, child = gemChild) {
 // out of agy's list (not while it runs here: the web service checks)
 const GEM_TITLES = path.join(ROOT, 'gem-titles.json');
 const gemTitles = () => { try { return JSON.parse(fs.readFileSync(GEM_TITLES, 'utf8')); } catch { return {}; } };
-const gemTitlesSave = (t) => { fs.writeFileSync(`${GEM_TITLES}.tmp`, JSON.stringify(t)); fs.renameSync(`${GEM_TITLES}.tmp`, GEM_TITLES); };
+const gemTitlesSave = (t) => writeWhole(GEM_TITLES, JSON.stringify(t));
 function gemDb(sql, ...args) { // agy's list written (it waits a moment for an agy writing it too)
   const { DatabaseSync } = require('node:sqlite'), d = new DatabaseSync(path.join(GEMINI_HOME, 'antigravity-cli', 'conversation_summaries.db'));
   try { d.exec('PRAGMA busy_timeout = 3000'); return d.prepare(sql).run(...args); } finally { d.close(); }
@@ -1842,7 +1875,7 @@ async function oaiApi(p, body) {
   const r = await fetch(`https://api.openai.com/v1/${p}`, { method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
     body: body && JSON.stringify(body), signal: AbortSignal.timeout(60000) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`OpenAI：${j.error?.message ?? r.status}`);
+  if (!r.ok) throw Object.assign(new Error(`OpenAI：${j.error?.message ?? r.status}`), { status: r.status });
   return j;
 }
 // a message as OpenAI takes it: your words, then each picture and file
@@ -1858,11 +1891,13 @@ function oaiInput(text, files = []) {
 }
 // an answer's words (its sources are links in them already)
 const oaiText = (r) => (r.output ?? []).filter((o) => o.type === 'message').flatMap((o) => o.content ?? []).map((c) => c.text ?? c.refusal ?? '').join('\n\n').trim();
+const oaiDeleting = new Set();
 const oaiRead = (id) => {
+  if (oaiDeleting.has(id)) throw new Error('这个聊天正在删除');
   if (!/^oai-\d+$/.test(id ?? '')) throw new Error('没有这个对话');
   try { return JSON.parse(fs.readFileSync(path.join(OAI, `${id}.json`), 'utf8')); } catch { throw new Error('找不到这个对话'); }
 };
-const oaiSave = (c) => { fs.mkdirSync(OAI, { recursive: true }); const f = path.join(OAI, `${c.id}.json`); fs.writeFileSync(`${f}.tmp`, JSON.stringify(c)); fs.renameSync(`${f}.tmp`, f); };
+const oaiSave = (c) => { fs.mkdirSync(OAI, { recursive: true }); const f = path.join(OAI, `${c.id}.json`); writeWhole(f, JSON.stringify(c)); };
 // ponytail: every chat's file read for each look at the list (every 5 s a page is open); a small index of them if there are hundreds
 const oaiChats = () => ls(OAI).filter((f) => /^oai-\d+\.json$/.test(f)).flatMap((f) => { try { return [JSON.parse(fs.readFileSync(path.join(OAI, f), 'utf8'))]; } catch { return []; } });
 // as the CLI lists them (the 管家's sessions --all, chat look / say): no folder, no account, none running (busy: an
@@ -1924,9 +1959,12 @@ async function oaiPoll() {
   if (oaiPolling) return;
   oaiPolling = true;
   try {
-    for (const { id, pending } of oaiChats().filter((c) => c.pending)) {
+    for (const { id, pending } of oaiChats().filter((c) => c.pending && !oaiDeleting.has(c.id))) {
       let r;
-      try { r = await oaiApi(`responses/${pending}`); } catch { continue; } // the network: asked again next time
+      try { r = await oaiApi(`responses/${pending}`); } catch (e) {
+        if (e.status !== 404) continue;
+        r = { status: 'failed', error: { message: e.message } };
+      }
       if (['queued', 'in_progress'].includes(r.status)) continue;
       let c;
       try { c = oaiRead(id); } catch { continue; } // deleted meanwhile
@@ -1948,6 +1986,19 @@ async function oaiStop(id) {
   const now = oaiRead(id);
   if (now.pending === c.pending) { now.msgs.push({ role: 'note', text: '已停止，这一条不算进对话', at: Date.now() }); now.pending = null; oaiSave(now); }
   return {};
+}
+
+async function oaiDelete(id, bin = recycleA) {
+  const c = oaiRead(id);
+  if (oaiSending.has(id)) throw new Error('消息正在发送，稍后再删');
+  oaiDeleting.add(id);
+  try {
+    if (c.pending) await oaiApi(`responses/${c.pending}/cancel`, {}).catch(() => {});
+    const files = [path.join(OAI, id), path.join(OAI, id + '.json')].filter((f) => fs.existsSync(f));
+    const r = await bin(files);
+    if (r.status !== 0 || files.some((f) => fs.existsSync(f))) throw new Error(`删除失败：${(r.stderr || '').trim().split('\n')[0]}`);
+    return { said: `已删除「${c.title}」，可以在${TRASH}里找回。` };
+  } finally { oaiDeleting.delete(id); }
 }
 
 // The key the island presses to split a conversation's tab into its own window before tiling: Windows
@@ -1985,6 +2036,7 @@ function rename(id, name) {
   name = (name ?? '').trim();
   if (!s && name && listGemini().some((x) => x.id === id)) return console.log(gemRename(id, name, gemAgyConvs(agyPids()).has(id)).said); // a Gemini one's (agy's own list too when it isn't running)
   if (!s || !name) { console.log('用法：claude-multi rename <对话 id> <新名字>'); process.exit(1); }
+  if (s.mac) { console.log('Mac 上的对话暂时不能在这里改名'); process.exit(1); }
   if (s.pid) { console.log(`这个对话正在运行，请在它的窗口里输入：/rename ${name}`); process.exit(1); }
   fs.appendFileSync(s.file, JSON.stringify({ type: 'custom-title', customTitle: name, sessionId: id }) + '\n');
   fs.mkdirSync(s.file.slice(0, -6), { recursive: true });
@@ -2776,15 +2828,12 @@ function dropNote(n, pid = null) {
   if (!islandOff()) {
     fs.mkdirSync(INBOX, { recursive: true });
     const f = path.join(INBOX, `${Date.now()}-${process.pid}-${++noteSeq}`); // (two in one millisecond: both kept)
-    fs.writeFileSync(`${f}.tmp`, JSON.stringify({ ...n, pid }));
-    fs.renameSync(`${f}.tmp`, `${f}.json`);
+    writeWhole(`${f}.json`, JSON.stringify({ ...n, pid }));
   }
   fs.appendFileSync(NOTES, JSON.stringify({ at: Date.now(), ...n }) + '\n');
   try { // trimmed whole or not at all: a page reading it then never gets half
     if (fs.statSync(NOTES).size > 262144) {
-      const tmp = `${NOTES}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, readNotes(200).reverse().map((x) => JSON.stringify(x)).join('\n') + '\n');
-      try { fs.renameSync(tmp, NOTES); } catch { fs.rmSync(tmp, { force: true }); }
+      writeWhole(NOTES, readNotes(200).reverse().map((x) => JSON.stringify(x)).join('\n') + '\n');
     }
   } catch {}
   island();
@@ -2796,8 +2845,7 @@ function chats(page) {
   if (islandOff()) { console.log('灵动岛在网页的设置里关了，先在那里打开它'); return; }
   fs.mkdirSync(INBOX, { recursive: true });
   const f = path.join(INBOX, `${Date.now()}-${process.pid}`);
-  fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'chats', arrange: page === 'arrange', tokens: page === 'tokens' }));
-  fs.renameSync(`${f}.tmp`, `${f}.json`);
+  writeWhole(`${f}.json`, JSON.stringify({ kind: 'chats', arrange: page === 'arrange', tokens: page === 'tokens' }));
   island();
 }
 
@@ -2837,7 +2885,7 @@ async function usageState(reg = load(), { macFresh = false } = {}) {
   // counted only with an account at its limit (the island's notice is all that needs it): listing costs a PowerShell
   const running = res.some((r) => WINDOWS.some(([k]) => Math.round(r.u?.[k]?.utilization) >= 100)) ? listSessions(reg).filter((s) => s.pid) : [];
   // whole or not at all: the island and the web service both write it, and a half-written one read would lose them all
-  try { fs.writeFileSync(`${USAGE_CACHE}.${process.pid}`, JSON.stringify(cache)); fs.renameSync(`${USAGE_CACHE}.${process.pid}`, USAGE_CACHE); } catch {}
+  try { writeWhole(USAGE_CACHE, JSON.stringify(cache)); } catch {}
   const ok = res.map((r, i) => ({ ...r, i })).filter((r) => r.u);
   const open = ok.filter((r) => runway(r.u) > 0);
   const rec = open.length ? pickOpen(open) : [...ok].sort((a, b) => readyAt(a.u) - readyAt(b.u))[0];
@@ -3152,7 +3200,7 @@ function blogSent(id) {
   if (at !== blogMemo.at) {
     const list = [];
     for (const l of fs.readFileSync(BLOG, 'utf8').split('\n')) try {
-      const j = JSON.parse(l), m = /^(?:给「[^」]*」发了消息|新开了对话（[^）]*）)：([\s\S]+)$/.exec(j.text ?? '');
+      const j = JSON.parse(l), m = /^(?:给「[\s\S]*?」发了消息|新开了对话（[\s\S]*?）)：([\s\S]+)$/.exec(j.text ?? '');
       if (m && j.id) list.push({ id: j.id, at: j.at, text: m[1].replace(/…$/, '').trim() });
     } catch {}
     blogMemo = { at, list };
@@ -3184,7 +3232,7 @@ const WEB_KEY = path.join(ROOT, 'web-key');
 function webKey(fresh = false) { // made on first use; in the user's own folder, as each account's login is
   if (!fresh) try { const k = fs.readFileSync(WEB_KEY, 'utf8').trim(); if (k.length >= 32) return k; } catch {}
   const k = require('crypto').randomBytes(32).toString('base64url');
-  fs.writeFileSync(`${WEB_KEY}.tmp`, k); fs.renameSync(`${WEB_KEY}.tmp`, WEB_KEY); // whole: a reader meanwhile never sees it empty (and makes its own)
+  writeWhole(WEB_KEY, k); // whole: a reader meanwhile never sees it empty (and makes its own)
   return k;
 }
 // true when given (from the link or the cookie) is the key; in constant time
@@ -3224,24 +3272,15 @@ function markRead(id) {
 // When you last said something in a conversation (a prompt, a slash command), not counting what Claude
 // hands itself as a prompt (a background task's or a teammate's message). Cached until the file changes.
 const saidCache = new Map();
-function lastSaid(file) {
+function lastSaid(file, since) {
   try {
-    const mt = fs.statSync(file).mtimeMs, c = saidCache.get(file);
-    if (c?.mt === mt) return c.at;
-    const fd = fs.openSync(file, 'r'), size = fs.fstatSync(fd).size;
-    const lines = slice(fd, Math.max(0, size - 4194304), 4194304).split('\n');
-    fs.closeSync(fd);
-    let at = 0;
-    for (let i = lines.length - 1; i >= 0 && !at; i--) {
-      if (!lines[i].includes('"type":"user"')) continue;
-      try {
-        const j = JSON.parse(lines[i]), m = j.message?.content;
-        if (j.type !== 'user' || j.isMeta || j.isCompactSummary) continue;
-        const t = typeof m === 'string' ? m : Array.isArray(m) ? m.find((x) => x.type === 'text')?.text : null;
-        if (t && !/^<(task-notification|teammate-message)/.test(t.trimStart())) at = Date.parse(j.timestamp) || 0;
-      } catch {}
-    }
-    saidCache.set(file, { mt, at });
+    const st = fs.statSync(file), mt = st.mtimeMs, c = saidCache.get(file);
+    if (c?.mt === mt || (c?.at > since && c.born === st.birthtimeMs && c.size <= st.size)) return c.at;
+    const fd = fs.openSync(file, 'r');
+    let tail;
+    try { tail = slice(fd, Math.max(0, fs.fstatSync(fd).size - 4194304), 4194304); } finally { fs.closeSync(fd); }
+    const at = latestPrompt(tail, Infinity, true)?.at ?? 0;
+    saidCache.set(file, { mt, at, born: st.birthtimeMs, size: st.size });
     return at;
   } catch { return 0; }
 }
@@ -3254,7 +3293,7 @@ function unreadNotes(list, notes = readNotes(60), marks = readMarks()) {
     const k = n.id ?? n.at;
     if (seen.has(k)) return false;
     seen.add(k);
-    return n.at > all && n.at > (marks.get(n.id) ?? 0) && !(files.has(n.id) && lastSaid(files.get(n.id)) > n.at) && !((said.get(n.id) ?? 0) > n.at);
+    return n.at > all && n.at > (marks.get(n.id) ?? 0) && !(files.has(n.id) && lastSaid(files.get(n.id), n.at) > n.at) && !((said.get(n.id) ?? 0) > n.at);
   }).slice(0, 10);
 }
 
@@ -3605,8 +3644,8 @@ function peekTurn() {
     const j = batch.find((x) => x.key === k), tmp = jobs.find((x) => x.k === k)?.out;
     if (!j || j.settled) return;
     j.settled = true;
-    if (done && fs.existsSync(tmp)) { fs.renameSync(tmp, j.pdf); return j.ok(j.pdf); }
-    fs.rmSync(tmp, { force: true });
+    if (done) try { fs.renameSync(tmp, j.pdf); return j.ok(j.pdf); } catch (e) { why = e.message; }
+    try { fs.rmSync(tmp, { force: true }); } catch {}
     j.no(new Error(`${OFFICE_APP[kind]} 没能把它转成 PDF：${why || '没有做完'}`));
   };
   const p = require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; ${ps[kind]}`],
@@ -3708,7 +3747,7 @@ function lead(items, lines, more = false) { // more: the record goes back furthe
 // for) and the subscriptions. What's pushed is encrypted for the phone alone (aes128gcm, RFC 8291).
 const PUSH = path.join(ROOT, 'push.json');
 const pushStore = () => { try { return JSON.parse(fs.readFileSync(PUSH, 'utf8')); } catch { return null; } };
-const savePush = (s) => { fs.writeFileSync(`${PUSH}.tmp`, JSON.stringify(s)); fs.renameSync(`${PUSH}.tmp`, PUSH); }; // whole: one cut short would read as none, and a new key drop every phone's subscription
+const savePush = (s) => writeWhole(PUSH, JSON.stringify(s)); // whole: one cut short would read as none, and a new key drop every phone's subscription
 function pushKeys() { // made on first use
   const s = pushStore();
   if (s) return s;
@@ -3872,7 +3911,44 @@ const shellParents = () => new Promise((ok) => require('child_process').execFile
   : ['ps', ['-A', '-o', 'ppid=,comm=']]), { windowsHide: true, timeout: 30000, maxBuffer: 16 << 20 }, (e, out) => ok(e ? null : shellsIn(out))));
 const replayPty = (t) => [...(t.modes ?? [])].map(([n, v]) => `\x1b[?${n}${v}`).join('') + (t.modeTail ?? '') + t.buf;
 
+// After a restart the old terminal map is gone. A surviving Claude already has its resume/session ID in
+// its launch arguments before it writes sessions/<pid>.json. Keep that ID busy until it registers or exits.
+const deletingArg = /(?:[\\/]|")claude-multi\.js"?\s+"?delete"?\s+"?([0-9a-f-]{36})"?(?=\s|$)/i;
+function startingOwners(output) {
+  const owners = new Map();
+  for (const line of output.split(/\r?\n/)) {
+    const pid = /^\s*(\d+)\s+/.exec(line)?.[1], id = deletingArg.exec(line)?.[1] ?? /(?:^|\s)"?--(?:resume|session-id)"?\s+"?([0-9a-f-]{36})"?(?=\s|$)/i.exec(line)?.[1];
+    if (pid && id) {
+      if (!owners.has(id)) owners.set(id, []);
+      owners.get(id).push(Number(pid));
+    }
+  }
+  return owners;
+}
+async function priorOwners() {
+  const r = WIN
+    ? await execA('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      'Get-CimInstance Win32_Process -Filter "Name = \'claude.exe\' OR Name = \'node.exe\'" | Where-Object { $_.Name -eq \'claude.exe\' -or $_.CommandLine -match \'claude-multi\\.js"?\\s+"?delete\' } | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }'])
+    : await execA('ps', ['-ww', '-U', String(process.getuid()), '-o', 'pid=,ucomm=,args=']);
+  // A delete helper may also outlive the service, between its checks and moving the files.
+  const output = WIN ? r.stdout : r.stdout.split('\n').filter((l) =>
+    /^\s*\d+\s+(?:claude\s|\S+\s+(?:\S*\/)?claude\s|\S+\s+(?:\S*\/)?node\s.*\/@anthropic-ai\/claude-code\/cli\.js\s)/.test(l) || deletingArg.test(l)).join('\n');
+  if (r.status !== 0) log('web_owner_scan_fail', { status: r.status });
+  return startingOwners(output);
+}
+
+function stillStarting(previous, id, sessions) {
+  const pids = previous.get(id);
+  if (!pids) return false;
+  const listed = new Set(sessions().map((s) => s.pid));
+  const pending = pids.filter((pid) => alive(pid) && !listed.has(pid));
+  if (pending.length) { previous.set(id, pending); return true; }
+  previous.delete(id);
+  return false;
+}
+
 async function web() {
+  const previous = await priorOwners();
   procStarts.beside = true; // its process checks never hold up the terminals
   // A private extension, when profiles.json names one (ext: a CommonJS file's absolute path, trusted as this code is):
   // its routes join the page's behind the same key, its page part (/ext.js) runs before the page's script. One that
@@ -3925,7 +4001,7 @@ async function web() {
   const DOZED = path.join(ROOT, 'dozed.json');
   const dozed = (() => { try { return JSON.parse(fs.readFileSync(DOZED, 'utf8')); } catch { return {}; } })();
   const dozing = () => { const now = Date.now(); for (const [id, at] of Object.entries(dozed)) if (now - at >= DOZE_KEEP) delete dozed[id]; return dozed; };
-  const saveDozed = () => { try { fs.writeFileSync(`${DOZED}.tmp`, JSON.stringify(dozing())); fs.renameSync(`${DOZED}.tmp`, DOZED); } catch {} };
+  const saveDozed = () => { try { writeWhole(DOZED, JSON.stringify(dozing())); } catch {} };
   const unDoze = (id) => { if (id && dozed[id]) { delete dozed[id]; saveDozed(); } };
   const slashCache = new Map(); // `${configDir}|${folder}` -> { at, list }: / in a conversation's box
   // the quota as the page last got it, kept on disk: after a restart the page shows it at once (read again behind it)
@@ -3936,8 +4012,15 @@ async function web() {
   const SDK = require('./sdk'), sdk = SDK.createSdk({ lib: SDK.loader(ROOT), exe: claudeExe, envOf: childEnv, done: () => { sessCache = null; } });
 
   const send = (t, ev, data) => { for (const res of t.clients) res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); };
+  const heads = new Map(), headCache = path.join(ROOT, 'session-heads-v1.json');
+  try { for (const [f, head] of JSON.parse(fs.readFileSync(headCache, 'utf8'))) if (head && (head.cwd == null || typeof head.cwd === 'string')) heads.set(f, head); } catch {}
+  let savedHeadsAt = 0;
   const sessions = () => {
-    if (!sessCache || Date.now() - sessAt > 3000) { sessCache = listSessions(load()); sessAt = Date.now(); }
+    if (!sessCache || Date.now() - sessAt > 3000) { sessCache = listSessions(load(), heads); sessAt = Date.now(); }
+    if (sessAt - savedHeadsAt > 180000) {
+      savedHeadsAt = sessAt;
+      try { writeWhole(headCache, JSON.stringify([...heads])); } catch {}
+    }
     return sessCache;
   };
   // The GPT conversations, kept apart from the Claude ones (sessions(): what's written for those reads their records),
@@ -4028,8 +4111,11 @@ async function web() {
     const key = `p${Date.now().toString(36)}${(++ptys).toString(36)}`;
     const proc = pty.spawn(agy, resume ? ['--conversation', resume] : [], { name: 'xterm-256color', cols, rows, cwd, env: { ...process.env, TERM: 'xterm-256color' } });
     const t = { kind: 'pty', key, get pid() { return proc.pid; }, proc, clients: new Set(), buf: '', w: cols, h: rows, cwd, gem: { id: resume ?? null, since: Date.now(), enters: [] } };
-    proc.onData((d) => { keepOut(t, d); send(t, 'data', d); });
-    proc.onExit(() => { t.gone = true; gemCache = null; send(t, 'gone', {}); saveRun(); setTimeout(() => terms.delete(key), 60000); }); // (ended: not started again after a restart)
+    proc.onData((d) => {
+      if (!t.listed && proc.pid) { t.listed = true; saveTerms(); }
+      keepOut(t, d); send(t, 'data', d);
+    });
+    proc.onExit(() => { t.gone = true; saveTerms(); gemCache = null; send(t, 'gone', {}); saveRun(); setTimeout(() => terms.delete(key), 60000); }); // (ended: not started again after a restart)
     terms.set(key, t); gemCache = null; unDoze(resume);
     if (!resume) gemIdle(t); // (a page that never connects: its tab closed while this started)
     log('web_session', { profile_id: g.id, cwd, args: resume ? `--conversation ${resume}` : '' });
@@ -4293,8 +4379,7 @@ async function web() {
     } else if (o.live) {
       const was = new Map(macLive(m).map((j) => [j.sessionId, j.status])), going = (st) => st === 'busy' || st === 'shell';
       fs.mkdirSync(home, { recursive: true });
-      fs.writeFileSync(path.join(home, 'live.json.tmp'), JSON.stringify(o.live));
-      fs.renameSync(path.join(home, 'live.json.tmp'), path.join(home, 'live.json'));
+      writeWhole(path.join(home, 'live.json'), JSON.stringify(o.live));
       sessCache = null;
       for (const j of o.live) {
         if (j.kind && j.kind !== 'interactive') continue; // a claude -p's is for whoever ran it
@@ -4367,7 +4452,7 @@ async function web() {
   // for the island and `claude-multi attach`: which running conversations are ours
   function saveTerms() {
     const up = [...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid); // a GPT one's too: the island opens it here
-    try { fs.writeFileSync(WEB_TERMS, JSON.stringify(up.map((t) => t.pid))); } catch {}
+    try { writeWhole(WEB_TERMS, JSON.stringify(up.map((t) => t.pid))); } catch {}
   }
   // and which conversations run here, by id (one just started has it once listed: looked at every 10 s too). A service
   // killed never writes again, so after a restart this says what ran, and each is continued.
@@ -4379,7 +4464,7 @@ async function web() {
       const pids = new Set([...terms.values()].filter((t) => t.kind === 'pty' && !t.gone && t.pid).map((t) => t.pid));
       const now = JSON.stringify([...sessions().filter((s) => s.pid && pids.has(s.pid)).map((s) => s.id), // (a Gemini one's: gem:<id>)
         ...gemLive().filter((t) => t.gem.id).map((t) => `gem:${t.gem.id}`)]);
-      if (now !== ranHere) { fs.writeFileSync(WEB_RUN, now); ranHere = now; }
+      if (now !== ranHere) { writeWhole(WEB_RUN, now); ranHere = now; }
     } catch {}
   }
 
@@ -4521,8 +4606,8 @@ async function web() {
   };
   // its tickets, as the 操作台 shows them: the open ones, what waits on you first, then the last 5 ended. Only this service
   // writes them (written whole, then swapped in: a crash mid-write leaves the old file)
-  const editTickets = (fn) => { const all = readTickets(), r = fn(all); fs.writeFileSync(`${TICKETS}.tmp`, JSON.stringify(all, null, 1)); fs.renameSync(`${TICKETS}.tmp`, TICKETS); return r; };
-  const editProjects = (fn) => { const all = readProjects(), r = fn(all); fs.writeFileSync(`${PROJECTS}.tmp`, JSON.stringify(all, null, 1)); fs.renameSync(`${PROJECTS}.tmp`, PROJECTS); return r; };
+  const editTickets = (fn) => { const all = readTickets(), r = fn(all); writeWhole(TICKETS, JSON.stringify(all, null, 1)); return r; };
+  const editProjects = (fn) => { const all = readProjects(), r = fn(all); writeWhole(PROJECTS, JSON.stringify(all, null, 1)); return r; };
   const ticketsNow = (list = [...sessions(), ...gptSessions(), ...gemSessions()]) => { // a ticket's conversation: Claude's, GPT's or Gemini's
     const all = readTickets().map((t) => { const s = list.find((x) => x.id === t.conv); return { ...t, ev: undefined, stage: stageOf(t, s), convTitle: s?.title ?? null }; });
     const open = all.filter((t) => !t.end).sort((a, b) => STAGE_ORDER.indexOf(a.stage[1]) - STAGE_ORDER.indexOf(b.stage[1]) || a.id - b.id);
@@ -4767,8 +4852,7 @@ async function web() {
       if (!islandOff()) { // (off: nothing would ever take it out)
         fs.mkdirSync(INBOX, { recursive: true });
         const f = path.join(INBOX, `${Date.now()}-read`);
-        fs.writeFileSync(`${f}.tmp`, JSON.stringify({ kind: 'read', id }));
-        fs.renameSync(`${f}.tmp`, `${f}.json`);
+        writeWhole(`${f}.json`, JSON.stringify({ kind: 'read', id }));
       }
       return {};
     },
@@ -4819,11 +4903,7 @@ async function web() {
         } finally { free(); gemCache = null; }
       }
       if (!b.oai) return b.gpt ? archiveGpt(String(b.id ?? '')) : command('delete', String(b.id ?? ''));
-      const c = oaiRead(String(b.id ?? '')); // a GPT 聊天 one: an answer on its way stopped (not paid for), then its files to the Recycle Bin
-      if (c.pending) await oaiApi(`responses/${c.pending}/cancel`, {}).catch(() => {});
-      const r = recycle([path.join(OAI, `${c.id}.json`), path.join(OAI, c.id)].filter((p) => fs.existsSync(p)));
-      if (r.status !== 0) throw new Error(`删除失败：${(r.stderr || '').trim().split('\n')[0]}`);
-      return { said: `已删除「${c.title}」，可以在回收站里找回。` };
+      return oaiDelete(String(b.id ?? ''));
     },
     // a GPT 聊天 one: its messages and the mode and effort it was last sent with (the page asks every 2 s while it's
     // shown); one sent; the answer on its way stopped
@@ -5181,6 +5261,8 @@ async function web() {
         if (!/^application\/json/.test(req.headers['content-type'] ?? '')) return out(415, { err: '只收 JSON' });
         body = await jsonBody(req);
         if (body === undefined) return out(413, { err: '太大' });
+        if (body?.id && ['/api/open', '/api/sdk/send', '/api/delete', '/api/rename', '/api/switch'].includes(url.pathname)
+            && stillStarting(previous, body.id, sessions)) throw new Error('重启前的对话操作还没结束，稍后再试');
       }
       out(200, await fn(url.searchParams, body));
     } catch (e) { out(500, { err: e.message }); }
@@ -5238,11 +5320,12 @@ async function web() {
   // on: the 管家 is, for those it watches). The 管家 also (switched on) when it has tickets open; then told to look at them all again,
   // and to set again the reminders that ended. (A Claude ended with its terminal takes its session file.)
   async function wakeUp() {
+    sessCache = null;
     const all = sessions(), reg = load(), me = all.find((x) => sameDir(x.cwd, BUTLER));
     for (const id of ranBefore) {
       // a Mac's still running in its tmux there is joined again (startMac finds it)
       const s = all.find((x) => x.id === id), p = s && s !== me && (s.mac || (!s.pid && reg.profiles[s.acct]));
-      if (p) try { if (s.mac) startMac(s.mac, { resume: s.id, cwd: s.macCwd }); else startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
+      if (p && !stillStarting(previous, id, sessions) && !(s.pid && where(s)) && !resuming(id) && !sdk.busy(id) && !doing.has(id)) try { if (s.mac) startMac(s.mac, { resume: s.id, cwd: s.macCwd }); else startPty(p, s.cwd, ['--resume', s.id]); log('web_resumed', { session_id: s.id }); } catch (e) { log('web_resume_fail', { session_id: s.id, err: e.message }); }
     }
     // a Gemini one (gem:<id>): on the account on (its record is every account's: nothing to switch)
     const on = geminiAccounts(reg).findIndex((g) => g.id === reg.geminiOn) + 1, gl = ranBefore.some((x) => String(x).startsWith('gem:')) ? listGemini(reg) : [];
@@ -5252,7 +5335,9 @@ async function web() {
       if (s && on && !gemPc.has(s.id)) try { await startGem(on, s.cwd, s.id); log('web_resumed', { session_id: s.id, gem: true }); } catch (e) { log('web_resume_fail', { session_id: s.id, gem: true, err: e.message }); }
     }
     const open = readTickets().some((x) => !x.end), p = butlerOn() && me && !me.pid && (ranBefore.includes(me.id) || open) && reg.profiles[me.acct];
-    if (!p) return;
+    if (!p || stillStarting(previous, me.id, sessions) || resuming(me.id) || sdk.busy(me.id) || doing.has(me.id)) return;
+    sessCache = null;
+    if (sessions().some((s) => s.id === me.id && s.pid)) return;
     const t = startPty(p, me.cwd, ['--resume', me.id]);
     if (!open && !lost.length) return log('butler_woken', { session_id: me.id }); // nothing it was watching: back, waiting for you
     const hm = (ms) => new Date(ms).toTimeString().slice(0, 5);
@@ -5321,7 +5406,7 @@ function tokenRoots(reg = load()) {
 // priced by its own day)
 const PRICES = { 'claude-fable-5-2': [8, 40, 0.2], 'claude-fable-5-1': [10, 50, 0.25], 'claude-fable-5': [10, 50, 1], 'claude-opus-5-5': [4, 20, 0.2],
   'claude-opus-5': [5, 25, 0.5], 'claude-opus-4': [5, 25, 0.5], 'claude-sonnet-5': [2, 10, 0.2], 'claude-sonnet-4': [3, 15, 0.3],
-  'claude-haiku-4': [1, 5, 0.1], '<synthetic>': [0, 0, 0],
+  'claude-haiku-5-5': [0.1, 0.5, 0.01], 'claude-haiku-4': [1, 5, 0.1], '<synthetic>': [0, 0, 0],
   'gemini-4-neon': [3, 15, 0.15], 'gemini-4-hydrogen': [1.5, 7.5, 0.075], 'gemini-4-argon': [2, 10, 0.1, '2026-12-01', 4, 20, 0.2],
   'gemini-4-carbon': [2, 10, 0.1, '2026-12-01', 4, 20, 0.2], 'gemini-3.8-flash': [0.75, 3.75, 0.075, '2027-01-01', 1.5, 7.5, 0.15],
   // GPT's (Codex's): OpenAI's Standard tier, developers.openai.com/api/docs/pricing as of 2026-11-21 (output includes
@@ -5329,10 +5414,15 @@ const PRICES = { 'claude-fable-5-2': [8, 40, 0.2], 'claude-fable-5-1': [10, 50, 
   // Codex's window is 258K): a long-context row once a model's window passes it
   'gpt-6.2-astra': [8, 40, 0.4], 'gpt-6-astra': [10, 50, 1], 'gpt-6.2-sol': [2, 10, 0.1], 'gpt-6.1-sol': [2, 10, 0.1],
   'gpt-6.1-terra': [1, 5, 0.05], 'gpt-6-sol': [2, 10, 0.2], 'gpt-6-luna': [0.1, 0.5, 0.01] };
+function advisorRows(x, iterations = []) {
+  return iterations.filter((t) => t.type !== 'message' && t.model).map((t, k) => [`${x[0]}:${k}`, x[1], t.input_tokens ?? 0, t.output_tokens ?? 0,
+    t.cache_creation?.ephemeral_5m_input_tokens ?? 0, t.cache_creation?.ephemeral_1h_input_tokens ?? 0, t.cache_read_input_tokens ?? 0, t.model, 0, x[9]]);
+}
 function replyCost([, day, i, o, w5, w1, r, model, fast]) {
   const name = (model ?? '').replace(/^[\w.-]+\//, ''), k = Object.keys(PRICES).filter((p) => name.startsWith(p)).sort((a, b) => b.length - a.length)[0];
   const p = PRICES[k ?? 'claude-opus-5-5'], [pi, po, pr] = p[3] && String(day) >= p[3] ? p.slice(4) : p;
-  return ((i + w5 * 1.25 + w1 * 2) * pi + o * po + r * pr) / 1e6 * (fast ? 2 : 1);
+  const tier = k === 'claude-haiku-5-5' && i + w5 + w1 + r > 100000 ? 5 : 1;
+  return ((i + w5 * 1.25 + w1 * 2) * pi + o * po + r * pr) / 1e6 * (fast ? 2 : 1) * tier;
 }
 // The page's usage (as GET /api/tokens gives it) counted in a child node: reading the records takes ~0.3 s, and in the web
 // service the whole service, every terminal with it, stood still meanwhile.
@@ -5422,8 +5512,7 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
               w - w1, w1, num(u, 'cache_read_input_tokens'), l.match(/"model":"([^"]+)"/)?.[1] ?? '', +/"speed":"fast"/.test(u), Date.parse(ts)];
             // the advisor's calls (Fable, at its price) ride in the reply's usage.iterations, apart from its own tokens
             const its = u.includes('"advisor_message"') ? (() => { try { return JSON.parse(l).message.usage.iterations ?? []; } catch { return []; } })() : [];
-            const xs = [x, ...its.filter((t) => t.type !== 'message' && t.model).map((t, k) => [`${x[0]}:${k}`, x[1], t.input_tokens ?? 0, t.output_tokens ?? 0,
-              t.cache_creation?.ephemeral_5m_input_tokens ?? 0, t.cache_creation?.ephemeral_1h_input_tokens ?? 0, t.cache_read_input_tokens ?? 0, t.model, 0, x[9]])];
+            const xs = [x, ...advisorRows(x, its)];
             // kept as fresh strings: a match is a slice holding its whole 32 MB piece alive (V8), and a first read of
             // every record (no cache yet, or a new version) ran out of memory with them
             for (const y of xs.map((z) => JSON.parse(JSON.stringify(z)))) {
@@ -5479,17 +5568,15 @@ function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-ca
   for (const [f, c] of Object.entries(cache.files)) {
     if (c.gem) { if (!next[f]) { next[f] = c; if (gems.length) gemCount(c); } continue; }
     const ri = roots.findIndex((r) => f.startsWith(r.dir + path.sep) || (r.arch && f.startsWith(r.arch + path.sep)));
-    if (next[f] || ri < 0 || fs.existsSync(f)) continue;
-    next[f] = c;
-    count(c, ri, sidOf(ri, f));
+    if (next[f]) continue;
+    next[f] = c; // a removed root can return, and this may be its only usage history
+    if (ri >= 0) count(c, ri, sidOf(ri, f));
   }
   // whole or not at all: this cache is the only record left of deleted transcripts, so a cut-off write must
   // never replace it (two runs at once: the later rename wins, each file whole)
   // nothing new since the last run: not written again (13 MB each time, for nothing)
   if (dirty || Object.keys(next).length !== Object.keys(cache.files).length) {
-    const tmp = `${cacheFile}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ v: 4, files: next }));
-    try { fs.renameSync(tmp, cacheFile); } catch { fs.rmSync(tmp, { force: true }); } // held open by another run: it saves
+    try { writeWhole(cacheFile, JSON.stringify({ v: 4, files: next })); } catch (e) { if (!['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) throw e; } // held open by another run: it saves
   }
   // per day, and inside each day per account (by[n]); usd is the API price of the same tokens
   const zero = () => ({ i: 0, o: 0, cw: 0, cr: 0, usd: 0, n: 0 });
@@ -5530,9 +5617,11 @@ function butlerCost(roots = tokenRoots(), logFile = LOG, now = Date.now()) {
           kind = w.startsWith('[系统通知]') ? 'notice' : w.startsWith('<task-notification>') ? 'bg' : 'you';
         } else if (j.type === 'assistant' && j.message?.usage) {
           const u = j.message.usage, w = u.cache_creation_input_tokens ?? 0, w1 = Math.min(w, u.cache_creation?.ephemeral_1h_input_tokens ?? 0), at = Date.parse(j.timestamp);
-          const usd = replyCost([0, 0, u.input_tokens ?? 0, u.output_tokens ?? 0, w - w1, w1, u.cache_read_input_tokens ?? 0, j.message.model, u.speed === 'fast']);
-          const k = `${j.message.id}:${j.requestId ?? ''}`;
-          if (!(seen.get(k)?.[0] >= usd)) seen.set(k, [usd, seen.get(k)?.[1] ?? kind, day(at), j.message.model ?? '']);
+          const x = [`${j.message.id}:${j.requestId ?? ''}`, day(at), u.input_tokens ?? 0, u.output_tokens ?? 0, w - w1, w1, u.cache_read_input_tokens ?? 0, j.message.model, u.speed === 'fast'];
+          for (const row of [x, ...advisorRows(x, u.iterations)]) {
+            const usd = replyCost(row), prev = seen.get(row[0]);
+            if (!prev || usd > prev[0]) seen.set(row[0], [usd, prev?.[1] ?? kind, row[1], row[7] ?? '']);
+          }
         }
       }
     }
@@ -5579,7 +5668,7 @@ function saveLine(input, dir = LINES) {
     fs.mkdirSync(dir, { recursive: true });
     for (const x of fs.readdirSync(dir)) try { if (Date.now() - fs.statSync(path.join(dir, x)).mtimeMs > 30 * 864e5) fs.unlinkSync(path.join(dir, x)); } catch {}
   }
-  fs.writeFileSync(`${f}.tmp`, line); fs.renameSync(`${f}.tmp`, f); // whole, for the service reading it meanwhile
+  writeWhole(f, line); // whole, for the service reading it meanwhile
 }
 const readLine = (id, dir = LINES) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')); } catch { return null; } };
 // A Gemini account's quota, as agy hands it to its status line each time (per window: what's left, when it resets; its
@@ -5592,7 +5681,7 @@ function saveGemQuota(input, dir = GEM_QUOTA) {
   const q = Object.fromEntries(Object.entries(input.quota).map(([k, v]) => [k, { left: v?.remaining_fraction ?? null, reset: v?.reset_time ?? null }]));
   const line = JSON.stringify({ plan: input.plan_tier ?? null, q }), f = path.join(dir, `${g.id}.json`);
   try { if (fs.readFileSync(f, 'utf8') === line) return; } catch { fs.mkdirSync(dir, { recursive: true }); }
-  fs.writeFileSync(`${f}.tmp`, line); fs.renameSync(`${f}.tmp`, f);
+  writeWhole(f, line);
 }
 // its Gemini models' windows as the page shows a GPT account's: how much used, when it resets (one past its reset: 0)
 function gemUsage(g, dir = GEM_QUOTA) {
@@ -5753,7 +5842,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { macSysOf, dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { oaiDelete, priorOwners, stillStarting, startingOwners, writeWhole, macSysOf, dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
