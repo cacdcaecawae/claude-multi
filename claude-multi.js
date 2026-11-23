@@ -3934,7 +3934,7 @@ async function priorOwners() {
   const output = WIN ? r.stdout : r.stdout.split('\n').filter((l) =>
     /^\s*\d+\s+(?:claude\s|\S+\s+(?:\S*\/)?claude\s|\S+\s+(?:\S*\/)?node\s.*\/@anthropic-ai\/claude-code\/cli\.js\s)/.test(l) || deletingArg.test(l)).join('\n');
   if (r.status !== 0) log('web_owner_scan_fail', { status: r.status });
-  return startingOwners(output);
+  return Object.assign(startingOwners(output), { failed: r.status !== 0 });
 }
 
 function stillStarting(previous, id, sessions) {
@@ -3945,6 +3945,13 @@ function stillStarting(previous, id, sessions) {
   if (pending.length) { previous.set(id, pending); return true; }
   previous.delete(id);
   return false;
+}
+// Only the pids a new scan still finds on the same id: one ended and its pid taken by another program lets go of it.
+function keepOwners(previous, now) {
+  for (const [id, pids] of previous) {
+    const still = pids.filter((pid) => now.get(id)?.includes(pid));
+    if (still.length) previous.set(id, still); else previous.delete(id);
+  }
 }
 
 async function web() {
@@ -4023,6 +4030,17 @@ async function web() {
     }
     return sessCache;
   };
+  // The ones from before the restart, let go once they register or end, looked at again every 30 s till none is left: an
+  // entry only checked when its conversation is touched could meet its pid reused by another program and refuse it for good
+  (async () => {
+    while (previous.size) {
+      await sleep(30000);
+      for (const id of [...previous.keys()]) stillStarting(previous, id, sessions);
+      if (!previous.size) break;
+      const now = await priorOwners();
+      if (!now.failed) keepOwners(previous, now);
+    }
+  })().catch((e) => log('web_owner_scan_fail', { err: e.message }));
   // The GPT conversations, kept apart from the Claude ones (sessions(): what's written for those reads their records),
   // and which of them run here. A Codex started here is bound to its thread once Codex has one (in that account, in that
   // folder, made since it started: there before its first message); a resumed one knows its own. One running here is
@@ -5842,7 +5860,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { oaiDelete, priorOwners, stillStarting, startingOwners, writeWhole, macSysOf, dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { oaiDelete, priorOwners, stillStarting, startingOwners, keepOwners, writeWhole, macSysOf, dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);

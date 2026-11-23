@@ -94,6 +94,11 @@ console.log('statusline ok');
   assert.ok(stillStarting(old, id, () => []));
   assert.ok(!stillStarting(old, id, () => [{ pid: process.pid }]));
   assert.equal(old.size, 0);
+  // its pid alive again, but a scan finds another program on it (or none on this id): the id is let go
+  const { keepOwners } = require('./claude-multi'), more = new Map([[id, [process.pid, 12]], ['b', [13]]]);
+  keepOwners(more, new Map([[id, [12]], ['c', [13]]]));
+  assert.deepEqual([...more], [[id, [12]]]);
+  assert.ok(!stillStarting(more, id, () => []), 'a pid no longer running lets go');
 }
 // A transient sharing violation retries the replacement. Persistent failure leaves the old bytes and no staging file.
 {
