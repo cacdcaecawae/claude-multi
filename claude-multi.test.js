@@ -1485,7 +1485,15 @@ if (SESSION0) {
   corrupt = false; marker = 'C'; assert.equal(recordOf(query).file, null);
 
   // A Writable can fail after write() returns. The API must await its callback, for both GPT and Claude mirrors.
-  const terms = new Map(), inputApi = vm.runInNewContext(api('input', 'resize'), { terms, sleep: async () => {}, codexKeys: require('./claude-multi').codexKeys });
+  const { CODEX_END } = require('./claude-multi');
+  const terms = new Map(), inputApi = vm.runInNewContext(api('input', 'resize'), { terms, sleep: async () => {}, codexKeys: require('./claude-multi').codexKeys, CODEX_END });
+  // a Codex's Enter after words: End before it, ending its paste (a long one still being read took the Enter as a new line
+  // in it); an Enter alone (a pick in its list) as it is, and the next words' Enter gets one again
+  const keys = [];
+  terms.set('codex', { kind: 'pty', gpt: {}, proc: { write(d) { keys.push(d); } } });
+  for (const data of ['\x1b[200~长长的一段\r第二行\x1b[201~', '\r', '\x1b[B', '\r', 'ok', '\r']) await inputApi(null, { key: 'codex', data });
+  assert.deepEqual(keys.map((k) => k.replace(CODEX_END, '<End>').replace(/\x1b\[13;28;13;[01];16;1_/g, '<S>')),
+    ['长长的一段<S><S>第二行', '<End>\r', '\x1b[B', '\r', 'ok', '<End>\r']);
   for (const codex of [true, false]) {
     const stdin = new Writable({ write(chunk, encoding, done) { process.nextTick(() => done(Error('EPIPE'))); } });
     stdin.on('error', () => {});

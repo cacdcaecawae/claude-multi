@@ -1094,6 +1094,13 @@ const gptUnmark = (pid) => { try { fs.unlinkSync(path.join(GPT_LIVE, `${pid}.jso
 // words without the marks, each new line as Shift+Enter in win32-input-mode (the pty and console-bridge.ps1 both turn
 // that into the key). Words: anything printable besides escape sequences.
 const SHIFT_ENTER = '\x1b[13;28;13;1;16;1_\x1b[13;28;13;0;16;1_';
+// End (win32-input-mode, as SHIFT_ENTER), pressed before the Enter that sends words. Codex takes keys coming fast as a
+// paste, and an Enter it reads within 120 ms of the last of them as a new line in it; it reads them as they come, and
+// 4,000 characters were still being read 600 ms on: the Enter joined the paste and nothing went (Codex 0.171, 2026-11-23:
+// [Pasted Content 4001 chars] left in its box). A key that isn't text ends the paste at once, however long it takes to
+// read (its composer: flush_before_modified_input, clear_window_after_non_char); End moves nothing there (the cursor is
+// at the end), and no list of Codex's takes it (←/→ switch its file search)
+const CODEX_END = '\x1b[35;79;0;1;256;1_\x1b[35;79;0;0;256;1_';
 function codexKeys(raw) {
   let data = String(raw).replace(/\x1b\[20[01]~/g, '');
   const words = /[^\x00-\x1f\x7f]/.test(data.replace(/\x1b(\[[0-9;?]*[A-Za-z~_]|O.)/g, ''));
@@ -5136,12 +5143,13 @@ async function web() {
       // a Codex: in turn, an Enter alone waits until 600 ms after the last words (sooner, it's a new line in them). Answered
       // once written: one that didn't get there (its Codex gone meanwhile) says so, for the page to put the message back
       // (one failing doesn't stop the next in the queue)
+      // The Enter after words: End first (CODEX_END); one alone (a pick in its list) as it is
       const { data, words } = codexKeys(b.data);
       await (t.q = (t.q ?? Promise.resolve()).catch(() => {}).then(async () => {
         if (data === '\r') { const w = (t.wordsAt ?? 0) + 600 - Date.now(); if (w > 0) await sleep(w); }
         if (t.gone) throw new Error('这个终端已经结束');
-        await write(data);
-        if (words) t.wordsAt = Date.now();
+        await write(data === '\r' && t.wordsUnsent ? CODEX_END + data : data);
+        if (words) { t.wordsAt = Date.now(); t.wordsUnsent = true; } else if (data.includes('\r')) t.wordsUnsent = false;
       }));
       return {};
     },
@@ -5884,7 +5892,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { oaiDelete, priorOwners, stillStarting, startingOwners, keepOwners, writeWhole, macSysOf, dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { CODEX_END, oaiDelete, priorOwners, stillStarting, startingOwners, keepOwners, writeWhole, macSysOf, dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
