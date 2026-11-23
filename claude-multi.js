@@ -3308,6 +3308,12 @@ function said(j) {
   const c = j.type === 'attachment' ? j.attachment?.prompt : j.message?.content;
   return typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : [];
 }
+// A record read in the web service: its lines told apart on its bytes, each one wanted made a string, the rest (tool
+// output, screenshots: most of a record) never are. Decoded whole, 16 MB held the service 50–80 ms and took 40–56 MB a
+// look (2026-11-23, this PC's biggest records). The words a line is told by, as bytes:
+const W = Object.fromEntries(Object.entries({ user: '"type":"user"', assistant: '"type":"assistant"', queued: '"queued_command"', turn: '"turn_duration"',
+  patch: '"structuredPatch":', result: '"type":"tool_result"', anyResult: '"tool_result"', op: '"queue-operation"', thinking: '"type":"thinking"',
+  text: '"type":"text"', toolUse: '"type":"tool_use"' }).map(([k, w]) => [k, Buffer.from(w)]));
 // A first look (no from) gets its last keep items or so, from the start of a message of yours: the page draws them at
 // once (all 16 MB of a long one froze it for a second), and asks for the ones before (end: start) as you scroll up.
 function history(file, { from, end, keep = 120 } = {}) {
@@ -3320,25 +3326,27 @@ function history(file, { from, end, keep = 120 } = {}) {
   fs.closeSync(fd);
   const skip = a === 0 || from != null ? 0 : buf.indexOf(10) + 1; // a piece cut mid-line starts at its next line
   const last = buf.lastIndexOf(10); // a line still being written waits for the next read (from: end)
-  const lines = last < skip ? [] : buf.toString('utf8', skip, last + 1).split('\n');
   const out = [];
   const add = (role, text, at) => { // whole, however long: the page folds a long one, and its 复制 copies all of it
     text = String(text ?? '').trim();
     if (text) out.push({ role, text, at, pos: here });
   };
-  let next = a + skip, here = 0; // where each line starts in the file: a picture in it is fetched from there (recordImage)
+  let here = 0; // where each line starts in the file: a picture in it is fetched from there (recordImage)
   const byParent = new Map(); // a line your message hangs on → that message's items
-  for (const l of lines) {
-    const pos = next;
-    here = pos; next += Buffer.byteLength(l) + 1;
-    if (!l.includes('"type":"user"') && !l.includes('"type":"assistant"') && !l.includes('"queued_command"') && !l.includes('"turn_duration"')) continue;
-    if (l.includes('"structuredPatch":')) { // an Edit's or a Write's result: the file, its lines added and taken out
-      try { const j = JSON.parse(l), e = !j.isSidechain && editOf(j.toolUseResult); if (e) out.push({ role: 'edit', ...e, at: Date.parse(j.timestamp) || 0, pos: here }); } catch {}
+  for (let s = skip, nl; s <= last; s = nl + 1) {
+    nl = buf.indexOf(10, s);
+    const line = buf.subarray(s, nl), pos = a + s;
+    here = pos;
+    if (line.indexOf(W.user) < 0 && line.indexOf(W.assistant) < 0 && line.indexOf(W.queued) < 0 && line.indexOf(W.turn) < 0) continue;
+    if (line.indexOf(W.patch) >= 0) { // an Edit's or a Write's result: the file, its lines added and taken out
+      try { const j = JSON.parse(line.toString('utf8')), e = !j.isSidechain && editOf(j.toolUseResult); if (e) out.push({ role: 'edit', ...e, at: Date.parse(j.timestamp) || 0, pos: here }); } catch {}
       continue;
     }
-    if (l.includes('"type":"tool_result"')) continue; // tool output, often huge (screenshots): not shown, not parsed
+    if (line.indexOf(W.result) >= 0) continue; // tool output, often huge (screenshots): not shown, not parsed
+    // a reply's thinking, a line of its own (its signature ~10 KB): nothing here shows it, and it was half of what was parsed
+    if (line.indexOf(W.thinking) >= 0 && line.indexOf(W.text) < 0 && line.indexOf(W.toolUse) < 0 && line.indexOf(W.assistant) >= 0) continue;
     let j;
-    try { j = JSON.parse(l); } catch { continue; }
+    try { j = JSON.parse(line.toString('utf8')); } catch { continue; }
     if (j.isMeta || j.isSidechain) continue;
     const at = Date.parse(j.timestamp) || 0, c = j.message?.content;
     const queued = j.attachment?.type === 'queued_command' && j.attachment.origin?.kind === 'human'; // sent while Claude was at work
@@ -3441,13 +3449,14 @@ function queueNow(file) {
   if (s.cut && !skip) return [];
   const flat = (t) => String(t ?? '').replace(/\s+/g, ''), words = (j) => said(j).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
   const take = (t) => { const i = s.q.findIndex((x) => flat(x.text) === flat(t)); if (i >= 0) s.q.splice(i, 1); };
-  const lines = last < skip ? [] : buf.toString('utf8', skip, last + 1).split('\n');
-  for (const l of lines) {
-    const op = l.includes('"queue-operation"'), queued = !op && l.includes('"queued_command"'), end = !op && !queued && l.includes('"turn_duration"');
-    const yours = !op && !queued && !end && s.q.length && l.includes('"type":"user"') && !l.includes('"tool_result"');
+  for (let p = skip, nl; p <= last; p = nl + 1) { // (told apart on its bytes, as history's)
+    nl = buf.indexOf(10, p);
+    const l = buf.subarray(p, nl);
+    const op = l.indexOf(W.op) >= 0, queued = !op && l.indexOf(W.queued) >= 0, end = !op && !queued && l.indexOf(W.turn) >= 0;
+    const yours = !op && !queued && !end && s.q.length && l.indexOf(W.user) >= 0 && l.indexOf(W.anyResult) < 0;
     if (!op && !queued && !end && !yours) continue;
     let j;
-    try { j = JSON.parse(l); } catch { continue; }
+    try { j = JSON.parse(l.toString('utf8')); } catch { continue; }
     if (op && j.type === 'queue-operation') {
       const mine = typeof j.content === 'string' && j.content.trim() && !/^\s*<(task-notification|teammate-message)/.test(j.content);
       if (j.operation === 'enqueue' && mine) s.q.push({ text: j.content, at: Date.parse(j.timestamp) || 0 });
@@ -4775,9 +4784,12 @@ async function web() {
     'POST /api/ticket': (q, b) => editTickets((all) => ticketOp(all, b)),
     'GET /api/machines': () => machines(),
     'GET /api/tokens': async (q) => {
-      if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000) // counted beside, one count at a time; the child failed: here, as before
-        await (tokNow ??= tokensBeside().catch(() => ({ ...tokenStats(), butler: butlerCost() }))
-          .then((t) => { tokCache = t; tokAt = Date.now(); }).finally(() => { tokNow = null; }));
+      // counted beside, one count at a time. Never here: it holds the whole service, every terminal with it, 0.3 s and more
+      // (minutes when its cache is made again), and one that ran out of memory beside would end the service too. One that
+      // failed: the last count stays, unless there's none or you asked for a new one (刷新): then why it failed
+      if (!tokCache || q.has('fresh') || Date.now() - tokAt > 30000)
+        await (tokNow ??= tokensBeside().then((t) => { tokCache = t; tokAt = Date.now(); }).finally(() => { tokNow = null; }))
+          .catch((e) => { log('tokens_fail', { err: e.message }); if (!tokCache || q.has('fresh')) throw e; });
       return tokCache;
     },
     'GET /api/push/key': () => ({ key: pushPublic(pushKeys().jwk) }),
@@ -4925,7 +4937,15 @@ async function web() {
     },
     // a GPT 聊天 one: its messages and the mode and effort it was last sent with (the page asks every 2 s while it's
     // shown); one sent; the answer on its way stopped
-    'GET /api/oai': (q) => { const c = oaiRead(q.get('id')); return { items: oaiItems(c), busy: !!c.pending, since: c.since ?? null, title: c.title, opts: c.opts ?? OAI_OPTS }; },
+    // v: the chat as the page has it (its file's time): not changed since, that alone. It's asked every 2 s while GPT
+    // answers (minutes for Pro), and nothing changes till the answer's in: the whole chat each time, for nothing
+    'GET /api/oai': (q) => {
+      const id = q.get('id') ?? '';
+      let v = null;
+      if (/^oai-\d+$/.test(id) && !oaiDeleting.has(id)) try { v = String(fs.statSync(path.join(OAI, `${id}.json`)).mtimeMs); } catch {}
+      if (v && q.get('v') === v) return { same: true };
+      const c = oaiRead(id); return { v, items: oaiItems(c), busy: !!c.pending, since: c.since ?? null, title: c.title, opts: c.opts ?? OAI_OPTS };
+    },
     'POST /api/oai/send': (q, b) => oaiSend(b),
     'POST /api/oai/stop': (q, b) => oaiStop(String(b.id ?? '')),
     // API 额度 (sdk.js): one as it stands here (answering, a question waiting, why its last turn failed; the models offered
@@ -5446,7 +5466,11 @@ function replyCost([, day, i, o, w5, w1, r, model, fast]) {
 // service the whole service, every terminal with it, stood still meanwhile.
 const tokensBeside = () => new Promise((ok, no) => require('child_process').execFile(process.execPath,
   ['-e', `const m = require(${JSON.stringify(__filename)}); process.stdout.write(JSON.stringify({ ...m.tokenStats(), butler: m.butlerCost() }))`],
-  { windowsHide: true, maxBuffer: 256 << 20 }, (e, out) => { try { if (e) throw e; ok(JSON.parse(out)); } catch (x) { no(x); } }));
+  { windowsHide: true, maxBuffer: 256 << 20 }, (e, out, err) => {
+    // failed: why, as its error's line says it (not the whole command and its stack)
+    if (e) return no(new Error(String(err ?? '').split(/\r?\n/).map((l) => l.trim()).find((l) => /^(?:[A-Za-z]*Error: |FATAL ERROR)/.test(l))?.replace(/^[A-Za-z]*Error: /, '') ?? e.message.split('\n')[0]));
+    try { ok(JSON.parse(out)); } catch (x) { no(x); }
+  }));
 function tokenStats(roots = tokenRoots(), cacheFile = path.join(ROOT, 'tokens-cache.json'), logFile = LOG) {
   let cache = { v: 4, files: {} }, dirty = false; // dirty: something read further, or dropped: the cache is written
   try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch (e) {

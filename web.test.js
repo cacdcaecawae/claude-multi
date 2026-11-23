@@ -28,6 +28,8 @@ const histUrls = []; // what each asked (the last 50)
 const dirs = { '': { path: '', up: null, dirs: ['C:/Users/ly', 'C:/Users/ly/Desktop', 'D:/'], files: [] },
   'D:/': { path: 'D:/', up: '', dirs: ['D:/work', 'D:/.cache'], files: ['a.civa'] }, 'D:/work': { path: 'D:/work', up: 'D:/', dirs: [], files: [] } };
 let oaiHold = null; // a promise: GPT 聊天's send answered only once it settles
+let oaiSame = 0; // GPT 聊天 asked with the version it has (oai.v): answered "unchanged", counted
+let stateHold = null, stateHeld = false; // a promise: the next /api/state answered once it settles, with the state as it was when asked (held: it came)
 // an API 额度 one as the service has it (/api/sdk), and what the page sent it: messages, answers, 停止
 let rejectAnswer = false, sdkState = { busy: false }; const sdkPosts = [];
 const cmdAsks = []; // whose commands / asked for, in turn
@@ -79,6 +81,10 @@ const server = http.createServer((req, res) => {
     setTimeout(() => res.write(osc('终端里复制的中文')), 300);
     return;
   }
+  if (url.pathname === '/api/state' && stateHold) { // held: the state as it was, answered after what's asked meanwhile
+    const was = JSON.stringify(state), hold = stateHold; stateHold = null; stateHeld = true;
+    return hold.then(() => { res.setHeader('content-type', 'application/json'); res.end(was); });
+  }
   if (url.pathname.startsWith('/api/')) {
     const data = url.pathname === '/api/state' ? state : url.pathname === '/api/asks' ? []
       : url.pathname === '/api/tokens' ? tokens
@@ -86,7 +92,7 @@ const server = http.createServer((req, res) => {
       : url.pathname === '/api/machines' ? [{ id: 'here', name: 'PC', cpu: 50, cpuClaude: 20, mem: 8 * 2 ** 30, memClaude: 2 * 2 ** 30, memAll: 16 * 2 ** 30, n: 3 }]
       : url.pathname === '/api/history' ? { id: historyId, start: 0, end: histFeed?.length ?? 1, items: histFeed ? histFeed.slice(Number(url.searchParams.get('from') ?? 0)) : [{ role: 'claude', text: long }], ...(histQueue && { queue: histQueue }) }
       : url.pathname === '/api/upload' ? { path: 'C:/uploads/' + decodeURIComponent(req.headers['x-name'] ?? 'picture.png') }
-      : url.pathname === '/api/oai' ? { ...oai, title: 'Pro 你好' }
+      : url.pathname === '/api/oai' ? (oai.v && url.searchParams.get('v') === oai.v ? (oaiSame++, { same: true }) : { ...oai, title: 'Pro 你好' })
       : url.pathname === '/api/sdk' ? sdkState
       : url.pathname === '/api/commands' ? (cmdAsks.push(url.searchParams.get('id') ?? url.searchParams.get('dir') ?? url.searchParams.get('mac')), url.searchParams.get('id') === 'M' ? { commands: [{ name: 'clear', desc: 'Start anew', hint: '[name]', also: ['reset'], builtin: true }, { name: 'maintain-formal-verification-skill', desc: 'a Mac skill', hint: '', also: [], builtin: false }] } : { commands: CMDS })
       : url.pathname.startsWith('/api/peek') ? { type: /\.exe$/.test(url.searchParams.get('path')) ? 'application/octet-stream' : /\.pptx$/.test(url.searchParams.get('path')) ? 'application/pdf' : 'image/png' }
@@ -274,7 +280,19 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate("localStorage.getItem('cm-draft:oai-1')"), '留着这句');
   release(); oaiHold = null;
   await until("localStorage.getItem('cm-draft:oai-1') === null");
+  await evaluate('closeConv(oc)');
+  // while GPT answers it's asked every 2 s: unchanged since the version the page has, the service says only that, and
+  // what's shown stays (正在思考 too); the answer in, a new version: drawn
+  oai = { items: [{ role: 'user', text: '慢慢想', at: Date.now() }], busy: true, since: Date.now(), opts: { mode: 'pro', effort: 'max' }, v: 'v1' }; oaiSame = 0;
+  await evaluate("window.oc = makeOai('oai-1', 'Pro 你好'); addConv(focusG, oc)");
+  await until("document.querySelector('.pane.on.oai .live .busy')?.textContent.includes('正在思考')");
+  for (let i = 0; i < 100 && oaiSame < 1; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(oaiSame >= 1, 'asked with its version');
+  assert.deepEqual(await evaluate("[document.querySelector('.pane.on.oai .hm.user')?.textContent, !!document.querySelector('.pane.on.oai .live .busy'), document.querySelector('.pane.on.oai .go').dataset.m]"), ['慢慢想', true, 'stop']);
+  oai = { ...oai, items: [...oai.items, { role: 'claude', text: '想好了', at: Date.now() }], busy: false, v: 'v2' };
+  await until("document.querySelector('.pane.on.oai .hm.claude')?.textContent.includes('想好了') && document.querySelector('.pane.on.oai .go').dataset.m === 'send'");
   await evaluate('closeConv(oc)'); oai = { items: [], busy: false };
+  console.log('browser GPT chat unchanged ok');
   // API 额度: on an API account, 新对话 under Claude offers Claude Code or the Agent SDK; the SDK one's pane sends with the
   // model on its button, says it's starting, then asks: a permission (允许), AskUserQuestion's two questions (one a
   // multi-select: 提交 once both are picked), words typed answering one; its record as a Claude one's; 停止; why a turn failed
@@ -1036,6 +1054,23 @@ const press = async (key, shift = false) => {
     window.fetch = real; btn('close').click(); return out.join(' | '); })()`),
     '4 | true | # 注释 | """多 | 行""" | false | pre | copy+wrap | true | true | pre-wrap | true | % 中文 | 2 | "% 中文\\nx = 1;" | Get-Date | 标题 | copy+src | 3 | true | copy+src+wrap');
   console.log('browser 预览 code ok');
+  // the service's state: an answer back after a newer one's is dropped (a name changed since came back as it was); while
+  // one is out, the 5 s look doesn't ask again
+  {
+    const a = state.sessions.find((s) => s.id === 'A'), was = a.title;
+    let answer; stateHold = new Promise((r) => (answer = r));
+    await evaluate('window.oldLook = load(); 0'); // asked first, answered last
+    for (let i = 0; i < 100 && !stateHeld; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(stateHeld, 'the first look held');
+    a.title = '刚改的名字';
+    assert.equal(await evaluate('load()'), '');
+    assert.equal(await evaluate("state.sessions.find((s) => s.id === 'A').title"), '刚改的名字');
+    answer(); assert.equal(await evaluate('window.oldLook'), '');
+    assert.equal(await evaluate("state.sessions.find((s) => s.id === 'A').title"), '刚改的名字');
+    assert.equal(await evaluate('loadsOut'), 0);
+    a.title = was; await evaluate('load()');
+  }
+  console.log('browser 状态 新旧 ok');
   // 设置's 重启网页服务: asked once you say yes; the service still here when it ended (it failed): why; a new one answering
   // (another up): the page reloaded. Last, as the reload starts the page anew
   state.up = 1; await evaluate('load()');
