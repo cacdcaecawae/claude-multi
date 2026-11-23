@@ -179,6 +179,33 @@ test('--profiles: a 申请接入 account\'s /j/<id> goes to its gateway; any oth
   assert.deepEqual(s.last.slice(-2).map((x) => x.via), ['whole', 'whole']); assert.equal(s.kept.n, 1); // acct-1's, not acct-3's
 });
 
+test('two receivers keep independent bases for interleaved turns', async () => {
+  const other = cache(64 << 20), received = [];
+  const server = http.createServer((req, res) => read(req, (body) => {
+    const r = rebuild(other, req.headers, body);
+    if (!r) { res.writeHead(409, { 'x-delta-miss': '1' }); return res.end(); }
+    received.push(r.body);
+    keep(other, r.key, r.body, r.d);
+    res.writeHead(200, { 'x-delta-ok': '1' }); res.end();
+  }));
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  try {
+    const file = path.join(dir, 'profiles.json'), reg = JSON.parse(fs.readFileSync(file));
+    reg.profiles.push({ id: 'second', api: { join: 'j4', baseURL: `http://127.0.0.1:${server.address().port}` } });
+    fs.writeFileSync(file, JSON.stringify(reg));
+    const before = (await stats(P.byId)).misses;
+    const sendTo = async (id, body) => { const r = await post(P.byId, `/j/${id}/v1/messages`, body); await r.text(); assert.equal(r.status, 200); };
+    await sendTo('second', convo('Q', 1));
+    await sendTo('acct-1', convo('Z', 3));
+    await sendTo('second', convo('Z', 5));
+    await sendTo('acct-1', convo('Z', 5));
+    const s = await stats(P.byId);
+    assert.equal(s.misses, before);
+    assert.ok(s.last.at(-1).sent < 20000);
+    assert.ok(received.at(-1).equals(convo('Z', 5)) && got.at(-1).body.equals(convo('Z', 5)));
+  } finally { server.closeAllConnections(); server.close(); }
+});
+
 test('--plain: while --to\'s receiving end answers no ping, whole by --plain\'s way; back once it does; a failure switches at once', async () => {
   const dead = await free(), port = await free(), wait = async (f) => { for (let i = 0; i < 60 && !(await f()); i++) await new Promise((r) => setTimeout(r, 100)); };
   const fb = run('send', '--port', port, '--to', `http://127.0.0.1:${dead}/gw`, '--plain', `http://127.0.0.1:${P.gw}`), s = () => stats(port);

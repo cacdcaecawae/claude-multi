@@ -1606,7 +1606,9 @@ async function menuPick(e) {
       toast((await post('/api/delete', { id: s.id, gpt: s.gpt, oai: s.oai, gem: s.gem })).said);
       const c = convOf(s.id); if (c) closeConv(c);
       try { localStorage.removeItem('cm-draft:' + s.id); } catch {}
-    } catch (er) { deleting.delete(s.id); toast(er.message, 4000); }
+    } catch (er) { toast(er.message, 4000); }
+    try { await load(); } finally { deleting.delete(s.id); drawSide(); }
+    return;
   }
   load();
 }
@@ -1837,7 +1839,7 @@ async function drawAsks() {
   if (!state.sessions.some((s) => s.wait && s.pid && !isButler(s))) { askOf.clear(); $('#asks').html = ''; return; }
   asksBusy = true;
   let list = [];
-  try { list = await (await fetch('/api/asks')).json(); } catch {} finally { asksBusy = false; }
+  try { list = await (await fetch('/api/asks', { signal: AbortSignal.timeout(15000) })).json(); } catch {} finally { asksBusy = false; }
   if (!Array.isArray(list)) return;
   list = list.filter((a) => !(Date.now() - (pickedAt.get(a.id) ?? 0) < 8000));
   askOf = new Map(list.map((a) => [a.id, a.menu?.ask]));
@@ -2149,7 +2151,7 @@ async function warm() {
 }
 // the token counts; an answer that isn't them (the service's {err}, the relay's page) a failure, never kept as them
 // (tokensErr: the last count failed, said in the panel till 刷新, not asked again by itself every 5 s)
-const getTokens = (fresh) => fetch(`/api/tokens${fresh ? '?fresh=1' : ''}`).then((r) => r.json().catch(() => ({ err: `连不上（${r.status}）` })))
+const getTokens = (fresh) => fetch(`/api/tokens${fresh ? '?fresh=1' : ''}`, { signal: AbortSignal.timeout(15000) }).then((r) => r.json().catch(() => ({ err: `连不上（${r.status}）` })))
   .then((t) => { if (!Array.isArray(t?.accounts)) throw new Error(t?.err || '统计失败'); return t; });
 // the counts asked again every 2 minutes in the background, the last ones shown meanwhile; then redrawn
 function renewTokens(then) {
@@ -2584,6 +2586,39 @@ const THEME = { background: '#1f1f1f', foreground: '#cccccc', cursor: '#aeafad',
   brightBlack: '#666666', brightRed: '#f14c4c', brightGreen: '#23d18b', brightYellow: '#f5f543', brightBlue: '#3b8eea', brightMagenta: '#d670d6', brightCyan: '#29b8db', brightWhite: '#e5e5e5' };
 const KEYS = [['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['←', '\x1b[D'], ['→', '\x1b[C'], ['^C', '\x03'], ['⏎', '\r'], ['⌫', '\x7f']];
 // the box you write in, under a conversation
+function attachInput(c, el, $p, line, attachments, goMode) {
+  const attsEl = $p('.atts'), pick = $p('input[type=file]');
+  const urls = new Set();
+  const release = (a) => { if (a?.url && urls.delete(a.url)) URL.revokeObjectURL(a.url); };
+  c.releasePreviews = () => { for (const url of urls) URL.revokeObjectURL(url); urls.clear(); };
+  c.attach = (files) => {
+    for (const f of files) {
+      // a picture goes in as one (Claude attaches it); any other file, or a picture this browser can't open, by its path (a
+      // GPT one's pictures too: Codex is given the path)
+      const pic = /^image\//.test(f.type) && (!c.gpt || c.oai) && !c.gem;
+      if (!pic && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
+      // (a GPT or Gemini one's picture, sent by its path: still shown small here, as the bubble shows it once sent)
+      const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name, ...(/^image\/(png|jpeg|gif|webp|bmp)$/.test(f.type) && { url: URL.createObjectURL(f) }) };
+      if (a.url) urls.add(a.url);
+      a.up = a.file ? sendFile(f, c.mac) : shrink(f).then((b) => upload(b, c.mac), () => { a.file = true; a.name = f.name; release(a); a.url = null; drawAtts(); return sendFile(f, c.mac); });
+      a.up.catch((e) => { a.failed = true; toast(`${a.file ? '文件' : '图片'}没传上去：${e.message}`, 4000); release(a); const i = attachments().indexOf(a); if (i >= 0) attachments().splice(i, 1); drawAtts(); });
+      attachments().push(a);
+    }
+    drawAtts();
+  };
+  const drawAtts = () => { attsEl.innerHTML = attachments().map((a, i) => `<div class="att${a.url ? '' : ' file'}">${a.url ? `<img src="${a.url}" alt="">` : `${svg(I.clip)}<span>${esc(a.name)}</span>`}<button data-unatt="${i}" title="不发这个">${svg(I.close, 2)}</button></div>`).join(''); goMode(); };
+  $p('.pic').onclick = () => pick.click();
+  pick.onchange = () => { c.attach([...pick.files]); pick.value = ''; };
+  line.addEventListener('paste', (e) => { // a screenshot pasted, as into Claude itself
+    const fs = [...(e.clipboardData?.files ?? [])]; // a screenshot, or files copied
+    if (fs.length) { e.preventDefault(); c.attach(fs); }
+  });
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-unatt]');
+    if (b) { release(attachments().splice(+b.dataset.unatt, 1)[0]); drawAtts(); }
+  });
+  return { drawAtts, release };
+}
 const SEND_BOX = () => `<div class="send"><button class="toEnd" hidden></button><div class="box"><div class="atts"></div><div class="bar"><button class="ico pic" title="发图片或文件（也可以粘贴、拖进来）">${svg(I.clip)}</button><input type="file" multiple hidden>
       <textarea placeholder="${FINE ? '输入消息，Enter 发送，Shift+Enter 换行' : '输入消息'}" enterkeyhint="send" rows="1"></textarea><button class="btn primary go" title="发送">${svg(I.send, 2)}</button></div></div></div>`;
 // a listed conversation's pane: a GPT 聊天 one's, or one with a terminal behind it
@@ -2662,7 +2697,7 @@ function makeConv(body, title) {
   // A Mac's: Claude Code's own commands only, a line saying why; a GPT one's: that line alone
   const slash = document.createElement('div'); slash.className = 'slash'; slash.hidden = true; slash.setAttribute('role', 'listbox'); $p('.send').append(slash);
   let cmds = null, asking = null, slashQ = '', picked = 0, offered = [], slashNote = '';
-  const askCmds = () => asking ??= fetch('/api/commands?' + new URLSearchParams(c.gem ? { gem: 1 } : c.id ? { id: c.id } : c.mac ? { mac: c.mac } : { dir: c.dir(), acct: c.acct ?? '' }))
+  const askCmds = () => asking ??= fetch('/api/commands?' + new URLSearchParams(c.gem ? { gem: 1 } : c.id ? { id: c.id } : c.mac ? { mac: c.mac } : { dir: c.dir(), acct: c.acct ?? '' }), { signal: AbortSignal.timeout(15000) })
     .then(async (r) => { const j = await r.json(); if (!r.ok) throw Object.assign(new Error(j.err), { old: r.status === 404 }); cmds = j.commands ?? []; slashNote = j.note ?? ''; slashDraw(); })
     .catch((e) => { cmds = []; if (e.old) toast('/ 的命令列表要等网页服务重启后才有', 3000); setTimeout(() => { cmds = asking = null; }, 60000); });
   function slashDraw() {
@@ -2705,28 +2740,7 @@ function makeConv(body, title) {
   if (c.id) try { line.value = localStorage.getItem(draftKey()) ?? ''; } catch {}
   line.addEventListener('input', () => { goMode(); grow(); });
   let atts = [], sending = false; // the pictures waiting to go, each { url: shown here, up: its upload, to the path }
-  const attsEl = $p('.atts'), pick = $p('input[type=file]');
-  c.attach = (files) => {
-    for (const f of files) {
-      // a picture goes in as one (Claude attaches it); any other file, or a picture this browser can't open, by its path (a
-      // GPT one's pictures too: Codex is given the path)
-      const pic = /^image\//.test(f.type) && !c.gpt && !c.gem;
-      if (!pic && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
-      // (a GPT or Gemini one's picture, sent by its path: still shown small here, as the bubble shows it once sent)
-      const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name, ...(/^image\/(png|jpeg|gif|webp|bmp)$/.test(f.type) && { url: URL.createObjectURL(f) }) };
-      a.up = a.file ? sendFile(f, c.mac) : shrink(f).then((b) => upload(b, c.mac), () => { a.file = true; a.name = f.name; a.url = null; drawAtts(); return sendFile(f, c.mac); });
-      a.up.catch((e) => { a.failed = true; toast(`${a.file ? '文件' : '图片'}没传上去：${e.message}`, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
-      atts.push(a);
-    }
-    drawAtts();
-  };
-  const drawAtts = () => { attsEl.innerHTML = atts.map((a, i) => `<div class="att${a.url ? '' : ' file'}">${a.url ? `<img src="${a.url}" alt="">` : `${svg(I.clip)}<span>${esc(a.name)}</span>`}<button data-unatt="${i}" title="不发这个">${svg(I.close, 2)}</button></div>`).join(''); goMode(); };
-  $p('.pic').onclick = () => pick.click();
-  pick.onchange = () => { c.attach([...pick.files]); pick.value = ''; };
-  line.addEventListener('paste', (e) => { // a screenshot pasted, as into Claude itself
-    const fs = [...(e.clipboardData?.files ?? [])]; // a screenshot, or files copied
-    if (fs.length) { e.preventDefault(); c.attach(fs); }
-  });
+  const { drawAtts } = attachInput(c, el, $p, line, () => atts, goMode);
   const imagesShown = () => { // the [Image #N] on Claude's screen: one more each time it has attached a pasted picture
     const b = term.buffer.active; let t = '';
     for (let i = 0; i < term.rows; i++) t += b.getLine(b.baseY + i)?.translateToString(true) ?? '';
@@ -2880,11 +2894,10 @@ function makeConv(body, title) {
     }
   };
   el.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-v], [data-kb], [data-act], [data-pick], [data-key], [data-unatt]');
+    const b = e.target.closest('[data-v], [data-kb], [data-act], [data-pick], [data-key]');
     if (!b) return;
     const d = b.dataset;
-    if (d.unatt) { atts.splice(+d.unatt, 1); drawAtts(); }
-    else if (d.v) setView(d.v);
+    if (d.v) setView(d.v);
     else if (d.kb) input(KEYS[+d.kb][1]);
     else if (d.act === 'more') paneMenu(c, b);
     else if (d.act === 'bset') bset(b);
@@ -3393,7 +3406,7 @@ function makeConv(body, title) {
   // works). false, and why in a bubble, when it can't go now: the words stay where they were written. Taken, a step that
   // fails later puts them back in this box, as for one typed here
   c.say = (text) => send(text);
-  c.close = () => { c.closed = true; c.sleep(); ro.disconnect(); clearTimeout(liveT); clearTimeout(fitT); term?.dispose(); term = null; key = null; switching = 0; el.remove(); };
+  c.close = () => { c.closed = true; c.releasePreviews(); c.sleep(); ro.disconnect(); clearTimeout(liveT); clearTimeout(fitT); term?.dispose(); term = null; key = null; switching = 0; el.remove(); };
   c.claim = claim; c.swap = swap; c.end = endIt;
   // ⋯'s 新对话: another one beside it, in its folder: which of them first, then on its account if it's the same kind, else
   // that kind's first (a Mac's: that Mac, its folder here if it has one, Claude only)
@@ -3429,7 +3442,7 @@ function makeOai(id, title) {
   el.className = 'pane hist oai';
   el.innerHTML = `<div class="crumbs"><span class="path"></span></div>
     <div class="msgs"><div class="col"><div class="hTop hm note"></div><div class="hNew"></div><div class="live"></div></div></div>${SEND_BOX()}`;
-  const $p = (s) => el.querySelector(s), hist = $p('.msgs'), line = $p('.send textarea'), go = $p('.go'), attsEl = $p('.atts'), pick = $p('input[type=file]');
+  const $p = (s) => el.querySelector(s), hist = $p('.msgs'), line = $p('.send textarea'), go = $p('.go');
   if (FINE) navOf(el, hist);
   let shown = false, timer = null, drawn = '', busy = false, since = 0, sending = false, atts = [];
   // its mode and effort: the chat's own (as last sent) once read, unless picked here first; a new one's, as last picked
@@ -3464,24 +3477,10 @@ function makeOai(id, title) {
   line.addEventListener('input', () => { goMode(); grow(); });
   line.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim() || atts.length) go.click(); } };
   // a picture goes as one (a big one made smaller, as for Claude), any other file as it is: each uploaded at once
-  c.attach = (files) => {
-    for (const f of files) {
-      const pic = /^image\//.test(f.type);
-      if (!pic && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
-      const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name };
-      a.up = pic ? shrink(f).then(upload) : sendFile(f);
-      a.up.catch((e) => { a.failed = true; toast(`${pic ? '图片' : '文件'}没传上去：${e.message}`, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
-      atts.push(a);
-    }
-    drawAtts();
-  };
-  const drawAtts = () => { attsEl.innerHTML = atts.map((a, i) => `<div class="att${a.file ? ' file' : ''}">${a.file ? `${svg(I.clip)}<span>${esc(a.name)}</span>` : `<img src="${a.url}" alt="">`}<button data-unatt="${i}" title="不发这个">${svg(I.close, 2)}</button></div>`).join(''); goMode(); };
-  $p('.pic').onclick = () => pick.click();
-  pick.onchange = () => { c.attach([...pick.files]); pick.value = ''; };
-  line.addEventListener('paste', (e) => { const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); c.attach(fs); } });
+  const { drawAtts, release } = attachInput(c, el, $p, line, () => atts, goMode);
   el.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-unatt], [data-oset]');
-    if (b?.dataset.unatt) { atts.splice(+b.dataset.unatt, 1); drawAtts(); } else if (b) oset(b);
+    const b = e.target.closest('[data-oset]');
+    if (b) oset(b);
   });
 
   let sentWith = opts; // what the answer on its way was asked with
@@ -3516,6 +3515,7 @@ function makeOai(id, title) {
     try {
       const r = await post('/api/oai/send', { id: c.id, text: v, paths: await Promise.all(files.map((a) => a.up)), ...opts });
       if (!c.id) { c.id = r.id; c.title = (v.split('\n')[0] || '新对话').slice(0, 40); save(); markRows(); if (c.g) drawTabs(c.g); }
+      files.forEach(release);
       busy = true; since = Date.now(); sentWith = opts; sending = false;
       await refresh(); load(); // the list and the tab: it's answering
       return true;
@@ -3541,7 +3541,7 @@ function makeOai(id, title) {
     clearInterval(timer); timer = setInterval(() => { if (document.visibilityState === 'visible' && (busy || sending || !(++ticks % 8))) refresh(); }, 2000);
   };
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(timer); readNote(c.id); };
-  c.close = () => { c.closed = true; c.sleep(); el.remove(); };
+  c.close = () => { c.closed = true; c.releasePreviews(); c.sleep(); el.remove(); };
   c.say = (t) => send(t);
   c.swap = () => toast('GPT 聊天不用换账号');
   c.where = () => null; c.focus = () => line.focus({ preventScroll: true }); c.back = () => { if (shown) refresh(); }; c.tick = c.claim = () => {};
@@ -3560,7 +3560,7 @@ function makeSdk(body, title) {
   el.className = 'pane hist sdk';
   el.innerHTML = `<div class="crumbs"><span class="path"></span></div>
     <div class="msgs"><div class="col"><div class="hTop hm note"></div><div class="hOld"></div><div class="hNew"></div><div class="live"></div></div></div>${SEND_BOX()}`;
-  const $p = (s) => el.querySelector(s), hist = $p('.msgs'), line = $p('.send textarea'), go = $p('.go'), attsEl = $p('.atts'), pick = $p('input[type=file]');
+  const $p = (s) => el.querySelector(s), hist = $p('.msgs'), line = $p('.send textarea'), go = $p('.go');
   if (FINE) navOf(el, hist);
   // st: /api/sdk's last word; end, oldest: where the record read so far ends and begins; sent: a message on its way, shown
   // till the record has it; queued: the ones sent while it answered that Claude hasn't taken in yet (its record's queue);
@@ -3604,21 +3604,7 @@ function makeSdk(body, title) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (line.value.trim() || atts.length) go.click(); }
     else if (e.key === 'Escape' && st.busy) { e.preventDefault(); stop(); } // as in Claude: Esc stops it
   };
-  c.attach = (files) => { // as GPT 聊天's: each uploaded at once, a big picture made smaller
-    for (const f of files) {
-      const pic = /^image\//.test(f.type);
-      if (!pic && f.size > 20 << 20) { toast(`${f.name} 太大了（最大 20 MB）`, 4000); continue; }
-      const a = pic ? { url: URL.createObjectURL(f) } : { file: true, name: f.name };
-      a.up = pic ? shrink(f).then(upload) : sendFile(f);
-      a.up.catch((e) => { a.failed = true; toast(`${pic ? '图片' : '文件'}没传上去：${e.message}`, 4000); atts = atts.filter((x) => x !== a); drawAtts(); });
-      atts.push(a);
-    }
-    drawAtts();
-  };
-  const drawAtts = () => { attsEl.innerHTML = atts.map((a, i) => `<div class="att${a.file ? ' file' : ''}">${a.file ? `${svg(I.clip)}<span>${esc(a.name)}</span>` : `<img src="${a.url}" alt="">`}<button data-unatt="${i}" title="不发这个">${svg(I.close, 2)}</button></div>`).join(''); goMode(); };
-  $p('.pic').onclick = () => pick.click();
-  pick.onchange = () => { c.attach([...pick.files]); pick.value = ''; };
-  line.addEventListener('paste', (e) => { const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); c.attach(fs); } });
+  const { drawAtts, release } = attachInput(c, el, $p, line, () => atts, goMode);
 
   // its record, as a Claude one's: a picture fetched by where it is in it, a pasted block shown without its wrapper
   const histGet = async (qs) => {
@@ -3695,14 +3681,14 @@ function makeSdk(body, title) {
     if (atEnd) hist.scrollTop = hist.scrollHeight;
   }
   async function answer(b) { // (n: the question shown, so an answer never goes to one asked since)
-    try { await post('/api/sdk/answer', { id: c.id, n: st.ask?.n, ...b }); } catch (e) { toast(e.message, 4000); }
-    await readState();
+    try { await post('/api/sdk/answer', { id: c.id, n: st.ask?.n, ...b }); return true; } catch (e) { toast(e.message, 4000); return false; }
+    finally { readState(); }
   }
   el.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-unatt], [data-sset], [data-sa], [data-sq], [data-sx], [data-sgo]');
+    const b = e.target.closest('[data-sset], [data-sa], [data-sq], [data-sx], [data-sgo]');
     if (!b) return;
     const d = b.dataset, a = st.ask;
-    if (d.unatt) { atts.splice(+d.unatt, 1); drawAtts(); } else if (d.sset != null) pickModel(b);
+    if (d.sset != null) pickModel(b);
     else if (d.sa) answer({ allow: d.sa === '1' });
     else if (d.sx != null) answer({ allow: false });
     else if (d.sgo != null && a) answer({ allow: true, answers: Object.fromEntries(a.questions.map((q, i) => [q.question, picks[i]])) });
@@ -3719,7 +3705,15 @@ function makeSdk(body, title) {
     const v = (text ?? line.value).trim(), files = text == null ? atts : [];
     if (!v && !files.length) return false;
     if (sending) { toast('上一条还在发，稍等一下'); return false; }
-    if (st.ask && v && !files.length) { if (text == null) { line.value = ''; grow(); } await answer({ allow: false, text: v }); return true; }
+    if (st.ask && v && !files.length) {
+      sending = true;
+      const draft = line.value;
+      try {
+        const ok = await answer({ allow: false, text: v });
+        if (ok && text == null && line.value === draft) { line.value = ''; grow(); }
+        return ok;
+      } finally { sending = false; goMode(); }
+    }
     const into = st.busy;
     sending = true;
     if (text == null) { going = v; line.value = ''; atts = []; grow(); drawAtts(); }
@@ -3728,6 +3722,7 @@ function makeSdk(body, title) {
       const r = await post('/api/sdk/send', { id: c.id, acct: c.acct, dir: body.dir, text: v, paths: await Promise.all(files.map((a) => a.up)), model, effort });
       if (!c.id) { c.id = r.id; c.title = (v.split('\n')[0] || title || '新对话').slice(0, 40); save(); markRows(); if (c.g) drawTabs(c.g); c.sync(); }
       sending = false;
+      files.forEach(release);
       if (into) { await readState(); await readHist(); return true; }
       st = { busy: true, since: Date.now(), note: '正在启动' };
       await readState(); load(); // the list and the tab: it's answering
@@ -3745,7 +3740,7 @@ function makeSdk(body, title) {
   async function stop() {
     const words = sent && (sentQ || st.note === '正在启动') ? sent.replace(/^附件：.*$/gm, '').trim() : '', flat = (s) => s.replace(/\s+/g, '');
     const back = [...queued.map((x) => x.text), ...(st.later ?? [])];
-    if (words && !back.some((t) => flat(shownText(t)) === flat(words))) back.unshift(words);
+    if (words && !back.some((t) => flat(t.replace(/^附件：.*$/gm, '')) === flat(words))) back.unshift(words);
     try { await post('/api/sdk/stop', { id: c.id }); } catch (e) { toast(e.message, 4000); return readState(); }
     if (back.length) {
       line.value = [...back, line.value.trim()].filter(Boolean).join('\n'); queued = []; sent = ''; grow(); goMode();
@@ -3771,7 +3766,7 @@ function makeSdk(body, title) {
     }, 1000);
   };
   c.sleep = () => { shown = false; el.classList.remove('on'); clearInterval(timer); readNote(c.id); };
-  c.close = () => { c.closed = true; c.sleep(); el.remove(); };
+  c.close = () => { c.closed = true; c.releasePreviews(); c.sleep(); el.remove(); };
   c.say = (t) => send(t);
   c.swap = () => toast('API 额度的对话不能换账号');
   c.where = () => null; c.focus = () => line.focus({ preventScroll: true }); c.back = () => { if (shown) { readState(); readHist(); } }; c.tick = c.claim = () => {};
@@ -3967,7 +3962,7 @@ async function shrink(f) {
   try { b = await createImageBitmap(f); } catch { throw new Error('这张图片打不开'); }
   const k = Math.min(1, 2000 / Math.max(b.width, b.height)), cv = document.createElement('canvas');
   cv.width = Math.round(b.width * k); cv.height = Math.round(b.height * k);
-  const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(b, 0, 0, cv.width, cv.height);
+  const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(b, 0, 0, cv.width, cv.height); b.close();
   return new Promise((ok) => cv.toBlob(ok, 'image/jpeg', 0.9));
 }
 // to the computer, where it was saved (mac: for a conversation on a Mac, copied on there: its path there). A picture as

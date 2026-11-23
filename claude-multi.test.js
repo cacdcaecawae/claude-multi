@@ -87,6 +87,37 @@ assert.equal(statusline({ workspace: { project_dir: 'D:\\paper_fast', current_di
 console.log('statusline ok');
 
 // token counting: each reply once at its largest, appended lines picked up, a half-written line waits
+{
+  const { startingOwners, stillStarting } = require('./claude-multi'), id = 'e0907995-3eb1-4614-916e-c69bb6f585da';
+  assert.deepEqual([...startingOwners(`  12 "/some dir/claude" --resume ${id}\n91 cli.exe "--session-id" "${id}"\n99 other${id}\n24 node "C:/my app/claude-multi.js" delete ${id}`)], [[id, [12, 91, 24]]]);
+  const old = new Map([[id, [process.pid]]]);
+  assert.ok(stillStarting(old, id, () => []));
+  assert.ok(!stillStarting(old, id, () => [{ pid: process.pid }]));
+  assert.equal(old.size, 0);
+  // its pid alive again, but a scan finds another program on it (or none on this id): the id is let go
+  const { keepOwners } = require('./claude-multi'), more = new Map([[id, [process.pid, 12]], ['b', [13]]]);
+  keepOwners(more, new Map([[id, [12]], ['c', [13]]]));
+  assert.deepEqual([...more], [[id, [12]]]);
+  assert.ok(!stillStarting(more, id, () => []), 'a pid no longer running lets go');
+}
+// A transient sharing violation retries the replacement. Persistent failure leaves the old bytes and no staging file.
+{
+  const { writeWhole } = require('./claude-multi'), path = require('path');
+  const file = path.join(TEST_HOME, 'atomic.json'), rename = fs.renameSync;
+  writeWhole(file, 'old');
+  let failures = 2;
+  fs.renameSync = (...args) => {
+    if (failures-- > 0) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+    return rename(...args);
+  };
+  try {
+    if (process.platform === 'win32') { writeWhole(file, 'new'); assert.equal(failures, -1); }
+    failures = 100;
+    assert.throws(() => writeWhole(file, 'partial'), /busy/);
+    assert.equal(fs.readFileSync(file, 'utf8'), process.platform === 'win32' ? 'new' : 'old');
+    assert.deepEqual(fs.readdirSync(TEST_HOME).filter((n) => n.startsWith('atomic.')), ['atomic.json']);
+  } finally { fs.renameSync = rename; }
+}
 const { tokenStats } = require('./claude-multi');
 const tmp = fs.mkdtempSync(require('path').join(require('os').tmpdir(), 'cm-tok-'));
 const A = require('path').join(tmp, 'a', 'p'), B = require('path').join(tmp, 'b', 'p');
@@ -119,6 +150,8 @@ fs.rmSync(fa); // Claude Code's 30-day cleanup: the replies stay counted (the co
 assert.equal(tokenStats(roots, cacheF).total, 27);
 fs.rmSync(require('path').join(B, 'copy.jsonl'));
 assert.equal(tokenStats(roots, cacheF).total, 27);
+assert.equal(tokenStats([], cacheF).total, 0);
+assert.equal(tokenStats(roots, cacheF).total, 27); // both roots re-added after the records themselves were deleted
 // a resume copies a record into the other account: its replies stay with the account that made them
 const cacheC = require('path').join(tmp, 'c.json'), fb = require('path').join(B, 'orig.jsonl');
 fs.writeFileSync(fb, reply('msg_5', atH(12), 0, 4, 0, 0, 'claude-opus-5-5'));
@@ -246,6 +279,8 @@ if (SESSION0) {
   const dir = fs.mkdtempSync(require('path').join(require('os').tmpdir(), 'cm-note-')), T = Date.parse('2026-10-07T08:00:00Z');
   const conv = (said) => { const f = require('path').join(dir, `${said}.jsonl`); fs.writeFileSync(f, [
     { type: 'user', timestamp: new Date(T + said).toISOString(), message: { content: 'hi' } },
+    ...['[系统通知] 回来看一下', 'Another Claude session sent a message: hi'].map((content) =>
+      ({ type: 'user', timestamp: new Date(T + 8e6).toISOString(), message: { content } })),
     { type: 'user', timestamp: new Date(T + 9e6).toISOString(), message: { content: '<task-notification>\n<task-id>x</task-id>' } }, // not you
   ].map((x) => JSON.stringify(x)).join('\n') + '\n'); return f; };
   const list = [{ id: 'a', file: conv(1000) }, { id: 'b', file: conv(5e6) }, { id: 'c', file: conv(0) }];
@@ -1263,17 +1298,21 @@ if (SESSION0) {
   const T = new Date().toISOString(), u = (content) => ({ type: 'user', timestamp: T, message: { content } });
   const a = (id, usage) => ({ type: 'assistant', timestamp: T, requestId: 'r' + id, message: { id, model: 'claude-sonnet-5', usage } });
   fs.writeFileSync(path.join(dir, 's.jsonl'), [u('你好'), a('m1', { input_tokens: 1e6 }), a('m1', { input_tokens: 1e6 }), u('\n\n<pasted_content id="a1">\n[系统通知] 有动静\n</pasted_content id="a1">\n'), a('m2', { output_tokens: 1e5 }), // a long notice: a paste
-    u([{ type: 'tool_result', content: 'ok' }]), a('m3', { input_tokens: 5e5 }), u('<task-notification>\n<status>completed</status>'), a('m4', { input_tokens: 1e6 })].map((x) => JSON.stringify(x)).join('\n'));
+    u([{ type: 'tool_result', content: 'ok' }]), a('m3', { input_tokens: 5e5 }), u('<task-notification>\n<status>completed</status>'), a('m4', { input_tokens: 1e6, iterations: [{ type: 'advisor_message', model: 'claude-fable-5-2', output_tokens: 25000 }] })].map((x) => JSON.stringify(x)).join('\n'));
   const log = path.join(tmp, 'events.jsonl');
   fs.writeFileSync(log, JSON.stringify({ timestamp: T, event: 'watchdog', usd: 0.01 }) + '\n');
   const c = butlerCost([{ dir: path.join(tmp, 'projects') }], log).today, r = (x) => Math.round(x * 100) / 100;
-  assert.deepEqual([r(c.you), r(c.notice), r(c.bg), r(c.dog), c.n], [2, 2, 2, 0.01, 5]);
-  assert.deepEqual(Object.fromEntries(Object.entries(c.models).map(([k, v]) => [k, r(v)])), { 'claude-sonnet-5': 6, 'claude-haiku-4-5': 0.01 });
+  assert.deepEqual([r(c.you), r(c.notice), r(c.bg), r(c.dog), c.n], [2, 2, 3, 0.01, 6]);
+  assert.deepEqual(Object.fromEntries(Object.entries(c.models).map(([k, v]) => [k, r(v)])), { 'claude-sonnet-5': 6, 'claude-fable-5-2': 1, 'claude-haiku-4-5': 0.01 });
   fs.rmSync(tmp, { recursive: true, force: true });
   // what the 管家 typed, found under the paste Claude Code wraps a long one in (so it shows as 管家发的)
   const { unwrapPaste } = require('./claude-multi');
   assert.equal(unwrapPaste('<pasted_content id="adb0">\n继续改图。重点：1) 图4\n</pasted_content id="adb0">\n'), '继续改图。重点：1) 图4');
   assert.equal(unwrapPaste('短的不包'), '短的不包');
+  const blog = path.join(TEST_HOME, '.claude-multi', 'butler-log.jsonl');
+  fs.appendFileSync(blog, ['给「修好「额度」面板」发了消息：处理一下', '新开了对话（D:/测试（旧）版）：继续'].map((text) =>
+    JSON.stringify({ id: 'nested', at: 10, text })).join('\n') + '\n');
+  assert.deepEqual(require('./claude-multi').blogSent('nested').map((e) => e.text), ['处理一下', '继续']);
   console.log('butler cost ok');
 }
 
@@ -1534,6 +1573,9 @@ if (SESSION0) {
   const replyCost = vm.runInNewContext(part(js, 'const PRICES', '\nfunction tokenStats') + ';replyCost;');
   assert.equal(replyCost(['k', 'd', 1e6, 1e6, 0, 0, 1e6, 'claude-fable-5-2', false]), 48.2);
   assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5-20260101', false]), 0.2); assert.equal(replyCost(['k', 'd', 0, 0, 0, 0, 1e6, 'claude-fable-5', false]), 1);
+  const haiku = (read) => replyCost(['k', 'd', 100, 200, 20, 30, read, 'claude/claude-haiku-5-5', false]);
+  near(haiku(99850), (185 * 0.1 + 200 * 0.5 + 99850 * 0.01) / 1e6);
+  near(haiku(99851), (185 * 0.5 + 200 * 2.5 + 99851 * 0.05) / 1e6);
   // 本地代理's names (a gateway's provider/ before the model's): its own price, not Opus 5.5's for any it doesn't know
   assert.equal(replyCost(['k', 'd', 1e6, 0, 0, 0, 0, 'claude/claude-sonnet-5-5', false]), 2); assert.equal(replyCost(['k', 'd', 1e6, 0, 0, 0, 0, 'claude/claude-fable-5-1', false]), 10);
   // Gemini's (agy's name: its effort after it), by the reply's day where Google changes a price on one
@@ -1563,8 +1605,13 @@ if (SESSION0) {
     + JSON.stringify({ type: 'ai-title', aiTitle: '在 Mac 上改文件' }) + '\n');
   fs.writeFileSync(path.join(dir, 'live.json'), JSON.stringify([{ pid: 4321, sessionId: id, status: 'busy', kind: 'interactive' }]));
   const reg = { profiles: [], mac: { host: 'mini', dir: '~/Desktop/mine' } };
-  const s = listSessions(reg).find((x) => x.id === id);
+  const heads = new Map(), s = listSessions(reg, heads).find((x) => x.id === id);
   assert.ok(s, 'the Mac one listed');
+  const restored = new Map(JSON.parse(JSON.stringify([...heads]))), open = fs.openSync;
+  try {
+    fs.openSync = (file, ...args) => { if (file === s.file) throw new Error('unexpected transcript read'); return open(file, ...args); };
+    assert.equal(listSessions(reg, restored).find((x) => x.id === id).title, s.title);
+  } finally { fs.openSync = open; }
   assert.deepEqual([s.mac, s.acct, s.pid, s.busy, s.who, s.title], ['mac', -1, -4321, true, 'Mac mini', '在 Mac 上改文件']);
   assert.equal(listSessions({ profiles: [] }).some((x) => x.id === id), false); // no Mac set up: not listed
   // one in a project's folder there (mine/demo-sim): shown in the folder here it's for (folders.json), running where it runs
@@ -1586,6 +1633,15 @@ if (SESSION0) {
   assert.deepEqual([String.raw`F:\demo-sim`, 'F:/', String.raw`D:\a\my proj's`, String.raw`D:\-x`, String.raw`D:\论文 返修`].map(macName),
     ['demo-sim', 'F', 'my-proj-s', 'x', '论文-返修']);
   fs.writeFileSync(path.join(dir, 'live.json'), '[]');
+  const replica = path.join(dir, 'projects', '-Users-me-Desktop-mine', id + '.jsonl'), bytes = fs.readFileSync(replica);
+  const registry = path.join(TEST_HOME, '.claude-multi', 'profiles.json'), prior = fs.readFileSync(registry);
+  try {
+    fs.writeFileSync(registry, JSON.stringify(reg));
+    const r = require('child_process').spawnSync(process.execPath, [require.resolve('./claude-multi'), 'rename', id, '新标题'], { encoding: 'utf8' });
+    assert.equal(r.status, 1); assert.match(r.stdout, /Mac 上的对话/);
+    assert.deepEqual(fs.readFileSync(replica), bytes);
+    assert.ok(!fs.existsSync(replica.slice(0, -6)));
+  } finally { fs.writeFileSync(registry, prior); }
   assert.equal(listSessions(reg).find((x) => x.id === id).pid, null); // ended there
   // an API 额度 one: begun by the Agent SDK (entrypoint sdk-ts, sdk-py for Python's); claude -p's (sdk-cli) is Claude Code's own
   const ep = (n, e) => { const f = `${n}f1e2d3c-4b5a-4968-8776-655443322110`; fs.writeFileSync(path.join(dir, 'projects', '-Users-me-Desktop-mine', `${f}.jsonl`),
@@ -1679,7 +1735,7 @@ if (SESSION0) {
   // the Mac's password file (ConvertFrom-SecureString: DPAPI, this Windows user) read back by .NET alone; a broken one says
   // why. In a node of its own: its PowerShells, run here, held up the timed waits going on meanwhile
   require('child_process').execFile(process.execPath, ['-e', `
-    const { dpapiRead } = require(${JSON.stringify(require.resolve('./claude-multi'))}), fs = require('fs'), f = ${JSON.stringify(path.join(TEST_HOME, 'pw.dpapi'))};
+    const { dpapiRead } = require(${JSON.stringify(require.resolve('./claude-multi'))}), fs = require('fs'), f = ${JSON.stringify(path.join(TEST_HOME, "O'Brien.dpapi"))};
     fs.writeFileSync(f, require('child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', "ConvertTo-SecureString 'pw Test-1' -AsPlainText -Force | ConvertFrom-SecureString"], { encoding: 'utf8' }).stdout.trim());
     const good = dpapiRead(f).stdout; fs.writeFileSync(f, 'abcd'); const bad = dpapiRead(f);
     console.log(JSON.stringify([good, bad.stdout, bad.stderr]));`], { encoding: 'utf8' }, (e, out) => {
@@ -1779,8 +1835,37 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
     const { id } = await oaiSend({ text: '看看', paths: [f, f], mode: 'standard', effort: 'low' });
     const c = oaiRead(id), moved = path.join(root, 'oai', id, path.basename(f));
     assert.deepEqual([asked.length, c.pending, c.msgs[0].files, fs.existsSync(moved), fs.existsSync(f)], [1, 'resp_1', [moved, moved], true, false]);
+    const { oaiPoll, oaiStop } = require('./claude-multi'), mode = { id, mode: 'standard', effort: 'low' };
+    fs.writeFileSync(path.join(root, 'island-off'), '');
+    let result = { status: 'completed', id: 'resp_1', output: [{ type: 'message', content: [{ text: '好了' }] }] }, status = 200;
+    let hold;
+    globalThis.fetch = async (u, opts) => {
+      if (!String(u).startsWith('https://api.openai.com/')) return real(u, opts);
+      if (opts.method === 'GET' && hold) await hold;
+      return { ok: status === 200, status, json: async () => result };
+    };
+    await oaiPoll();
+    assert.equal(oaiRead(id).msgs.at(-1).text, '好了');
+    for (const code of [200, 404]) {
+      result = { id: 'resp_2' }; status = 200; await oaiSend({ ...mode, text: '继续' });
+      status = 503; await oaiPoll(); assert.equal(oaiRead(id).pending, 'resp_2');
+      result = { status: 'incomplete', incomplete_details: { reason: 'limit' } }; status = code;
+      await oaiPoll();
+      const chat = oaiRead(id); assert.equal(chat.pending, null); assert.equal(chat.resp, 'resp_1');
+      assert.match(chat.msgs.at(-1).text, code === 404 ? /404/ : /limit/);
+    }
+    status = 200; result = { id: 'resp_3' }; await oaiSend({ ...mode, text: '停止测试' });
+    let release; hold = new Promise((ok) => { release = ok; });
+    const poll = oaiPoll(); await oaiStop(id); release(); await poll;
+    assert.equal(oaiRead(id).msgs.at(-1).role, 'note'); assert.match(oaiRead(id).msgs.at(-1).text, /已停止/);
+    assert.equal(oaiRead(id).pending, null);
+    let finishBin;
+    const deleting = require('./claude-multi').oaiDelete(id, () => new Promise((ok) => { finishBin = ok; }));
+    await assert.rejects(oaiSend({ ...mode, text: '不能丢掉的消息' }), /正在删除/);
+    finishBin({ status: 1, stderr: '文件正在使用' });
+    await assert.rejects(deleting, /文件正在使用/); assert.equal(oaiRead(id).pending, null);
   } finally { globalThis.fetch = real; }
-  console.log('gpt chat files ok');
+  console.log('gpt chat files and polling ok');
 })().catch((e) => { console.error(e); process.exitCode = 1; });
 // 休眠: which conversations running in the web service are ended to free memory, and the shells that keep one going
 {
@@ -1897,6 +1982,10 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
       await assert.rejects(peekPdf(bad, o), /Word 没能把它转成 PDF：no Word here/);
       await assert.rejects(peekPdf(sheet, o), /Excel 没能把它转成 PDF：no Excel here/);
       assert.deepEqual(fs.readdirSync(dir).sort(), [path.basename(a), path.basename(c2)].sort()); // none half-made
+      const lock = path.join(tmp, 'locked.pptx'); fs.writeFileSync(lock, 'x');
+      const hold = { ppt: each('[IO.File]::WriteAllText($j.out, "pdf"); $f=[IO.File]::Open($j.out, "Open", "Read", "None"); "ok $($j.k)"; [Console]::Out.Flush(); Start-Sleep -Milliseconds 500; $f.Dispose()') };
+      await assert.rejects(peekPdf(lock, { dir, ps: hold }), /没能把它转成 PDF/);
+      await new Promise((ok) => setTimeout(ok, 1000));
       delete process.env.CM_RUNS; fs.rmSync(tmp, { recursive: true, force: true });
       console.log('peek ok');
     });
@@ -1970,6 +2059,7 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
       if (req.url === '/m/_quota') return send(req.headers.authorization === 'Bearer sk-cm-test' ? quotas : 401, [{ provider: 'claude', name: 'Claude Code', plan: 'pro', user: 's***@example.com', windows: [{ name: '5 hours', used: 14 }] }]);
       if (req.url === '/m/_sdk' && sdkOn) return send(req.headers.authorization === 'Bearer sk-cm-test' ? 200 : 401, sdkOn);
       if (req.url === '/m/apply') return send(200, { ticket: 'T-' + b.name });
+      if (b.ticket === 'T-gone') { res.writeHead(404, { 'content-type': 'text/html' }); return res.end('<html>Gone</html>'); }
       if (b.ticket !== 'T-me' && b.ticket !== 'T-no') return send(404, { err: '没有这个申请' });
       if (req.url === '/m/apply/done') { done++; return send(200, { ok: true }); }
       send(200, { state: b.ticket === 'T-no' ? 'rejected' : st, ...(st === 'approved' && { key: 'sk-cm-test' }) });
@@ -1983,6 +2073,14 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   await checkJoins();
   assert.equal(mine().length, 0);
   st = 'approved'; const rec = readJoins()[0];
+  const accounts = path.join(TEST_HOME, '.claude-multi', 'accounts'), folders = fs.readdirSync(accounts).sort(), rename = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    if (to === path.join(TEST_HOME, '.claude-multi', 'profiles.json')) throw Object.assign(new Error('registry full'), { code: 'ENOSPC' });
+    return rename(from, to);
+  };
+  try { await assert.rejects(checkJoins(), /registry full/); } finally { fs.renameSync = rename; }
+  assert.deepEqual(fs.readdirSync(accounts).sort(), folders);
+  assert.equal(readJoins()[0].state, 'pending');
   await checkJoins();
   const [p] = mine(), s = JSON.parse(fs.readFileSync(path.join(p.configDir, 'settings.json'), 'utf8'));
   assert.deepEqual([p.api.join, p.subscriptionType, readJoins().length], [rec.id, 'API', 0]);
@@ -2009,6 +2107,7 @@ const t = Date.now(), first = procStarts([process.pid]), quick = Date.now() - t 
   await joinApply({ url, name: 'no' }); // a new one at the same address replaces the last
   await checkJoins();
   assert.deepEqual(readJoins().map((j) => [j.name, j.state]), [['no', 'rejected']]);
+  await joinApply({ url, name: 'gone' }); await checkJoins(); assert.equal(readJoins()[0].state, 'gone');
   // applied there again and approved (a new application, a new key): the same account takes it, no second one
   fs.writeFileSync(path.join(TEST_HOME, '.claude-multi', 'join.json'), JSON.stringify([{ ...rec, id: 'again1', state: 'pending' }]));
   assert.equal(await checkJoins(), 1);

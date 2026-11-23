@@ -65,9 +65,10 @@ function common(a, b, tail = false, limit = Math.min(a.length, b.length)) {
   return n;
 }
 // the kept body that shares the most with body: { base, prefix, suffix }
-function closest(kept, body) {
+function closest(kept, body, scope = '') {
   let best = null;
   for (const [base, b] of kept.entries()) {
+    if (!base.startsWith(scope)) continue;
     const prefix = common(b, body), suffix = common(b, body, true, Math.min(b.length, body.length) - prefix);
     if (!best || prefix + suffix > best.prefix + best.suffix) best = { base, prefix, suffix };
   }
@@ -136,15 +137,16 @@ function send() {
     if (!to) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('delta.js: no such account'); }
     read(req, (body) => {
       const key = req.method === 'POST' && /\/v1\/messages$/.test(rest.split('?')[0]) && body.length > 0 && sha(body), t0 = Date.now();
+      const scope = to + '\n'; // one shared byte limit, but each receiver knows only its own bases
       let spent = 0;
       const go = (whole) => {
         const url = new URL(to + rest), headers = pass(req.headers);
         let data = body, d = null;
         if (key && to !== plain) {
           headers['x-delta-sha'] = key; // kept there as it is, and a delta's base from then on
-          d = whole || !can.get(to) ? null : closest(kept, body);
+          d = whole || !can.get(to) ? null : closest(kept, body, scope);
           if (d && d.prefix + d.suffix >= 1024) {
-            Object.assign(headers, { 'x-delta-base': d.base, 'x-delta-prefix': d.prefix, 'x-delta-suffix': d.suffix });
+            Object.assign(headers, { 'x-delta-base': d.base.slice(scope.length), 'x-delta-prefix': d.prefix, 'x-delta-suffix': d.suffix });
             data = body.subarray(d.prefix, body.length - d.suffix);
           } else d = null;
         }
@@ -158,7 +160,7 @@ function send() {
           const ok = r.headers['x-delta-ok'] === '1';
           if (ok) can.set(to, true); else if (d) can.set(to, false); // its receiving end gone: whole from the next one
           if (!key) return;
-          if (ok && r.statusCode < 300) keep(kept, key, body, d); // kept there too
+          if (ok && r.statusCode < 300) keep(kept, scope + key, body, d); // kept there too
           stats.requests++; stats.bytes += body.length;
           stats.last = [...stats.last.slice(-19), { at: new Date(t0).toISOString(), bytes: body.length, sent: spent, via: d ? 'delta' : 'whole', status: r.statusCode, ms: Date.now() - t0 }];
         });
