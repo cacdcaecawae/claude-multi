@@ -80,10 +80,14 @@
       queue: rows.map((r) => /^\s*▸\s+(.*?)\s*\(alt\+m to send immediately\)\s*$/.exec(r)?.[1]?.replace(/…$/, '')).filter(Boolean) };
   }
   // Codex's screen (OpenAI's Codex CLI, 0.171): at work, its status row over its box (「• Working (35s • esc to
-  // interrupt)」: its dot • or ◦, its words what it's at). Gone while its answer streams: what's said then is the service's
+  // interrupt)」: its dot • or ◦, its words what it's at). Gone while its answer streams: what's said then is the service's.
+  // starting: not up yet, a message sent meanwhile held till it is: its conversation loading (「Waiting for startup · esc
+  // cancel」 under its box), then its plugins' MCP servers starting (its status row 「• Starting MCP servers (1/2): …」), a
+  // minute and more with many plugins
   function parseCodexScreen(rows) {
     const row = rows.map((r) => /^\s*[•◦]\s+(\S.*?)\s+\(.*esc to interrupt\)/.exec(r)).filter(Boolean).pop();
-    return { busy: row ? [row[0], row[1], ''] : null, menu: null };
+    return { busy: row ? [row[0], row[1], ''] : null, menu: null,
+      starting: /^Starting MCP servers/.test(row?.[1] ?? '') || rows.some((r) => /Waiting for startup/.test(r)) };
   }
   if (typeof module !== 'undefined') module.exports = { parseScreen, parseAgyScreen, parseCodexScreen }; else Object.assign(root, { parseScreen, parseAgyScreen, parseCodexScreen });
 })(this);

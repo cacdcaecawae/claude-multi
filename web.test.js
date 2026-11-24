@@ -845,6 +845,20 @@ const press = async (key, shift = false) => {
   await new Promise((ok) => setTimeout(ok, 500)); // (drawn with the row after 停止)
   gemRes.write(`event: data\ndata: ${JSON.stringify(codex(''))}\n\n`);
   await until("hg.live === ''");
+  // a message sent while it isn't up yet (its conversation loading, then its plugins' MCP servers starting): Codex holds
+  // it till it is, and its bubble says so; GPT 正在启动, not 正在回复
+  gemRes.write(`event: data\ndata: ${JSON.stringify('\x1b[2J\x1b[H  Resuming session…\r\n\r\n› 统计一下\r\n\r\n  Waiting for startup  · esc cancel\r\n')}\n\n`);
+  await new Promise((ok) => setTimeout(ok, 500));
+  await evaluate("{ hg.el.querySelector('.send textarea').value = '统计一下'; hg.el.querySelector('.go').click(); }");
+  await until("hg.el.querySelector('.live .hm.user.pending .lab')?.textContent === 'GPT 还在启动，启动完会自动发出'");
+  assert.equal(await evaluate("hg.el.querySelector('.live .busy')"), null);
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex('• Starting MCP servers (1/2): computer-use (2s • esc to interrupt)'))}\n\n`);
+  await until("/^GPT 正在启动 · \\d+s$/.test(hg.el.querySelector('.live .busy')?.textContent ?? '')");
+  assert.equal(await evaluate("hg.el.querySelector('.live .hm.user.pending .lab')?.textContent"), 'GPT 还在启动，启动完会自动发出');
+  // up: the bubble waits as any (its record brings it)
+  gemRes.write(`event: data\ndata: ${JSON.stringify(codex('• Working (1s • esc to interrupt)'))}\n\n`);
+  await until("/^GPT 正在回复/.test(hg.el.querySelector('.live .busy')?.textContent ?? '')");
+  assert.equal(await evaluate("hg.el.querySelector('.live .hm.user.pending .lab')"), null);
   await evaluate('closeConv(hg)'); await both("state.sessions = state.sessions.filter((x) => x.id !== 'GPT1')");
   historyId = 'A'; histFeed = null; termGem = ''; gemRes = null;
   console.log('browser GPT 正在回复 ok');
