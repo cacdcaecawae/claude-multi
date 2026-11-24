@@ -1062,7 +1062,14 @@ if (SESSION0) {
   const work = (dot) => parseCodexScreen(['› 再写一篇，讲苹果的历史', '', `${dot} Working (35s • esc to interrupt)`, '  └ Tip: Switch models or reasoning effort quickly with /model.', ...foot]).busy;
   assert.deepEqual([work('•')?.[1], work('◦')?.[1], work('•')?.[2]], ['Working', 'Working', '']); // (how long: the page's count, as agy's)
   assert.equal(parseCodexScreen(['› 再写一篇，讲苹果的历史', '', '• # 苹果的历史：从天山果林到现代果园', '', '  ### 一、天山脚下的野果', ...foot]).busy, null);
-  assert.deepEqual(parseCodexScreen(foot), { busy: null, menu: null });
+  assert.deepEqual(parseCodexScreen(foot), { busy: null, menu: null, starting: false });
+  assert.equal(parseCodexScreen(['› 再写一篇，讲苹果的历史', '', '• Working (35s • esc to interrupt)', ...foot]).starting, false);
+  // not up yet, a message held (as 0.171 drew them, resuming a big conversation): its conversation loading, then its
+  // plugins' MCP servers starting (at work as far as its row goes)
+  const loading = parseCodexScreen(['  >_ OpenAI Codex (v0.171.0)', '', '  Resuming session…', '', '› 统计一下，一共多少个算法函数', '', '  Waiting for startup  · esc cancel']);
+  assert.deepEqual([loading.starting, loading.busy], [true, null]);
+  const mcp = parseCodexScreen(['› 统计一下，一共多少个算法函数', '', '• Starting MCP servers (1/2): computer-use (0s • esc to interrupt)', ...foot]);
+  assert.deepEqual([mcp.starting, mcp.busy?.[1]], [true, 'Starting MCP servers']); // (its words: up to the first bracket)
   console.log('codex screen ok');
 }
 // What's on Claude's screen (screen.js, the page's and the 管家's): a question's options, the trust question, and

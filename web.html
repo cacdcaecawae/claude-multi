@@ -3077,15 +3077,16 @@ function makeConv(body, title) {
     // in Claude's queue (taken in once its current step is done): 排队中 on it; one sent from elsewhere (its window, another
     // page, the 管家) waiting there too, in the order they were sent
     const flat = (s) => s.replace(/\s+/g, ''), same = (s, x) => flat(x.text) === flat(s.text) || (s.text && flat(x.text).includes(flat(s.text))) || (x.cut && s.text && flat(s.text).startsWith(flat(x.text)));
-    const Q = '<span class="lab">排队中</span>';
+    // a GPT one not up yet (screen.js: starting): Codex holds what's sent till it is, and sends it then
+    const Q = '<span class="lab">排队中</span>', S = sc?.starting ? '<span class="lab">GPT 还在启动，启动完会自动发出</span>' : '';
     const h = [...sent.map((s) => ({ at: s.at, h: (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
-      + (s.text ? `<div class="hm user pending">${queued.some((x) => same(s, x)) ? Q : ''}${userBody(s.text, [], true)}</div>` : '') })),
+      + (s.text ? `<div class="hm user pending">${queued.some((x) => same(s, x)) ? Q : S}${userBody(s.text, [], true)}</div>` : '') })),
     ...queued.filter((x) => !sent.some((s) => same(s, x))).map((x) => ({ at: x.at, h: `<div class="hm user pending">${Q}${userBody(x.text, [], true)}</div>` }))]
       .sort((a, b) => a.at - b.at).map((x) => x.h).join('') + (menu
       ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${askHead(menu)}${askOpts(menu, (o) => `data-pick="${o.n}"`, (o) => typeNow && o.n === menu.cur)}
         ${typeNow ? '<div class="hint2">在下面的输入框里写你的回答，发送后填进这一项</div>' : ''}
         <div class="row2">${menu.tabs ? '<button data-key="prev">← 上一题</button><button data-key="next" class="push">下一题 →</button>' : ''}<button data-key="esc">取消</button><button data-key="term">去终端里操作</button></div></div>`
-      : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : `${c.gem ? 'Gemini' : c.gpt ? 'GPT' : 'Claude'} 正在回复`}${took ? ' · ' + took : ''}</div>`
+      : busy ? `<div class="busy"><i></i>${/compact/i.test(busy[1]) ? '正在压缩对话' : sc?.starting ? 'GPT 正在启动' : `${c.gem ? 'Gemini' : c.gpt ? 'GPT' : 'Claude'} 正在回复`}${took ? ' · ' + took : ''}</div>`
       : sc?.writing ? '<div class="ask"><div class="hint2">在下面的输入框里写你的回答，发送后就是你的答案</div><div class="row2"><button data-key="esc">回到选项</button><button data-key="term">去终端里操作</button></div></div>' : '');
     if (!menu) typing = null;
     busyNow = !!busy && !menu; menuNow = !!menu; writeNow = !menu && !!sc?.writing; goMode();
