@@ -1236,6 +1236,17 @@ const shownConvs = () => (butler ? [peek ?? bConv] : groups.filter((g) => !g.min
 // Like the island: one account to the end, a conversation continues on its own account. Only when that one has
 // under an hour left and the recommended one has more, a sheet asks first (accounts don't share their prompt
 // cache). Resolves to the account number, or 0 when cancelled.
+// Going to another Gemini account (one on at a time) ends the Gemini ones running here and starts each again on it:
+// asked first, naming them, those answering said (cut short: you tell them to go on). One in a terminal window can't
+// go: said, nothing done. null: not going; else { move: whether others go along }
+function gemAlong(acct, self) {
+  if (state?.gemini?.[acct - 1]?.on) return { move: false };
+  const run = (state?.sessions ?? []).filter((x) => x.gem && x.pid && x.id !== self), pc = run.filter((x) => x.where === 'pc'), here = run.filter((x) => x.where !== 'pc');
+  if (pc.length) { toast(`电脑终端窗口里还有 Gemini 对话在运行（${pc.map((x) => x.title).join('、')}）：先在那里结束，才能换到 A${acct}`, 6000); return null; }
+  if (!here.length) return { move: false };
+  return confirm(`换到 Gemini 账号 A${acct}？\n同一时间只能一个 Gemini 账号在线，这 ${here.length} 个运行中的对话会先关掉，再在 A${acct} 上自动接着开：\n\n`
+    + here.map((x) => `· ${x.title}${x.busy ? '（正在回答：会被打断，换好后要你让它继续）' : ''}`).join('\n')) ? { move: true } : null;
+}
 function pickAcct(s) {
   if (s.gpt || s.gem) return Promise.resolve(s.acct + 1); // a GPT or Gemini one: its own account (it can't change)
   const u = state?.usage, a = u?.accounts?.[s.acct], b = u?.accounts?.[u?.rec];
@@ -2293,7 +2304,7 @@ function newSheet(kind) {
         用你的 OpenAI key 按用量计费，Pro 难的问题一次要想几分钟，答好了会通知你。</div>`
       : `<div class="m" style="margin-top:12px">账号</div><div class="opts">${accts.join('')}</div>
       ${api ? `<div class="opts">${[['', 'Claude Code'], ['1', 'API 额度：Agent SDK，按用量计费']].map(([v, l]) => `<button class="opt ${!!v === sdk ? 'on' : ''}" data-sdk="${v}">${l}</button>`).join('')}</div>` : ''}
-      ${gemOn && gm[acct - 1] && !gm[acct - 1].on ? '<div class="m" style="white-space:normal;margin-bottom:8px">同一时间只有一个 Gemini 账号在线：开始时会先换到这个账号，运行中的 Gemini 对话会一起换过去。</div>' : ''}
+      ${gemOn && gm[acct - 1] && !gm[acct - 1].on ? '<div class="m" style="white-space:normal;margin-bottom:8px">同一时间只有一个 Gemini 账号在线：开始时会先换到这个账号。</div>' : ''}
       <div class="m">文件夹</div><div class="opts">${mac ? `<button class="opt ${dir ? '' : 'on'}" data-d="" title="不对应你电脑上的文件夹">${esc(base(mac.dir))}</button>` : ''}${dirs.map((d) => `<button class="opt ${dir === d ? 'on' : ''}" data-d="${esc(d)}" title="${esc(d)}">${esc(base(d))}</button>`).join('')}</div>
       <div class="dirRow"><input type="text" id="dirIn" value="${esc(dir)}" placeholder="或输入完整路径"><button class="btn" id="browse">浏览…</button></div>
       ${mac ? `<div class="m" style="margin-top:8px;white-space:normal">${dir ? `在 ${esc(mac.label)} 上的 ${esc(mac.dir)}/${esc(base(dir))} 里运行，用那边的账号，通过 ssh 改你电脑上这个文件夹里的文件。`
@@ -2313,8 +2324,10 @@ function newSheet(kind) {
     }
     $('#cancel').onclick = sheetOff;
     $('#start').onclick = () => {
+      const go = gemOn && !mac ? gemAlong(acct, null) : {};
+      if (!go) return;
       sheetOff();
-      addConv(focusG, oai ? makeOai(null, '新对话') : api && sdk ? makeSdk({ acct, dir }, base(dir) || '新对话') : mac ? makeConv({ mac: mac.id, open: true, dir }, base(dir) || mac.label) : makeConv({ dir, acct, gpt, gem: gemOn }, base(dir) || '新对话'));
+      addConv(focusG, oai ? makeOai(null, '新对话') : api && sdk ? makeSdk({ acct, dir }, base(dir) || '新对话') : mac ? makeConv({ mac: mac.id, open: true, dir }, base(dir) || mac.label) : makeConv({ dir, acct, gpt, gem: gemOn, ...(go.move && { move: true }) }, base(dir) || '新对话'));
     };
   };
   draw(); $('#sheet').classList.add('on');
@@ -3192,26 +3205,23 @@ function makeConv(body, title) {
     if (!c.id) return toast('这个对话还没有消息，不用换账号');
     if (gm.length < 2) return toast('只有一个 Gemini 账号：在电脑上运行 claude-multi new gemini 再加一个');
     let acct = gm.findIndex((_, i) => i !== cur) + 1;
-    // one account on at a time: the other Gemini ones running here go along (those in a terminal window can't)
-    const others = (state?.sessions ?? []).filter((x) => x.gem && x.pid && x.id !== c.id), pc = others.filter((x) => x.where === 'pc'), web = others.filter((x) => x.where !== 'pc');
     const draw = () => {
-      const along = !gm[acct - 1]?.on && web.length, cut = web.filter((x) => x.busy).length;
       $('#sheetIn').innerHTML = `<div class="stitle">换账号继续</div><div class="m" style="margin-top:4px">${esc(c.title)}</div>
         <div class="m" style="margin-top:14px">换到</div><div class="opts">${gm.map((g, i) => `<button class="opt ${acct === i + 1 ? 'on' : ''}" data-a="${i + 1}"${i === cur ? ' disabled' : ''}>
           A${i + 1} · ${esc(g.label)}<small>${i === cur ? '当前' : used(g) != null ? `额度用了 ${used(g)}%` : ''}</small></button>`).join('')}</div>
-        ${busyNow ? '<div class="m" style="white-space:normal">它正在回答：现在换，这一轮会被打断</div>' : ''}
-        ${along ? `<div class="m" style="white-space:normal">同一时间只能一个 Gemini 账号在线：另外 ${web.length} 个运行中的 Gemini 对话会一起换到 A${acct}${cut ? `，其中 ${cut} 个正在回答，会被打断` : ''}</div>` : ''}
-        ${pc.length && !gm[acct - 1]?.on ? `<div class="m" style="white-space:normal">电脑终端窗口里还有 ${pc.length} 个 Gemini 对话在运行：先在那里结束它们才能换</div>` : ''}
+        ${busyNow ? '<div class="m" style="white-space:normal">它正在回答：现在换，这一轮会被打断，换好后要你让它继续</div>' : ''}
         <div class="btns" style="margin-top:16px"><button class="btn" id="cancel">取消</button><button class="btn primary" id="swapGo" style="flex:2">换到 A${acct}</button></div>`;
       document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
       $('#cancel').onclick = sheetOff;
       $('#swapGo').onclick = async () => {
+        const go = gemAlong(acct, c.id);
+        if (!go) return; // (the sheet stays: another account, or 取消)
         sheetOff();
-        if (!key || c.ended) { body = { id: c.id, acct, gem: true }; c.acct = acct; return start(); }
+        if (!key || c.ended) { body = { id: c.id, acct, gem: true, move: go.move }; c.acct = acct; return start(); }
         toast(`正在换到 Gemini 账号 A${acct}…`, 8000);
         gen++; es?.close(); es = null; // (its old agy's end isn't this tab's)
         try {
-          const r = await post('/api/open', { id: c.id, gem: true, swap: true, acct, cols: term?.cols, rows: term?.rows });
+          const r = await post('/api/open', { id: c.id, gem: true, swap: true, acct, move: go.move, cols: term?.cols, rows: term?.rows });
           switching = acct; ({ key, kind } = r); switched(); connect();
         } catch (e) { switching = 0; toast(e.message, 6000); body = { id: c.id, gem: true }; start(); } // (on as it was, or again where the service put it)
       };
