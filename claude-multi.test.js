@@ -2338,6 +2338,24 @@ if (process.platform === 'win32') {
   fs.writeFileSync(path.join(GEM, 'brain', 'c-long', '.system_generated', 'logs', 'transcript_full.jsonl'),
     [U('写长一点', '2026-11-20T09:00:00Z'), M(long, '2026-11-20T09:00:09Z')].map((s, i) => JSON.stringify({ step_index: i, status: 'DONE', ...s })).join('\n') + '\n');
   assert.deepEqual(hd('c-long').map((m) => m[1]), ['写长一点', long, '9000']);
+  // your message over 4 KB, its whole line not written yet (agy writes it a moment after the cut one): nothing handed
+  // out from it on, the page to ask again from there; once written, whole (not the cut one, kept: it didn't match
+  // the message you sent, whose grey copy stayed under it)
+  const mine = '我'.repeat(1500) + '中间' + '的'.repeat(1500), mineCut = '我'.repeat(600) + '\n<truncated 4000 bytes>\n' + '的'.repeat(600);
+  const fullOf = (id) => path.join(GEM, 'brain', id, '.system_generated', 'logs', 'transcript_full.jsonl');
+  rec('c-cut', [{ ...U('先说一句', '2026-11-20T09:00:00Z') }, M('好', '2026-11-20T09:00:05Z'), { ...U(mineCut, '2026-11-20T09:01:00Z'), truncated_fields: ['content'] }]);
+  fs.writeFileSync(fullOf('c-cut'), [U('先说一句', '2026-11-20T09:00:00Z'), M('好', '2026-11-20T09:00:05Z')].map((s, i) => JSON.stringify({ step_index: i, status: 'DONE', ...s })).join('\n') + '\n');
+  const early = gemHistory('c-cut', { live: true });
+  assert.deepEqual([early.items.map((m) => m.role), early.end], [['user', 'claude', 'done'], 2]);
+  assert.deepEqual(gemHistory('c-cut', { from: 2, live: true }), { items: [], start: 0, end: 2 });
+  fs.appendFileSync(fullOf('c-cut'), JSON.stringify({ step_index: 2, status: 'DONE', ...U(mine, '2026-11-20T09:01:00Z') }) + '\n');
+  const later = gemHistory('c-cut', { from: 2, live: true });
+  assert.deepEqual([later.items.map((m) => [m.role, m.text]), later.end], [[['user', mine]], 3]);
+  // its whole line never written (an agy ended first), the record left a while: the cut one, as before
+  rec('c-gone', [{ ...U(mineCut, '2026-11-20T09:01:00Z'), truncated_fields: ['content'] }]);
+  const old = (Date.now() - 60000) / 1000, tr = path.join(GEM, 'brain', 'c-gone', '.system_generated', 'logs', 'transcript.jsonl');
+  fs.utimesSync(tr, old, old);
+  assert.deepEqual(gemHistory('c-gone').items.map((m) => [m.role, m.text]), [['user', mineCut.trim()], ['done', '1000']]);
   assert.deepEqual([hd('../c-old'), hd('nope')], [[], []]);
   // the same ones with A2 on (they go on with it); none before there's an account
   fs.writeFileSync(regFile, JSON.stringify({ ...JSON.parse(reg0), gemini: [a1, a2], geminiOn: a2.id }));

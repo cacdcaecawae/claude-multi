@@ -1642,14 +1642,22 @@ function gemSteps(id) {
   // a field over 4 KB is cut there (its first and last 2 KB, 「<truncated N bytes>」 between, truncated_fields naming it):
   // whole on the same line of transcript_full.jsonl. Taken from there for what's shown (yours, its replies and calls, an
   // error), not for a tool's result (only its first line is read: up to tens of KB each, kept for 30 conversations)
-  let steps, full;
+  // Its whole line is written a moment after the cut one: till then (the record written in the last 30 s) the step is
+  // partial, the read not kept, and gemHistory hands out nothing from it on (a page keeps what it was given: your
+  // message cut there didn't match the one you sent, its grey copy left under it). Older (an agy ended first): as it is
+  let steps, full, partial = false;
+  const fresh = Date.now() - mt < 30000;
   const whole = (s, i) => {
     if (!s.truncated_fields || s.type === 'GENERIC') return s;
     if (full === undefined) try { full = fs.readFileSync(f.replace(/transcript\.jsonl$/, 'transcript_full.jsonl'), 'utf8').split('\n'); } catch { full = []; }
-    try { const w = JSON.parse(full[i]); return w.step_index === s.step_index ? w : s; } catch { return s; } // (still being written: as it is)
+    try { const w = JSON.parse(full[i]); if (w.step_index === s.step_index) return w; } catch {}
+    if (!fresh) return s;
+    partial = true;
+    return { ...s, partial: true };
   };
   try { steps = fs.readFileSync(f, 'utf8').split('\n').flatMap((l, i) => { try { return [whole(JSON.parse(l), i)]; } catch { return []; } }); } catch { return r?.steps ?? []; }
   steps.sort((a, b) => a.step_index - b.step_index);
+  if (partial) return steps;
   gemReads.set(id, { mt, steps });
   if (gemReads.size > 30) gemReads.delete(gemReads.keys().next().value);
   return steps;
@@ -1673,7 +1681,7 @@ function gemSum(id) {
   const sum = you ? { first: gemSaid(you.content).split('\n')[0].trim(), made: gemTime(you.created_at), said: gemTime(yours.at(-1).created_at), lastAt: gemTime(last.created_at),
     going: last.status === 'WAITING' ? 'wait' : (last.type === 'PLANNER_RESPONSE' && !gemCalls(last).length) || last.type === 'ERROR_MESSAGE' ? null : 'busy', n: steps.length,
     err: last.type === 'ERROR_MESSAGE' ? String(last.error ?? last.content ?? '').split('\n')[0].slice(0, 200) || '出错了' : null } : null;
-  gemSums.set(id, { mt, sum });
+  if (!steps.some((s) => s.partial)) gemSums.set(id, { mt, sum }); // (read again once whole)
   return sum;
 }
 // a turn of its over, by an agy that began at since: its steps then (each turn's end told once by that), else null
@@ -1823,7 +1831,8 @@ function gemEdit(c, r) {
   return { text: file, add: said ? +said[1] : lines(a.Content ?? a.Replacement ?? a.CodeContent), del: said ? +said[2] : lines(a.Target) };
 }
 function gemHistory(id, { from, end, keep = 120, live = false } = {}) {
-  const got = gemSteps(id);
+  const all = gemSteps(id), cut = all.findIndex((s) => s.partial), got = cut < 0 ? all : all.slice(0, cut); // (a partial step: it and what follows next time)
+  if (cut >= 0) live = true; // (its turn not over as far as this read goes)
   let items = [], turn = null, calls = []; // the turn going (when it began, its last step's time); the calls of the last reply not answered yet
   const over = (o) => { if (turn) items.push({ role: 'done', text: String(Math.max(1000, turn.last - turn.at)), o }); turn = null; };
   for (const s of got) {
