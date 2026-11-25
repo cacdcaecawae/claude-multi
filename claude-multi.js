@@ -4117,17 +4117,20 @@ async function web() {
     const r = await agyTasks(), mine = new Set(gemLive().map((t) => t.pid));
     return !r.ok || r.pids.some((p) => !mine.has(p));
   };
-  // One Gemini account on at a time, so going to another takes every Gemini conversation running here with it: each
-  // agy ended (an answer on its way cut short), the account switched, then each started again on it (its pages follow,
-  // event switched). Not while an agy runs elsewhere. One at a time. → the ones ended, for startGem to start again;
-  // the switch failing: the one on before on again, and e.moved, e.back (to start them on). shortcut: a new one whose
-  // id isn't found yet starts again as a new one
+  // One Gemini account on at a time, so going to another takes every Gemini conversation running here with it, once
+  // asked to (move: the page's 确认, which names them; the 管家, the CLI and a stale page are refused): each agy ended
+  // (an answer on its way cut short: you tell it to go on), the account switched, then each started again on it (its
+  // pages follow, event switched). Not while an agy runs elsewhere. One at a time. → the ones ended, for startGem to
+  // start again; the switch failing: the one on before on again, and e.moved, e.back (to start them on). shortcut: a
+  // new one whose id isn't found yet starts again as a new one
+  const gemBusy = (g, n) => new Error(`还有 ${n} 个 Gemini 对话在运行：同一时间只能一个 Gemini 账号在线，换到 A${geminiAccounts().findIndex((x) => x.id === g.id) + 1} 要先关掉它们（在网页上换账号，确认后会一起换过去）`);
   let gemMoveQ = Promise.resolve();
-  function gemMove(g) {
+  function gemMove(g, move) {
     const p = gemMoveQ.then(async () => {
       const reg = load();
       if (reg.geminiOn === g.id) return [];
       const was = geminiAccounts(reg).find((x) => x.id === reg.geminiOn), ours = gemLive();
+      if (ours.length && !move) throw gemBusy(g, ours.length);
       if (ours.length) {
         if (await gemForeign()) throw new Error('电脑的终端窗口里还有 agy 在运行：先在那里结束它，再换 Gemini 账号（同一时间只能一个 Gemini 账号在线）');
         for (const t of ours) { t.switching = true; require('child_process').execFile('taskkill', ['/pid', String(t.pid), '/t', '/f'], { windowsHide: true }, () => {}); }
@@ -4172,13 +4175,13 @@ async function web() {
   };
   setInterval(() => gemPcScan().catch(() => {}), 10000);
   setTimeout(() => gemPcScan().catch(() => {}), 2000);
-  async function startGem(acct, cwd, resume, cols = 100, rows = 30) {
+  async function startGem(acct, cwd, resume, cols = 100, rows = 30, move = false) { // move: the others may go along (gemMove)
     const g = geminiAccounts()[acct - 1], agy = agyCmd();
     if (!g) throw new Error('没有这个 Gemini 账号');
     if (!agy) throw new Error(`没找到 agy，先装好 Antigravity 的命令行：${AGY_GET}`);
     if (sameDir(cwd, BUTLER)) throw new Error('管家的文件夹里不开 Gemini 对话');
     let moved;
-    try { moved = await gemMove(g); } catch (e) {
+    try { moved = await gemMove(g, move); } catch (e) {
       if (e.moved?.length) gemRestart(e.moved, e.back && load().geminiOn === e.back.id ? geminiAccounts().findIndex((x) => x.id === e.back.id) + 1 : 0, e.message);
       throw e;
     }
@@ -5061,7 +5064,7 @@ async function web() {
       if (b.gem) { // a Gemini one: {id} its agy here, or continued here (acct: on that account, else the one on); {dir, acct} a new one
         if (!b.id) {
           if (!isDir(b.dir)) throw new Error('文件夹不存在');
-          return opened(await startGem(Number(b.acct) || 1, b.dir, null, cols, rows));
+          return opened(await startGem(Number(b.acct) || 1, b.dir, null, cols, rows, !!b.move));
         }
         const t = gemLive().find((x) => x.gem.id === b.id), s = gemSessions().find((x) => x.id === b.id), cwd = t?.cwd ?? s?.cwd;
         if (!t && s?.pid && s.web === false) { // in a terminal window: shown from there, as a Claude is (not a second agy on it)
@@ -5077,12 +5080,14 @@ async function web() {
           // an agy elsewhere (a terminal window's, the one that read the / menu): the switch would be refused once this one's ended
           if (g.id !== load().geminiOn && await gemForeign())
             throw new Error('电脑的终端窗口里还有 agy 在运行（或刚读过 / 命令的那个）：同一时间只能一个 Gemini 账号在线，等它们结束再换');
+          const others = gemLive().filter((x) => x !== t).length; // (refused before this one's ended, not after)
+          if (g.id !== load().geminiOn && others && !b.move) throw gemBusy(g, others);
           const free = hold(b.id, 'swap'); // (not deleted meanwhile)
           try {
             require('child_process').execFile('taskkill', ['/pid', String(t.pid), '/t', '/f'], { windowsHide: true }, () => {});
             for (let k = 0; k < 50 && !t.gone; k++) await sleep(100);
             if (!t.gone) throw new Error('它的 agy 没能停下来，稍后再试');
-            try { return await opened(await startGem(Number(b.acct), cwd, b.id, cols, rows)); } catch (e) {
+            try { return await opened(await startGem(Number(b.acct), cwd, b.id, cols, rows, !!b.move)); } catch (e) {
               const back = geminiAccounts().findIndex((x) => x.id === load().geminiOn) + 1;
               let on = false;
               if (back) try { await startGem(back, cwd, b.id, cols, rows); on = true; } catch {}
@@ -5094,7 +5099,7 @@ async function web() {
         if (!s) throw new Error('找不到这个对话');
         if (b.live) throw new Error('这个对话已经不在运行了');
         if (doing.get(s.id) === 'change') throw new Error('这个对话正在改名或删除，稍等一下');
-        return opened(await startGem(Number(b.acct) || s.acct + 1, s.cwd, s.id, cols, rows));
+        return opened(await startGem(Number(b.acct) || s.acct + 1, s.cwd, s.id, cols, rows, !!b.move));
       }
       if (b.mac && !b.id) { // {mac: its id (true: the Mac mini), dir?}: one started on that Mac, for that folder here (its project folder there), or in the Mac's folder
         if (b.dir && !isDir(b.dir)) throw new Error('文件夹不存在');

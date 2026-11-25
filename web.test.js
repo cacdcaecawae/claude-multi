@@ -786,20 +786,29 @@ const press = async (key, shift = false) => {
   for (let i = 0; i < 60 && inputs.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(inputs.slice(0, 2), ['\x1b[200~紫色\x1b[201~', '\r']);
   assert.equal(await evaluate("!!focusG.active.el.querySelector('.live .hm.user.pending')"), false); // an answer, not a message waiting for the record
-  // other Gemini ones running: going to another account takes those here along (one cut short: said); a terminal
-  // window's can't go
-  await both("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false }]; state.sessions.push({ id: 'GEM8', gem: true, title: 'b', acct: 0, cwd: 'C:/t', at: 1, pid: 8, where: 'web', busy: true }, { id: 'GEM9', gem: true, title: 'c', acct: 0, cwd: 'C:/t', at: 1, pid: 9, where: 'pc' })", 'focusG.active.acct = 1; focusG.active.swap()');
-  await until("document.querySelector('#sheetIn [data-a=\"2\"]')");
-  assert.match(await evaluate("document.querySelector('#sheetIn').textContent"), /另外 1 个运行中的 Gemini 对话会一起换到 A2，其中 1 个正在回答，会被打断[\s\S]*电脑终端窗口里还有 1 个 Gemini 对话在运行/);
-  await both("state.sessions = state.sessions.filter((x) => !['GEM8', 'GEM9'].includes(x.id))", 'sheetOff()');
-  // 换账号继续 on another Gemini account (its quota on the card): the service asked to end it here and go on there
+  // other Gemini ones running: going to another account asks first, naming them (one answering: cut short, you tell it
+  // to go on); 取消: nothing sent, the sheet stays. One in a terminal window: said, nothing asked or sent
+  openBodies.length = 0;
+  await both("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false }]; state.sessions.push({ id: 'GEM9', gem: true, title: 'c', acct: 0, cwd: 'C:/t', at: 1, pid: 9, where: 'pc' })", 'focusG.active.acct = 1; focusG.active.swap()');
+  await until("document.querySelector('#swapGo')");
+  await evaluate("window.confirm0 = window.confirm; window.asked = null; window.confirm = (t) => { asked = t; return false; }; document.querySelector('#swapGo').click()");
+  assert.deepEqual(await evaluate("[asked, document.querySelector('#toast').textContent]"), [null, '电脑终端窗口里还有 Gemini 对话在运行（c）：先在那里结束，才能换到 A2']);
+  await both("state.sessions = state.sessions.filter((x) => x.id !== 'GEM9'); state.sessions.push({ id: 'GEM8', gem: true, title: 'b', acct: 0, cwd: 'C:/t', at: 1, pid: 8, where: 'web', busy: true })");
+  await evaluate("document.querySelector('#swapGo').click()");
+  assert.match(await evaluate('asked'), /^换到 Gemini 账号 A2？[\s\S]*这 1 个运行中的对话会先关掉，再在 A2 上自动接着开[\s\S]*· b（正在回答：会被打断，换好后要你让它继续）$/);
+  await new Promise((ok) => setTimeout(ok, 300));
+  assert.deepEqual([await evaluate("document.querySelector('#sheet').classList.contains('on')"), openBodies.length], [true, 0]);
+  await evaluate("window.confirm = () => true; sheetOff()");
+  // 换账号继续 on another Gemini account (its quota on the card): the service asked to end it here and go on there (the
+  // other one going along, as confirmed)
   openBodies.length = 0;
   await both("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false, windows: [{ k: 'five_hour', pct: 30, reset: '1小时' }] }]", 'focusG.active.acct = 1; focusG.active.swap()');
   await until("document.querySelector('#sheetIn [data-a=\"2\"]')");
   assert.match(await evaluate("document.querySelector('#sheetIn [data-a=\"2\"]').textContent"), /A2 · g2@example\.com\s*额度用了 30%/);
   await evaluate("document.querySelector('#sheetIn [data-a=\"2\"]').click(); document.querySelector('#swapGo').click()");
   const sw = await opened();
-  assert.deepEqual([sw?.id, sw?.gem, sw?.swap, sw?.acct], ['GEM1', true, true, 2]);
+  assert.deepEqual([sw?.id, sw?.gem, sw?.swap, sw?.acct, sw?.move], ['GEM1', true, true, 2, true]);
+  await both("state.sessions = state.sessions.filter((x) => x.id !== 'GEM8')", 'window.confirm = window.confirm0');
   await until("/已换到 Gemini 账号 A2/.test(document.querySelector('#toast').textContent)");
   await both("Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 1, pid: 123 })", 'focusG.active.sync()'); // the list: running here, on A2 now (the one on)
   await until('focusG.active.acct === 2');
