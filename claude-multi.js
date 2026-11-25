@@ -1393,8 +1393,12 @@ function agyCmd() { // its installer's agy.exe (on the PATH, or where it puts it
 // after 60 s), stdout }
 const execA = (file, args, o = {}) => new Promise((ok) => require('child_process').execFile(file, args, { encoding: 'utf8', windowsHide: true, timeout: 60000, ...o },
   (e, stdout, stderr) => ok({ status: !e ? 0 : Number.isInteger(e.code) && !e.killed ? e.code : -1, stdout: stdout ?? '', stderr: stderr ?? '' })));
+// the agy programs running (tasklist): { ok, pids }; CM_AGY's own name for tests (an isolated run never sees yours)
+const agyImage = () => (process.env.CM_AGY ? path.basename(process.env.CM_AGY) : 'agy.exe');
+const agyFrom = (out) => [...String(out ?? '').matchAll(/^"([^"]+)","(\d+)"/gm)].filter((m) => m[1].toLowerCase() === agyImage().toLowerCase()).map((m) => +m[2]);
+const agyTasks = async () => { const r = await execA('tasklist', ['/fi', `imagename eq ${agyImage()}`, '/fo', 'csv', '/nh']); return { ok: r.status === 0, pids: agyFrom(r.stdout) }; };
 // (tasklist failing: as if one ran, so nothing switches blind)
-const agyRunning = async () => { const r = await execA('tasklist', ['/fi', 'imagename eq agy.exe', '/fo', 'csv', '/nh']); return r.status !== 0 || /^"agy\.exe"/im.test(r.stdout); };
+const agyRunning = async () => { const r = await agyTasks(); return !r.ok || r.pids.length > 0; };
 // The sign-in entry, read and written as agy's keyring library does (a generic credential, its user the part after the
 // colon, its bytes as they are), never through this process: save (to CM_FILE, DPAPI), load (from it), drop, has, peek
 // (its bytes, base64: only for the account's email). Exit 3: there's none.
@@ -2056,8 +2060,7 @@ function rename(id, name) {
 // files) is moved into N's first when another account wrote it last.
 // A Gemini one from the command line (the island, the 管家): which agy run (any: here or in a window), and the account
 // n names (A2 or 2; the one on when none: its record is every account's)
-const agyPids = () => (WIN ? new Set([...String(spawnSync('tasklist', ['/fi', 'imagename eq agy.exe', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true }).stdout ?? '')
-  .matchAll(/^"agy\.exe","(\d+)"/gim)].map((m) => +m[1])) : new Set());
+const agyPids = () => (WIN ? new Set(agyFrom(spawnSync('tasklist', ['/fi', `imagename eq ${agyImage()}`, '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true }).stdout)) : new Set());
 const gemAcct = (n, reg = load()) => { const all = geminiAccounts(reg); return all[Number(String(n ?? '').replace(/^A/i, '')) - 1] ?? all.find((g) => g.id === reg.geminiOn) ?? all[0]; };
 function resume(id, n) {
   const reg = load(), s = listSessions(reg).find((x) => x.id === id), gm = !s && listGemini(reg).find((x) => x.id === id);
@@ -4103,11 +4106,48 @@ async function web() {
     if (!gptUse || Date.now() - gptUseAt > 30000) { gptUse = gptAccounts().map((g) => ({ label: g.label, plan: g.plan, ...(gptUsage(g.home) ?? { windows: null }) })); gptUseAt = Date.now(); }
     return gptUse;
   };
-  // A Gemini conversation started or continued here: agy in a pseudo-terminal, its account switched on first (refused
-  // while an agy runs on another). A new one's id: the conversation its agy's log names (gemRead), or the one of its
-  // account and folder whose first message came a few seconds after an Enter typed in it from a page; till then it has
-  // none, and nobody watching it for 30 s ends it (it couldn't be found again)
+  // A Gemini conversation started or continued here: agy in a pseudo-terminal, its account switched on first (gemMove:
+  // the others running here go with it). A new one's id: the conversation its agy's log names (gemRead), or the one of
+  // its account and folder whose first message came a few seconds after an Enter typed in it from a page; till then it
+  // has none, and nobody watching it for 30 s ends it (it couldn't be found again)
   const gemLive = () => [...terms.values()].filter((t) => t.gem && !t.gone);
+  // an agy not started here (a terminal window's, start An's, one that read the / menu): nothing here can move it, and
+  // it would go on as the next account (tasklist failing: as if one ran)
+  const gemForeign = async () => {
+    const r = await agyTasks(), mine = new Set(gemLive().map((t) => t.pid));
+    return !r.ok || r.pids.some((p) => !mine.has(p));
+  };
+  // One Gemini account on at a time, so going to another takes every Gemini conversation running here with it: each
+  // agy ended (an answer on its way cut short), the account switched, then each started again on it (its pages follow,
+  // event switched). Not while an agy runs elsewhere. One at a time. → the ones ended, for startGem to start again;
+  // the switch failing: the one on before on again, and e.moved, e.back (to start them on). shortcut: a new one whose
+  // id isn't found yet starts again as a new one
+  let gemMoveQ = Promise.resolve();
+  function gemMove(g) {
+    const p = gemMoveQ.then(async () => {
+      const reg = load();
+      if (reg.geminiOn === g.id) return [];
+      const was = geminiAccounts(reg).find((x) => x.id === reg.geminiOn), ours = gemLive();
+      if (ours.length) {
+        if (await gemForeign()) throw new Error('电脑的终端窗口里还有 agy 在运行：先在那里结束它，再换 Gemini 账号（同一时间只能一个 Gemini 账号在线）');
+        for (const t of ours) { t.switching = true; require('child_process').execFile('taskkill', ['/pid', String(t.pid), '/t', '/f'], { windowsHide: true }, () => {}); }
+        for (let k = 0; k < 50 && ours.some((t) => !t.gone); k++) await sleep(100);
+        if (ours.some((t) => !t.gone)) { const e = new Error('有个 Gemini 对话的 agy 没能停下来，稍后再试'); e.moved = ours.filter((t) => t.gone); e.back = was; throw e; }
+      }
+      try { await gemOn(g); } catch (e) {
+        if (ours.length && was) try { await gemOn(was); } catch {}
+        e.moved = ours; e.back = was; throw e;
+      }
+      return ours;
+    });
+    gemMoveQ = p.catch(() => {});
+    return p;
+  }
+  // the ones gemMove ended, started again on account n (from 1): their pages follow; none (or one that won't start): ended
+  const gemRestart = (list, n, why) => {
+    for (const x of list) (n ? startGem(n, x.cwd, x.gem.id, x.w, x.h) : Promise.reject(new Error(why)))
+      .then((t) => send(x, 'switched', { key: t.key, acct: n }), (e) => { send(x, 'swapfail', { err: `没换成：${e.message}` }); send(x, 'gone', {}); });
+  };
   // Every agy.exe running (tasklist, every 10 s) and what each one's log says (read every 2 s, only what it added):
   // gemAgys id → { pid, since, cut, ask }; of those, the ones not run here (a terminal window's): gemPc. One run here that
   // moved to another conversation (/clear, /new, /resume, /fork typed in it) is followed, as a Claude one's session file
@@ -4127,8 +4167,7 @@ async function web() {
   };
   const gemPcScan = async () => {
     if (!WIN || !geminiAccounts().length) { gemPids = new Set(); gemAgys = new Map(); gemPc = new Map(); return; }
-    const r = await execA('tasklist', ['/fi', 'imagename eq agy.exe', '/fo', 'csv', '/nh']);
-    gemPids = new Set([...r.stdout.matchAll(/^"agy\.exe","(\d+)"/gim)].map((m) => +m[1]));
+    gemPids = new Set((await agyTasks()).pids);
     gemRead();
   };
   setInterval(() => gemPcScan().catch(() => {}), 10000);
@@ -4138,7 +4177,12 @@ async function web() {
     if (!g) throw new Error('没有这个 Gemini 账号');
     if (!agy) throw new Error(`没找到 agy，先装好 Antigravity 的命令行：${AGY_GET}`);
     if (sameDir(cwd, BUTLER)) throw new Error('管家的文件夹里不开 Gemini 对话');
-    await gemOn(g);
+    let moved;
+    try { moved = await gemMove(g); } catch (e) {
+      if (e.moved?.length) gemRestart(e.moved, e.back && load().geminiOn === e.back.id ? geminiAccounts().findIndex((x) => x.id === e.back.id) + 1 : 0, e.message);
+      throw e;
+    }
+    gemRestart(moved, acct);
     const twice = resume && gemLive().find((x) => x.gem.id === resume); // opened again while this one's switch ran: the first's
     if (twice) return twice;
     try { gemTrust(cwd); } catch {} // its folder trusted first, as a GPT one's (agy's question there isn't one 对话 can show)
@@ -4149,7 +4193,8 @@ async function web() {
       if (!t.listed && proc.pid) { t.listed = true; saveTerms(); }
       keepOut(t, d); send(t, 'data', d);
     });
-    proc.onExit(() => { t.gone = true; saveTerms(); gemCache = null; send(t, 'gone', {}); saveRun(); setTimeout(() => terms.delete(key), 60000); }); // (ended: not started again after a restart)
+    // (ended: not started again after a restart; ended to go to another account: its pages follow it there instead)
+    proc.onExit(() => { t.gone = true; saveTerms(); gemCache = null; if (!t.switching) send(t, 'gone', {}); saveRun(); setTimeout(() => terms.delete(key), 60000); });
     terms.set(key, t); gemCache = null; unDoze(resume);
     if (!resume) gemIdle(t); // (a page that never connects: its tab closed while this started)
     log('web_session', { profile_id: g.id, cwd, args: resume ? `--conversation ${resume}` : '' });
@@ -5025,15 +5070,13 @@ async function web() {
           return { key: w.key, kind: w.kind };
         }
         // {id, acct, swap}: 换账号继续. Its record is every account's: its agy here ended (an answer on its way cut short),
-        // started again on that one; not while another runs (one account on at a time); that switch failing: back on its own
+        // started again on that one, the others running here going with it (gemMove); that switch failing: back on its own
         if (t && b.swap) {
           const g = geminiAccounts()[Number(b.acct) - 1];
           if (!g) throw new Error('没有这个 Gemini 账号');
-          if (gemLive().some((x) => x !== t)) throw new Error('还有别的 Gemini 对话在运行：同一时间只能一个 Gemini 账号在线，先结束它们再换');
-          // any other agy (a terminal window's, the one that read the / menu): the switch would be refused once this one's ended
-          const ps = g.id === load().geminiOn ? null : await execA('tasklist', ['/fi', 'imagename eq agy.exe', '/fo', 'csv', '/nh']);
-          if (ps && (ps.status !== 0 || [...ps.stdout.matchAll(/^"agy\.exe","(\d+)"/gim)].some((m) => +m[1] !== t.pid)))
-            throw new Error('电脑上还有别的 agy 在运行（终端窗口里的，或刚读过 / 命令的那个）：同一时间只能一个 Gemini 账号在线，等它们结束再换');
+          // an agy elsewhere (a terminal window's, the one that read the / menu): the switch would be refused once this one's ended
+          if (g.id !== load().geminiOn && await gemForeign())
+            throw new Error('电脑的终端窗口里还有 agy 在运行（或刚读过 / 命令的那个）：同一时间只能一个 Gemini 账号在线，等它们结束再换');
           const free = hold(b.id, 'swap'); // (not deleted meanwhile)
           try {
             require('child_process').execFile('taskkill', ['/pid', String(t.pid), '/t', '/f'], { windowsHide: true }, () => {});

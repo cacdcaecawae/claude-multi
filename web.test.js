@@ -786,6 +786,12 @@ const press = async (key, shift = false) => {
   for (let i = 0; i < 60 && inputs.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(inputs.slice(0, 2), ['\x1b[200~紫色\x1b[201~', '\r']);
   assert.equal(await evaluate("!!focusG.active.el.querySelector('.live .hm.user.pending')"), false); // an answer, not a message waiting for the record
+  // other Gemini ones running: going to another account takes those here along (one cut short: said); a terminal
+  // window's can't go
+  await both("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false }]; state.sessions.push({ id: 'GEM8', gem: true, title: 'b', acct: 0, cwd: 'C:/t', at: 1, pid: 8, where: 'web', busy: true }, { id: 'GEM9', gem: true, title: 'c', acct: 0, cwd: 'C:/t', at: 1, pid: 9, where: 'pc' })", 'focusG.active.acct = 1; focusG.active.swap()');
+  await until("document.querySelector('#sheetIn [data-a=\"2\"]')");
+  assert.match(await evaluate("document.querySelector('#sheetIn').textContent"), /另外 1 个运行中的 Gemini 对话会一起换到 A2，其中 1 个正在回答，会被打断[\s\S]*电脑终端窗口里还有 1 个 Gemini 对话在运行/);
+  await both("state.sessions = state.sessions.filter((x) => !['GEM8', 'GEM9'].includes(x.id))", 'sheetOff()');
   // 换账号继续 on another Gemini account (its quota on the card): the service asked to end it here and go on there
   openBodies.length = 0;
   await both("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false, windows: [{ k: 'five_hour', pct: 30, reset: '1小时' }] }]", 'focusG.active.acct = 1; focusG.active.swap()');
@@ -797,6 +803,10 @@ const press = async (key, shift = false) => {
   await until("/已换到 Gemini 账号 A2/.test(document.querySelector('#toast').textContent)");
   await both("Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 1, pid: 123 })", 'focusG.active.sync()'); // the list: running here, on A2 now (the one on)
   await until('focusG.active.acct === 2');
+  // moved along by another one's switch (one Gemini account on at a time): its page told which account, not asking
+  await both("Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 0 })");
+  gemRes.write(`event: switched\ndata: ${JSON.stringify({ key: 'moved', acct: 1 })}\n\n`);
+  await until("/已换到 Gemini 账号 A1/.test(document.querySelector('#toast').textContent) && focusG.active.acct === 1");
   await both("state.gemini = [{ label: 'g@example.com', on: true }]; Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 0, pid: null })");
   historyId = 'A'; histFeed = null; termGem = ''; gemRes = null;
   await evaluate('closeConv(focusG.active)');
