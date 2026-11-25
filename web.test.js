@@ -786,19 +786,25 @@ const press = async (key, shift = false) => {
   for (let i = 0; i < 60 && inputs.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(inputs.slice(0, 2), ['\x1b[200~紫色\x1b[201~', '\r']);
   assert.equal(await evaluate("!!focusG.active.el.querySelector('.live .hm.user.pending')"), false); // an answer, not a message waiting for the record
-  // other Gemini ones running: going to another account asks first, naming them (one answering: cut short, you tell it
-  // to go on); 取消: nothing sent, the sheet stays. One in a terminal window: said, nothing asked or sent
+  // other Gemini ones running: going to another account asks first, as a second step of the sheet: each one named (the
+  // one switched too), one answering marked (cut short, you tell it to go on); 返回: the sheet as it was, nothing sent.
+  // One in a terminal window: said, no second step, nothing sent
   openBodies.length = 0;
   await both("state.gemini = [{ label: 'g1@example.com', on: true }, { label: 'g2@example.com', on: false }]; state.sessions.push({ id: 'GEM9', gem: true, title: 'c', acct: 0, cwd: 'C:/t', at: 1, pid: 9, where: 'pc' })", 'focusG.active.acct = 1; focusG.active.swap()');
   await until("document.querySelector('#swapGo')");
-  await evaluate("window.confirm0 = window.confirm; window.asked = null; window.confirm = (t) => { asked = t; return false; }; document.querySelector('#swapGo').click()");
-  assert.deepEqual(await evaluate("[asked, document.querySelector('#toast').textContent]"), [null, '电脑终端窗口里还有 Gemini 对话在运行（c）：先在那里结束，才能换到 A2']);
+  await evaluate("document.querySelector('#swapGo').click()");
+  await until("document.querySelector('#toast').textContent === '电脑终端窗口里还有 Gemini 对话在运行（c）：先在那里结束，才能换到 A2'");
+  assert.deepEqual(await evaluate("[!!document.querySelector('#gemGo'), !!document.querySelector('#swapGo')]"), [false, true]);
   await both("state.sessions = state.sessions.filter((x) => x.id !== 'GEM9'); state.sessions.push({ id: 'GEM8', gem: true, title: 'b', acct: 0, cwd: 'C:/t', at: 1, pid: 8, where: 'web', busy: true })");
   await evaluate("document.querySelector('#swapGo').click()");
-  assert.match(await evaluate('asked'), /^换到 Gemini 账号 A2？[\s\S]*这 1 个运行中的对话会先关掉，再在 A2 上自动接着开[\s\S]*· b（正在回答：会被打断，换好后要你让它继续）$/);
+  await until("document.querySelector('#gemGo')");
+  assert.match(await evaluate("document.querySelector('#sheetIn').textContent"), /确认换到 Gemini 账号 A2？[\s\S]*下面 2 个运行中的对话会先关掉，再在 A2 上自动接着开[\s\S]*换好后要你在那个对话里说一声「继续」[\s\S]*返回\s*确认，换到 A2/);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.gemAlong > div')].map((d) => [d.firstChild.textContent === focusG.active.title || d.firstChild.textContent, d.querySelector('.pill')?.textContent ?? ''])").then((l) => l.at(-1)), ['b', '正在回答 · 会被打断']);
+  assert.equal(await evaluate("document.querySelectorAll('.gemAlong > div').length"), 2);
+  await evaluate("document.querySelector('#gemBack').click()");
   await new Promise((ok) => setTimeout(ok, 300));
-  assert.deepEqual([await evaluate("document.querySelector('#sheet').classList.contains('on')"), openBodies.length], [true, 0]);
-  await evaluate("window.confirm = () => true; sheetOff()");
+  assert.deepEqual([await evaluate("[document.querySelector('#sheet').classList.contains('on'), !!document.querySelector('#swapGo'), !!document.querySelector('#gemGo')].join()"), openBodies.length], ['true,true,false', 0]);
+  await evaluate('sheetOff()');
   // 换账号继续 on another Gemini account (its quota on the card): the service asked to end it here and go on there (the
   // other one going along, as confirmed)
   openBodies.length = 0;
@@ -806,9 +812,12 @@ const press = async (key, shift = false) => {
   await until("document.querySelector('#sheetIn [data-a=\"2\"]')");
   assert.match(await evaluate("document.querySelector('#sheetIn [data-a=\"2\"]').textContent"), /A2 · g2@example\.com\s*额度用了 30%/);
   await evaluate("document.querySelector('#sheetIn [data-a=\"2\"]').click(); document.querySelector('#swapGo').click()");
+  await until("document.querySelector('#gemGo')"); // (the second step: nothing sent till 确认)
+  assert.equal(openBodies.length, 0);
+  await evaluate("document.querySelector('#gemGo').click()");
   const sw = await opened();
   assert.deepEqual([sw?.id, sw?.gem, sw?.swap, sw?.acct, sw?.move], ['GEM1', true, true, 2, true]);
-  await both("state.sessions = state.sessions.filter((x) => x.id !== 'GEM8')", 'window.confirm = window.confirm0');
+  await both("state.sessions = state.sessions.filter((x) => x.id !== 'GEM8')");
   await until("/已换到 Gemini 账号 A2/.test(document.querySelector('#toast').textContent)");
   await both("Object.assign(state.sessions.find((x) => x.id === 'GEM1'), { acct: 1, pid: 123 })", 'focusG.active.sync()'); // the list: running here, on A2 now (the one on)
   await until('focusG.active.acct === 2');

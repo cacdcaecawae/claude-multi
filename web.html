@@ -793,6 +793,12 @@ if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) do
     .sheet .in { width: 560px; margin-top: 8vh; border-radius: 16px; border: 1px solid var(--popB); box-shadow: 0 16px 48px var(--shadow); padding: 18px; }
   }
   .stitle { font-size: 17px; font-weight: 600; line-height: 1.5; margin-bottom: 8px; color: var(--fgHi); }
+  /* 换 Gemini 账号's second step: the conversations it ends, and what's cut short */
+  .gemAlong { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; max-height: 40vh; overflow: auto; }
+  .gemAlong > div { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+  .gemAlong > div + div { border-top: 1px solid var(--border); }
+  .gemAlong > div > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fgHi); }
+  #sheetIn .warn { margin-top: 10px; color: var(--orange); }
   .sheet.mid { align-items: center; justify-content: center; }
   .sheet.mid .in { width: min(400px, calc(100% - 32px)); margin: 0; border-radius: 16px; border: 1px solid var(--popB); padding: 16px 20px 20px; }
   .shead { display: flex; align-items: center; justify-content: space-between; }
@@ -1237,15 +1243,25 @@ const shownConvs = () => (butler ? [peek ?? bConv] : groups.filter((g) => !g.min
 // under an hour left and the recommended one has more, a sheet asks first (accounts don't share their prompt
 // cache). Resolves to the account number, or 0 when cancelled.
 // Going to another Gemini account (one on at a time) ends the Gemini ones running here and starts each again on it:
-// asked first, naming them, those answering said (cut short: you tell them to go on). One in a terminal window can't
-// go: said, nothing done. null: not going; else { move: whether others go along }
-function gemAlong(acct, self) {
-  if (state?.gemini?.[acct - 1]?.on) return { move: false };
-  const run = (state?.sessions ?? []).filter((x) => x.gem && x.pid && x.id !== self), pc = run.filter((x) => x.where === 'pc'), here = run.filter((x) => x.where !== 'pc');
-  if (pc.length) { toast(`电脑终端窗口里还有 Gemini 对话在运行（${pc.map((x) => x.title).join('、')}）：先在那里结束，才能换到 A${acct}`, 6000); return null; }
-  if (!here.length) return { move: false };
-  return confirm(`换到 Gemini 账号 A${acct}？\n同一时间只能一个 Gemini 账号在线，这 ${here.length} 个运行中的对话会先关掉，再在 A${acct} 上自动接着开：\n\n`
-    + here.map((x) => `· ${x.title}${x.busy ? '（正在回答：会被打断，换好后要你让它继续）' : ''}`).join('\n')) ? { move: true } : null;
+// asked first, as a second step of the sheet (not the browser's own box, passed over unread): each one named, those
+// answering marked (cut short: you tell them to go on), 确认 to go, 返回 to the sheet as it was (back). self: the one
+// being switched ({ id, title, busy, run }; none: a new one), listed with them when it runs. One in a terminal window
+// can't go: said, nothing done. Nothing running to end: not asked. → null: not going; else { move: others go along }
+function gemAlong(acct, self, back) {
+  if (state?.gemini?.[acct - 1]?.on) return Promise.resolve({ move: false });
+  const run = (state?.sessions ?? []).filter((x) => x.gem && x.pid && x.id !== self?.id), pc = run.filter((x) => x.where === 'pc'), here = run.filter((x) => x.where !== 'pc');
+  if (pc.length) { toast(`电脑终端窗口里还有 Gemini 对话在运行（${pc.map((x) => x.title).join('、')}）：先在那里结束，才能换到 A${acct}`, 6000); return Promise.resolve(null); }
+  const list = [...(self?.run && (self.busy || here.length) ? [self] : []), ...here], cut = list.filter((x) => x.busy).length;
+  if (!list.length) return Promise.resolve({ move: false });
+  return new Promise((done) => {
+    $('#sheetIn').innerHTML = `<div class="stitle">确认换到 Gemini 账号 A${acct}？</div>
+      <div style="margin-top:4px">同一时间只能一个 Gemini 账号在线。下面 ${list.length} 个运行中的对话会先关掉，再在 A${acct} 上自动接着开：</div>
+      <div class="gemAlong">${list.map((x) => `<div><span>${esc(x.title)}</span>${x.busy ? '<span class="pill o">正在回答 · 会被打断</span>' : ''}</div>`).join('')}</div>
+      ${cut ? `<div class="warn">被打断的回答不会自己接着答：换好后要你在那个对话里说一声「继续」。</div>` : ''}
+      <div class="btns" style="margin-top:16px"><button class="btn" id="gemBack">返回</button><button class="btn primary" id="gemGo" style="flex:2">确认，换到 A${acct}</button></div>`;
+    $('#gemBack').onclick = () => { back(); done(null); };
+    $('#gemGo').onclick = () => done({ move: here.length > 0 });
+  });
 }
 function pickAcct(s) {
   if (s.gpt || s.gem) return Promise.resolve(s.acct + 1); // a GPT or Gemini one: its own account (it can't change)
@@ -2323,8 +2339,8 @@ function newSheet(kind) {
       $('#browse').onclick = () => browse(dir);
     }
     $('#cancel').onclick = sheetOff;
-    $('#start').onclick = () => {
-      const go = gemOn && !mac ? gemAlong(acct, null) : {};
+    $('#start').onclick = async () => {
+      const go = gemOn && !mac ? await gemAlong(acct, null, draw) : {};
       if (!go) return;
       sheetOff();
       addConv(focusG, oai ? makeOai(null, '新对话') : api && sdk ? makeSdk({ acct, dir }, base(dir) || '新对话') : mac ? makeConv({ mac: mac.id, open: true, dir }, base(dir) || mac.label) : makeConv({ dir, acct, gpt, gem: gemOn, ...(go.move && { move: true }) }, base(dir) || '新对话'));
@@ -3214,7 +3230,7 @@ function makeConv(body, title) {
       document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { acct = +b.dataset.a; draw(); }));
       $('#cancel').onclick = sheetOff;
       $('#swapGo').onclick = async () => {
-        const go = gemAlong(acct, c.id);
+        const go = await gemAlong(acct, { id: c.id, title: c.title, busy: busyNow, run: !!key && !c.ended }, draw);
         if (!go) return; // (the sheet stays: another account, or 取消)
         sheetOff();
         if (!key || c.ended) { body = { id: c.id, acct, gem: true, move: go.move }; c.acct = acct; return start(); }
