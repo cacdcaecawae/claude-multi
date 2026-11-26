@@ -1035,8 +1035,10 @@ const press = async (key, shift = false) => {
     a.el.querySelector('[data-v=hist]').click(); window.fetch = real;
     btn(g1).click(); closeConv(b); await wait(100);
     out.push(groups.length, g1.min, a.el.classList.contains('on'));
+    // shown, its screen idle while the list says it's at it (its teammates working): its tab still turns
+    a.live = ''; sA.busy = true; drawTabs(g1); out.push(a.started, !!g1.strip.querySelector('.tab.on .spin')); sA.busy = false; drawTabs(g1);
     closeConv(a); return out.join(' | '); })()`),
-    '2 | false | false | true | true | false | b | true | true | 展开这一栏 | true,false | 0 | true | x ask | visible | block | 1 | false | true | a,b | true | true | 1 | false | true');
+    '2 | false | false | true | true | false | b | true | true | 展开这一栏 | true,false | 0 | true | x ask | visible | block | 1 | false | true | a,b | true | true | 1 | false | true | true | true');
   console.log('browser 收起这一栏 ok');
   // a conversation's folder: a button (no account, nor where it runs); the mouse on it, what's in it (a folder gone into,
   // ← back; a file opened in 预览), gone when the mouse leaves; clicked, the folder in 预览. A Mac's own folder: its name
