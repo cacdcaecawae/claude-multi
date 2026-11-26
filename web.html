@@ -2888,7 +2888,7 @@ function makeConv(body, title) {
       // the pictures pasted one by one first; the files' paths go at the end of the words, a line each
       const pics = paths.filter((_, i) => !imgs[i].file), files = paths.filter((_, i) => imgs[i].file);
       const text = [v, ...files.map((f) => `附件：${f}`)].filter(Boolean).join('\n');
-      if (wait && files.length) { wait.text = shownText(text); drawLive(); } // the files too, as the record will show it (附件：name)
+      if (wait && files.length) { wait.text = shownText(text); wait.files = filesOf(text); drawLive(); } // the files too, as the record will show it (附件：name; a picture itself)
       if (pics.length) { // Claude attaches each pasted path in well under a second: Enter waits for that (4 s at most)
         const before = imagesShown();
         // ponytail: a later step failing leaves the pictures already attached in Claude's box; sent again, they'd go twice
@@ -3109,7 +3109,7 @@ function makeConv(body, title) {
     // a GPT one not up yet (screen.js: starting): Codex holds what's sent till it is, and sends it then
     const Q = '<span class="lab">排队中</span>', S = sc?.starting ? '<span class="lab">GPT 还在启动，启动完会自动发出</span>' : '';
     const h = [...sent.map((s) => ({ at: s.at, h: (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
-      + (s.text ? `<div class="hm user pending">${queued.some((x) => same(s, x)) ? Q : S}${userBody(s.text, [], true)}</div>` : '') })),
+      + (s.text ? `<div class="hm user pending">${queued.some((x) => same(s, x)) ? Q : S}${userBody(s.text, s.files, true)}</div>` : '') })),
     ...queued.filter((x) => !sent.some((s) => same(s, x))).map((x) => ({ at: x.at, h: `<div class="hm user pending">${Q}${userBody(x.text, [], true)}</div>` }))]
       .sort((a, b) => a.at - b.at).map((x) => x.h).join('') + (menu
       ? `<div class="ask">${menu.tabs ? `<div class="tabsQ">${esc(menu.tabs)}</div>` : ''}${askHead(menu)}${askOpts(menu, (o) => `data-pick="${o.n}"`, (o) => typeNow && o.n === menu.cur)}
@@ -3856,8 +3856,10 @@ function userHtml(m, mark) {
   // a long one (a paste, a ticket): its first lines fading out, 「展开全部」 under them; that button's words from the CSS,
   // out of the bubble's text (停止 compares it with what was sent)
   const long = words.split('\n').length > 12 || words.length > 800, tag = cmd ? `<span class="slashTag">${svg(I.bolt)}${esc(cmd)}</span>${words ? ' ' : ''}` : '';
+  const lines = words.split('\n'), isAtt = (l) => l.startsWith('附件：'); // a long one's files under its fold, not hidden in it
   return `<div class="hm user${cls ? ' ' + cls : ''}${long ? ' long' : ''}"${mark}>${lab ? `<span class="lab">${lab}</span>` : ''}${long
-    ? `<div class="clip">${tag}${userBody(words, m.files)}</div><button class="more" data-more></button>` : tag + userBody(words, m.files)}</div>`;
+    ? `<div class="clip">${tag}${userBody(lines.filter((l) => !isAtt(l)).join('\n'))}</div>${userBody(lines.filter(isAtt).join('\n'), m.files)}<button class="more" data-more></button>`
+    : tag + userBody(words, m.files)}</div>`;
 }
 // A message's words, and its files (its 附件：name lines) as cards under them: the file's kind (its ending) in a colored
 // square, its name; a link that opens it once it's sent (files: their saved names, in order; one on its way has none).
