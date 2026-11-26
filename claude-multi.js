@@ -1880,7 +1880,7 @@ function gemHistory(id, { from, end, keep = 120, live = false } = {}) {
 // through a restart, the page there or not. (As LibreChat does it, without its own long-running jobs: OpenAI's background
 // mode holds the answer for us.)
 const OAI = path.join(ROOT, 'oai'), OAI_KEY = path.join(ROOT, 'openai-key.txt');
-const OAI_MODEL = 'gpt-6.2-astra',OAI_MODES = ['standard', 'pro'], OAI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // what it takes
+const OAI_MODEL = 'gpt-6.2-astra', OAI_MODES = ['standard', 'pro'], OAI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // what it takes
 const OAI_OPTS = { mode: 'standard', effort: 'medium' }; // a chat's, till one is picked: OpenAI's own default effort
 // what OpenAI takes, by the name's end: pictures as pictures, these as files; any other text file as text/plain (its own
 // type, or application/octet-stream, is refused)
