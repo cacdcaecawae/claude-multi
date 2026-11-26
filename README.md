@@ -39,7 +39,7 @@
 | 代理额度 | 左边的喜鹊图标：经代理或网关用的那些订阅账号，各窗口用了多少、多久后重置（邮箱打码）。申请接入的账号自动读对方网关给的；自己的代理，在 `profiles.json` 的 `localQuota.source` 里写一个读取脚本的绝对路径（见下面「文件说明」）。两样都没有就不显示。 |
 | GPT | 用 ChatGPT 订阅登录 OpenAI 的 [Codex](https://github.com/openai/codex)，在网页上和 Claude 的对话放在一起用（账号 G1、G2…）。 |
 | API 额度 | 订阅每月送的 Claude API 额度只付 Agent SDK、不付 Claude Code：在网页上开一种由 Agent SDK 跑的 Claude 对话，经网关用 Console 的 API key（见下面「API 额度」）。 |
-| GPT 聊天 | 用你的 OpenAI API key，在网页上直接和 GPT-6 Astra 聊天（不碰电脑上的文件），可以选 Pro 模式（ChatGPT 的 GPT-6 Pro）和思考强度，能联网、看图片和文件。 |
+| GPT 聊天 | 用你的 OpenAI API key，在网页上直接和 GPT-6.2 Astra 聊天（不碰电脑上的文件），可以选 Pro 模式和思考强度，能联网、看图片和文件。 |
 | Gemini | 用 Google 账号登录 Google 的 [Antigravity 命令行](https://antigravity.google/docs/cli/overview)（`agy`），在网页上和 Claude、GPT 的对话放在一起用（账号 A1、A2…，同一时间一个在线）。 |
 
 ## 截图
@@ -223,9 +223,9 @@ claude-multi web-link   :: 打印带钥匙的网页链接，用它打开网页
 
 **GPT 聊天**（OpenAI API）
 
-- 直接和 `gpt-6-astra` 聊天，能联网。只是聊天，没有文件夹，也不会在电脑上运行命令，所以不走 Codex。
+- 直接和 `gpt-6.2-astra` 聊天，能联网。只是聊天，没有文件夹，也不会在电脑上运行命令，所以不走 Codex。
 - 把你的 OpenAI API key 存进 `.claude-multi\openai-key.txt`（只有这一行），「新对话」的「GPT」下面就多一个「聊天」（没有 Codex 账号时，选 GPT 就是聊天）。key 只在电脑上，git 不管这个文件。
-- 输入框旁边的按钮选**模式**和**思考强度**，跟管家的那个一样：模式是「普通」或「Pro」（Pro 就是 ChatGPT 里的 GPT-6 Pro），思考强度从「低」到「最高」五档。每条消息按发的时候选的来；新开的对话沿用你上次选的，默认是普通 · 中。
+- 输入框旁边的按钮选**模式**和**思考强度**，跟管家的那个一样：模式是「普通」或「Pro」，思考强度从「低」到「最高」五档。每条消息按发的时候选的来；新开的对话沿用你上次选的，默认是普通 · 中。
 - 按 API 用量从你的 OpenAI 账户扣钱，不占 ChatGPT 订阅的额度。Pro 比普通多用好几倍 token：一条消息光输入就有一万多 token，联网搜索时更多。
 - Pro 碰到难的问题要想几分钟。回答在 OpenAI 那边后台进行，关掉网页、网页服务重启都不影响，答好了和其他对话一样会通知你。回答过程中可以停止，停止的那一条不算进对话。
 - 能发图片和文件：图片、PDF、Word、Excel、PPT 和文本文件（代码、csv、md 等）。发过的图片和文件放在 `oai\<对话编号>\`，记录在 `oai\<对话编号>.json`。

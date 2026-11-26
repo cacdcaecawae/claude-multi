@@ -2316,7 +2316,7 @@ function newSheet(kind) {
     $('#sheetIn').innerHTML = `<div class="stitle">新的 ${gemOn ? 'Gemini' : gptOn ? 'GPT' : 'Claude'} 对话</div>
       ${gptOn && gp.length && state.oai ? `<div class="opts" style="margin-top:12px">${[['', 'Codex：在文件夹里写代码'], ['1', '聊天：用 API key，按量计费']]
         .map(([v, l]) => `<button class="opt ${!!v === chat ? 'on' : ''}" data-chat="${v}">${l}</button>`).join('')}</div>` : ''}
-      ${oai ? `<div class="m" style="margin-top:12px;white-space:normal">直接和 GPT-6 Astra 聊天，能联网、看图片和文件。输入框旁边可以选模式（普通，或 ChatGPT 的 GPT-6 Pro 那种 Pro）和思考强度。
+      ${oai ? `<div class="m" style="margin-top:12px;white-space:normal">直接和 GPT-6.2 Astra 聊天，能联网、看图片和文件。输入框旁边可以选模式（普通或 Pro）和思考强度。
         用你的 OpenAI key 按用量计费，Pro 难的问题一次要想几分钟，答好了会通知你。</div>`
       : `<div class="m" style="margin-top:12px">账号</div><div class="opts">${accts.join('')}</div>
       ${api ? `<div class="opts">${[['', 'Claude Code'], ['1', 'API 额度：Agent SDK，按用量计费']].map(([v, l]) => `<button class="opt ${!!v === sdk ? 'on' : ''}" data-sdk="${v}">${l}</button>`).join('')}</div>` : ''}
@@ -3478,7 +3478,7 @@ function makeConv(body, title) {
 // on the button by the box (as the 管家's). The answer is made at OpenAI (minutes for a hard one, the page there or not):
 // 正在思考 meanwhile, 停止 cancels it. id null: a new chat, its id from its first message.
 const OAI_EFFORTS = EFFORTS.map(([v, l]) => [v, l, { low: '最快最省', medium: '默认', max: '最慢最贵' }[v] ?? '']);
-const OAI_MODES = [['standard', '普通', '快，按量计费'], ['pro', 'Pro', 'ChatGPT 的 GPT-6 Pro：更慢，token 多用几倍']];
+const OAI_MODES = [['standard', '普通', '快，按量计费'], ['pro', 'Pro', '想得更深：更慢，token 多用几倍']];
 const oaiName = (o) => `${OAI_MODES.find(([v]) => v === o.mode)?.[1] ?? o.mode} · ${effortName(o.effort)}`;
 function makeOai(id, title) {
   const c = { id, title, acct: null, gpt: true, oai: true, g: null, started: false, ended: false, closed: false, live: '' };

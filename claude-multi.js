@@ -1870,16 +1870,17 @@ function gemHistory(id, { from, end, keep = 120, live = false } = {}) {
   return { items: items.map(({ o, ...m }) => m), start, end: last + 1 };
 }
 
-// --- GPT 聊天:OpenAI's strongest model (GPT-6 Astra) over the API with your key (openai-key.txt here), as a plain chat:
-// no folder, no commands, so not Codex. Its mode and effort picked in the page for each message: pro mode is ChatGPT's
-// GPT-6 Pro. Each chat is oai\<id>.json (its messages as the page shows them) and oai\<id>\ (the pictures and files sent
-// in it, out of uploads\, which is emptied after a week). OpenAI keeps what was said (store), each message going on from
+// --- GPT 聊天:OpenAI's strongest model (GPT-6.2 Astra) over the API with your key (openai-key.txt here), as a plain chat:
+// no folder, no commands, so not Codex. Its mode and effort picked in the page for each message (standard or pro). A
+// chat begun on GPT-6 Astra goes on here on 6.2 (previous_response_id across the two: tried). Each chat is
+// oai\<id>.json (its messages as the page shows them) and oai\<id>\ (the pictures and files sent in it, out of uploads\,
+// which is emptied after a week). OpenAI keeps what was said (store), each message going on from
 // the last answer (previous_response_id): pictures and files are sent once. An answer is made at OpenAI in the background
 // (a hard one takes minutes): its id kept in the chat (pending) and asked after by the web service till it's done,
 // through a restart, the page there or not. (As LibreChat does it, without its own long-running jobs: OpenAI's background
 // mode holds the answer for us.)
 const OAI = path.join(ROOT, 'oai'), OAI_KEY = path.join(ROOT, 'openai-key.txt');
-const OAI_MODEL = 'gpt-6-astra', OAI_MODES = ['standard', 'pro'], OAI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // what it takes
+const OAI_MODEL = 'gpt-6.2-astra',OAI_MODES = ['standard', 'pro'], OAI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // what it takes
 const OAI_OPTS = { mode: 'standard', effort: 'medium' }; // a chat's, till one is picked: OpenAI's own default effort
 // what OpenAI takes, by the name's end: pictures as pictures, these as files; any other text file as text/plain (its own
 // type, or application/octet-stream, is refused)
