@@ -1530,7 +1530,7 @@ if (SESSION0) {
       const hist = { innerHTML: '', scrollHeight: 1000, scrollTop: 0, clientHeight: 100 };
       const localStorage = { setItem: (k,v) => store.set(k,v), getItem: k => store.get(k) ?? null, removeItem: k => store.delete(k) };
       const noop = () => {}, fitLine = noop, goMode = noop, drawAtts = noop, redraw = noop, markRows = noop, save = noop, slashDraw = noop, peekWarm = noop;
-      const claim = async () => {}, toast = t => messages.push(t), shownText = t => t, addItems = noop, topNote = noop, loadOlder = noop;
+      const claim = async () => {}, toast = t => messages.push(t), shownText = t => t, filesOf = () => [], addItems = noop, topNote = noop, loadOlder = noop;
       const histGet = async () => ({ id: nextId, start: 0, end: 0, items: [] });
       let post = async (url, b) => { writes.push(b.data); };
       let drawLive = () => { menuNow = question; };
