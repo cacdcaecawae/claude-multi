@@ -2452,7 +2452,9 @@ document.addEventListener('dragend', () => { drag = null; document.querySelector
 function drawTabs(g) {
   const note = new Map((state?.notes ?? []).map((n) => [n.id, n.kind])), busy = new Set(state?.sessions.filter((s) => s.busy).map((s) => s.id));
   g.strip.html = g.tabs.map((c, i) => {
-    const turning = c.ended ? false : c === g.active && c.started && !g.min ? c.live === 'busy' : busy.has(c.id); // (a collapsed column's: asleep, by the list)
+    // the one shown: by its screen too (quicker than the list). A Claude one by the list as well: its own screen idle while
+    // its teammates work, it's still at it (as the list, the status bar and its tab once you look away say)
+    const turning = c.ended ? false : c === g.active && c.started && !g.min ? c.live === 'busy' || (!c.gem && !c.gpt && busy.has(c.id)) : busy.has(c.id); // (a collapsed column's: asleep, by the list)
     const dot = c.live === 'ask' || note.get(c.id) === 'ask' ? ' ask' : note.has(c.id) ? ' done' : '';
     return `<div class="tab${c === g.active ? ' on' : ''}${c.ended ? ' gone' : ''}" data-i="${i}" tabindex="0" role="tab" aria-selected="${c === g.active}" draggable="${FINE}" title="${esc(c.title)}">
       ${turning ? '<span class="spin" title="正在回复"></span>' : ac(c.acct, '', convKind(c))}<span class="tt">${mark(convKind(c), c.acct, c.mac)}${esc(c.title)}</span><button class="x${dot}" data-x="${i}" title="关闭">${svg(I.close, 1.8)}</button></div>`;
