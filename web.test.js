@@ -786,6 +786,18 @@ const press = async (key, shift = false) => {
   for (let i = 0; i < 60 && inputs.length < 2; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(inputs.slice(0, 2), ['\x1b[200~紫色\x1b[201~', '\r']);
   assert.equal(await evaluate("!!focusG.active.el.querySelector('.live .hm.user.pending')"), false); // an answer, not a message waiting for the record
+  // a picture sent (as a file: 附件：its path): itself in the grey copy too, while the record hasn't the message yet; a
+  // long message's files under its fold, not hidden in it
+  gemShow([R, '>', R]);
+  await until("!/写你的回答/.test(focusG.active.el.querySelector('.live')?.textContent ?? '')");
+  const longWords = '很长的一段。'.repeat(150), pic = '20261126T023849-6dacb4-图.png';
+  await evaluate(`{ const c = focusG.active, t = c.el.querySelector('.send textarea'); c.attach([new File([new Uint8Array([137, 80, 78, 71])], '${pic}', { type: 'image/png' })]);
+    t.value = '${longWords}'; t.dispatchEvent(new Event('input')); c.el.querySelector('.go').click(); }`);
+  await until("focusG.active.el.querySelector('.live .hm.user.pending a.att.pic img')");
+  assert.equal(await evaluate("focusG.active.el.querySelector('.live .hm.user.pending a.att.pic img').getAttribute('src')"), `/api/file?n=${encodeURIComponent(pic)}`);
+  histFeed.push({ role: 'user', text: `${longWords}\n附件：C:/uploads/${pic}`, at: Date.now() });
+  await until("!focusG.active.el.querySelector('.live .hm.user.pending')");
+  assert.deepEqual(await evaluate("(() => { const b = [...focusG.active.el.querySelectorAll('.hNew .hm.user.long')].at(-1); return [!!b.querySelector(':scope > .atts a.att.pic img'), !b.querySelector('.clip .atts')]; })()"), [true, true]);
   // other Gemini ones running: going to another account asks first, as a second step of the sheet: each one named (the
   // one switched too), one answering marked (cut short, you tell it to go on); 返回: the sheet as it was, nothing sent.
   // One in a terminal window: said, no second step, nothing sent
