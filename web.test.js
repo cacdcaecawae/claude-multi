@@ -798,6 +798,12 @@ const press = async (key, shift = false) => {
   histFeed.push({ role: 'user', text: `${longWords}\n附件：C:/uploads/${pic}`, at: Date.now() });
   await until("!focusG.active.el.querySelector('.live .hm.user.pending')");
   assert.deepEqual(await evaluate("(() => { const b = [...focusG.active.el.querySelectorAll('.hNew .hm.user.long')].at(-1); return [!!b.querySelector(':scope > .atts a.att.pic img'), !b.querySelector('.clip .atts')]; })()"), [true, true]);
+  // agy drops some characters pasted into it (×, –, ⚠ reach it as NUL): its record's message without them is the one
+  // sent, its grey copy gone
+  await evaluate("{ const c = focusG.active, t = c.el.querySelector('.send textarea'); t.value = '⚠ 1366×768，误差 1.2–1.5%'; t.dispatchEvent(new Event('input')); c.el.querySelector('.go').click(); }");
+  await until("focusG.active.el.querySelector('.live .hm.user.pending')");
+  histFeed.push({ role: 'user', text: '1366768，误差 1.21.5%', at: Date.now() });
+  await until("!focusG.active.el.querySelector('.live .hm.user.pending')");
   // other Gemini ones running: going to another account asks first, as a second step of the sheet: each one named (the
   // one switched too), one answering marked (cut short, you tell it to go on); 返回: the sheet as it was, nothing sent.
   // One in a terminal window: said, no second step, nothing sent
