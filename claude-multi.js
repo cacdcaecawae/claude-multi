@@ -1107,6 +1107,16 @@ function codexKeys(raw) {
   if (words) data = data.replace(/\r\n?|\n/g, SHIFT_ENTER);
   return { data, words };
 }
+// what's typed into a Gemini (agy, Windows) through its pty. The pty hands agy a character that's neither on the keyboard
+// nor a letter or a wide one (×, –, …, →, “”, °, ✓, ⚠ …) as Alt+numpad presses, the character only on Alt's release,
+// which agy doesn't read: its box and its record go without it ("1366×768" was "1366768"). Each such one as a
+// win32-input-mode key carrying it, which the pty passes on as that key; inside a paste too, its new lines still new
+// lines. Letters (Chinese too) and ASCII as they are. An emoji too: as a key it's lost and takes the next character with
+// it, as it is only it is lost. (agy 1.5.18, 2026-11-27: 42 of 43 such characters kept, none before.)
+const gemKeys = (raw) => String(raw).replace(/[^\x00-\x7f\p{L}\u{10000}-\u{10ffff}]/gu, (ch) => {
+  const u = ch.charCodeAt(0);
+  return `\x1b[0;0;${u};1;0;1_\x1b[0;0;${u};0;0;1_`;
+});
 function gptMarks() {
   const out = [];
   for (const f of ls(GPT_LIVE).filter((x) => x.endsWith('.json'))) {
@@ -5197,7 +5207,7 @@ async function web() {
 
       const write = (d) => t.kind === 'pty' ? t.proc.write(d)
         : new Promise((resolve, reject) => t.proc.stdin.write(JSON.stringify({ k: d }) + '\n', (e) => e ? reject(e) : resolve()));
-      if (!t.gpt && !t.codex) { await write(String(b.data)); return {}; }
+      if (!t.gpt && !t.codex) { await write(t.gem && t.kind === 'pty' ? gemKeys(b.data) : String(b.data)); return {}; } // (a terminal window's: each character a key already)
       // a Codex: in turn, an Enter alone waits until 600 ms after the last words (sooner, it's a new line in them). Answered
       // once written: one that didn't get there (its Codex gone meanwhile) says so, for the page to put the message back
       // (one failing doesn't stop the next in the queue)
@@ -5950,7 +5960,7 @@ async function setup() {
   if (!process.env.SSH_CONNECTION && !process.argv.includes('--no-open')) require('child_process').spawn(process.platform === 'darwin' ? 'open' : 'explorer.exe', [link], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-module.exports = { CODEX_END, oaiDelete, priorOwners, stillStarting, startingOwners, keepOwners, writeWhole, macSysOf, dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
+module.exports = { CODEX_END, gemKeys, oaiDelete, priorOwners, stillStarting, startingOwners, keepOwners, writeWhole, macSysOf, dozable, shellsIn, claudeCmd, gemAgyConvs, gemEnded, gemSum, gemTrust, agySlash, saveGemQuota, gemUsage, gemRename, gemDelete, sameStart, withHooks, usageState, joinApply, checkJoins, pointJoins, readJoins, fetchUsage, quotaSource, webPid, peekHead, peekPdf, slashKeep, macSlashCmd, slashParse, macSlash, shellCmd, frontOf, FRONT_PS, asksPermission, projectOp, dirsIn, isDir, macList, MAC_USAGE, fileServed, macUsageNow, procStarts, tokensBeside, keepOut, replayPty, recycle, copyTo, claudeShare, lastTyped, listSessions, MAC_WATCH, macName, macCmd, macRules, dpapiRead, oaiInput, oaiText, oaiItems, oaiSend, oaiPoll, oaiStop, oaiRead, jsonBody, codexBlocked, codexKeys, listGpt, gptHistory, gptUsage, gptTrust, gptLast, gptTurn, gistText, hold, inLive, keepDefaults, butlerCost, blogSent, unwrapPaste, parseUntil, ticketOp, stageOf, tellSplit, tellAgain, readSeen, allNotes, notesUnseen, notesInto, turnBy, butlerNotice, waitsNow, pickOn, bark, barkMsg, gist, pushText, pushBody, pushAuth, pushPublic, pickOpen, keyMatch, keyCookie, shareTrust, childEnv, helpersBusy, statusline, saveLine, readLine, lastReq, tokenStats, tokenRoots, unlinkAll, unreadNotes, history, recordImage, saveUpload, sdkParts, lead, keepLast, shareMemory, shareMcp, nextRenewal, untilFree, takeSwitch, editOf, codexEdit, queueNow, updateCheck, upgrade, listGemini, gemHistory, gemOn, agyCred, gemSettings, newGemini };
 if (require.main === module) {
   fs.mkdirSync(ROOT, { recursive: true });
   const [cmd] = process.argv.slice(2);
