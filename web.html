@@ -2802,6 +2802,19 @@ function makeConv(body, title) {
   // meanwhile ends the watch (it would be in Claude's box a moment, and taken back). One sent from here comes back whole, its
   // pictures and files too; any other's pictures stay behind: in the box they're only [Image #N], typed again words.
   let stops = 0, lastSent = null;
+  // A long paste sits in Claude's box as a stand-in: [Pasted text #2 +54 lines] (54: its new lines), a huge one's middle
+  // as [...Truncated text #3 +900 lines...]; its words only Claude has
+  const HOLES = /\[Pasted text #\d+(?: \+\d+ lines)?\]|\[\.\.\.Truncated text #\d+ \+\d+ lines\.\.\.\]/g;
+  // the box is the last message sent from here: compared without spaces or line breaks (Claude wraps it, a file's path
+  // too), a stand-in for any of its words; one alone for all of them, its count of new lines theirs
+  const sentBack = (t) => {
+    if (!lastSent) return false;
+    const flat = (s) => s.replace(/\s+/g, ''), box = t.replace(/\[Image #\d+\]/g, '').trim();
+    const alone = /^\[Pasted text #\d+(?: \+(\d+) lines)?\]$/.exec(box);
+    if (alone) return +(alone[1] ?? 0) === (lastSent.text.match(/\n/g) ?? []).length;
+    const re = box.split(HOLES).map((p) => flat(p).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]*');
+    return new RegExp(`^${re}$`).test(flat(lastSent.text));
+  };
   async function stop() {
     const me = ++stops;
     input('\x1b'); workAt = 0; stopAt = Date.now();
@@ -2812,17 +2825,20 @@ function makeConv(body, title) {
       await new Promise((ok) => setTimeout(ok, 300));
       const t = me === stops && typed();
       if (!t) continue;
+      // the last message sent from here comes back as it was, with its pictures and files; else the box's words. Not one
+      // with a stand-in: taken out, it would come here as the stand-in, and sent, Claude would get those words
+      const flat = (s) => s.replace(/\s+/g, ''), m = sentBack(t) ? lastSent : null;
+      if (!m && new RegExp(HOLES.source).test(t)) return toast('已停止。退回的那条消息太长，Claude 只显示成一个占位符：它还在「终端」的输入框里，到那里改了再发', 6000);
       input('\x03');
-      // the last message sent from here, whole in the box (compared without spaces or line breaks: Claude wraps it, a
-      // file's path too): it comes back as it was, with its pictures and files; else the box's words
-      const flat = (s) => s.replace(/\s+/g, ''), m = lastSent && flat(t.replace(/\[Image #\d+\]/g, '')) === flat(lastSent.text) ? lastSent : null;
       const words = m ? m.v : t.replace(/\[Image #\d+\]\s*/g, '').trim(), pics = !m && /\[Image #\d+\]/.test(t);
       if (words) { line.value = line.value.trim() ? `${words}\n${line.value}` : words; grow(); goMode(); }
       if (m) { atts = [...m.imgs, ...atts]; drawAtts(); lastSent = null; }
-      // and its bubble goes now: back in the box, it isn't sent (the record keeps it until a later one replaces it)
+      // and its bubble goes now: back in the box, it isn't sent (the record keeps it until a later one replaces it). Ours
+      // compared as its bubble shows it (Markdown drawn: no ** or ` left in its text)
       const last = [...hist.querySelectorAll('.hm.user[data-u]')].pop();
       const answered = last && [...hist.querySelectorAll('.who, details.tools, .hm.claude, .hm.done')].some((x) => last.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING);
-      if (last && !answered && flat(last.textContent) === flat(m ? shownText(m.text) : words)) hist.querySelectorAll(`[data-u="${CSS.escape(last.dataset.u)}"]`).forEach((e) => e.remove());
+      const drawn = m && Object.assign(document.createElement('div'), { innerHTML: userHtml({ text: shownText(m.text), files: filesOf(m.text) }, '') }).textContent;
+      if (last && !answered && flat(last.textContent) === flat(m ? drawn : words)) hist.querySelectorAll(`[data-u="${CSS.escape(last.dataset.u)}"]`).forEach((e) => e.remove());
       const i = m?.wait ? sent.indexOf(m.wait) : sent.findIndex((s) => flat(s.text) === flat(words));
       if (i >= 0) { sent.splice(i, 1); drawLive(); }
       return toast(`已停止。还没执行的那条消息回到了输入框，可以改了再发${pics ? '（图片要重新选一下）' : ''}`, 4000);
