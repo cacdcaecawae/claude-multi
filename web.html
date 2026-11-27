@@ -3022,9 +3022,11 @@ function makeConv(body, title) {
         const atEnd = first || hist.scrollHeight - hist.scrollTop - hist.clientHeight < 80;
         addItems($p('.hNew'), r.items, c.gem ? { gem: true } : c.gpt || (c.mac && { mac: c.mac }));
         if (!first) for (const m of r.items) if (m.role === 'claude') peekWarm(m.text); // an Office file it names: its PDF made before it's opened
-        const flat = (s) => s.replace(/\s+/g, ' '); // a paste's new lines may come back as \r\n
+        // a paste's new lines may come back as \r\n. agy drops some characters pasted into it (×, –, ⚠ reach it as NUL,
+        // its record without them): a Gemini one's compared by its letters, digits and ASCII only
+        const flat = (s) => (c.gem ? s.replace(/[^\p{L}\p{N}\x21-\x7e]+/gu, '') : s.replace(/\s+/g, ' '));
         // the record's message, or one with it inside (typed on after text left in Claude's input box): no longer waiting
-        const took = (s, m) => flat(s.text) === flat(m.text) || (s.text && flat(m.text).includes(flat(s.text)));
+        const took = (s, m) => flat(s.text) === flat(m.text) || (flat(s.text) && flat(m.text).includes(flat(s.text)));
         for (const m of r.items) { const i = m.role === 'user' ? sent.findIndex((s) => took(s, m)) : -1; if (i >= 0) sent.splice(i, 1); }
         if (atEnd) hist.scrollTop = hist.scrollHeight; else { unseen = true; endBtn(); }
       }
@@ -3107,7 +3109,9 @@ function makeConv(body, title) {
     if (busy || menu || Date.now() - waitAns > 10000) waitAns = 0;
     // in Claude's queue (taken in once its current step is done): 排队中 on it; one sent from elsewhere (its window, another
     // page, the 管家) waiting there too, in the order they were sent
-    const flat = (s) => s.replace(/\s+/g, ''), same = (s, x) => flat(x.text) === flat(s.text) || (s.text && flat(x.text).includes(flat(s.text))) || (x.cut && s.text && flat(s.text).startsWith(flat(x.text)));
+    // (a Gemini one's as agy keeps it, some characters dropped: see loadHist)
+    const flat = (s) => (c.gem ? s.replace(/[^\p{L}\p{N}\x21-\x7e]+/gu, '') : s.replace(/\s+/g, ''));
+    const same = (s, x) => flat(x.text) === flat(s.text) || (flat(s.text) && flat(x.text).includes(flat(s.text))) || (x.cut && flat(s.text) && flat(s.text).startsWith(flat(x.text)));
     // a GPT one not up yet (screen.js: starting): Codex holds what's sent till it is, and sends it then
     const Q = '<span class="lab">排队中</span>', S = sc?.starting ? '<span class="lab">GPT 还在启动，启动完会自动发出</span>' : '';
     const h = [...sent.map((s) => ({ at: s.at, h: (s.imgs ?? []).map((u) => `<div class="hm img pending"><img src="${u}" alt=""></div>`).join('')
