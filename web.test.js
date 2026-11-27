@@ -14,6 +14,7 @@ let historyId = 'A', oai = { items: [], busy: false }, oaiSent = null; // a GPT 
 let termBusy = false, opens = 0; // a stream whose screen shows Claude at work (its end never sent); the terminals opened
 let restarts = 0; // 设置's 重启网页服务 asked
 let termGem = '', gemRes = null; // one whose screen shows agy's (these rows), and its stream, to show more on it later
+let claudeRes = null; // the last Claude terminal's stream, to show more on it later
 const inputs = []; // what was typed into the terminals (/api/input), in order
 const openBodies = []; // what each open asked for
 let histHang = false, hung = null; // the next history read never answered (a phone's request left hanging); that one
@@ -77,7 +78,7 @@ const server = http.createServer((req, res) => {
     const osc = (t) => `event: data\ndata: ${JSON.stringify(`x\x1b]52;c;${Buffer.from(t).toString('base64')}\x07y`)}\n\n`;
     res.write(osc('旧的复制'));
     if (termBusy) res.write(`event: data\ndata: ${JSON.stringify('\r\n✻ Thinking… (3s · esc to interrupt)\r\n')}\n\n`);
-    if (termGem) { gemRes = res; res.write(`event: data\ndata: ${JSON.stringify(termGem)}\n\n`); }
+    if (termGem) { gemRes = res; res.write(`event: data\ndata: ${JSON.stringify(termGem)}\n\n`); } else claudeRes = res;
     setTimeout(() => res.write(osc('终端里复制的中文')), 300);
     return;
   }
@@ -675,6 +676,37 @@ const press = async (key, shift = false) => {
   assert.equal(await evaluate("hq.el.querySelectorAll('.hNew .hm.user').length"), 2);
   termBusy = false; await evaluate('closeConv(hq)'); histFeed = null; histQueue = null;
   console.log('browser 排队中 ok');
+  // 停止 before Claude took a long message in: Claude puts it back in its box as [Pasted text #2 +4 lines] (4: its new
+  // lines). One sent from here comes back here whole, its bubble (Markdown drawn) gone, Claude's box emptied (Ctrl+C);
+  // one not sent from here stays in Claude's box, not taken out as the stand-in
+  termBusy = true; histFeed = [];
+  const claudeShow = (rows) => claudeRes.write(`event: data\ndata: ${JSON.stringify('\x1b[2J\x1b[H' + rows.join('\r\n'))}\n\n`), RULE = '─'.repeat(60);
+  const longMsg = '**改版**一下界面\n- 第一条 `a.html`\n- 第二条\n- 第三条\n最后一行';
+  await evaluate("window.hp = makeConv({ id: 'A' }, 'Test conversation'); addConv(focusG, hp)");
+  await until("hp.live === 'busy'");
+  await evaluate(`(() => { const t = hp.el.querySelector('.send textarea'); t.value = ${JSON.stringify(longMsg)}; t.dispatchEvent(new Event('input')); hp.el.querySelector('.go').click(); })()`);
+  await until("!hp.el.querySelector('.send textarea').value");
+  histFeed.push({ role: 'user', text: longMsg, at: Date.now(), p: 'P0', u: 'U1' }); // (its record line and the one before it, as the service gives them)
+  await until("!!hp.el.querySelector('.hNew .hm.user')?.textContent.includes('改版') && !hp.el.querySelector('.live .hm.user')");
+  inputs.length = 0;
+  await evaluate("hp.el.querySelector('.go').click()"); // 停止
+  for (let i = 0; i < 40 && !inputs.includes('\x1b'); i++) await new Promise((ok) => setTimeout(ok, 50));
+  claudeShow([RULE, '❯ [Pasted text #2 +4 lines]', RULE, '  ? for shortcuts']);
+  await until(`hp.el.querySelector('.send textarea').value === ${JSON.stringify(longMsg)}`);
+  assert.deepEqual(await evaluate("[!!hp.el.querySelector('.hNew .hm.user'), /回到了输入框/.test(document.querySelector('#toast').textContent)]"), [false, true]);
+  assert.ok(inputs.includes('\x03'), JSON.stringify(inputs));
+  await evaluate("(() => { const t = hp.el.querySelector('.send textarea'); t.value = ''; t.dispatchEvent(new Event('input')); })()");
+  claudeShow(['✻ Thinking… (3s · esc to interrupt)', RULE, '❯ ', RULE]);
+  await until("hp.live === 'busy' && hp.el.querySelector('.go').dataset.m === 'stop'");
+  inputs.length = 0;
+  await evaluate("hp.el.querySelector('.go').click()");
+  for (let i = 0; i < 40 && !inputs.includes('\x1b'); i++) await new Promise((ok) => setTimeout(ok, 50));
+  claudeShow([RULE, '❯ [Pasted text #3 +9 lines]', RULE, '  ? for shortcuts']);
+  await until("/还在「终端」的输入框里/.test(document.querySelector('#toast').textContent)");
+  await new Promise((ok) => setTimeout(ok, 400));
+  assert.deepEqual([inputs.includes('\x03'), await evaluate("hp.el.querySelector('.send textarea').value")], [false, '']);
+  termBusy = false; await evaluate("closeConv(hp); document.querySelector('#toast').style.display = 'none'"); histFeed = null; claudeRes = null; // (its note off the page: the next test points where it sits)
+  console.log('browser 停止 a long message ok');
   // 对话's ticks down its left: one a message of yours, the one you're reading marked (at the end: the last); the mouse on
   // one, it and its answer's start in the card; a click scrolls there; in 终端, none
   histFeed = [1, 2, 3, 4].flatMap((i) => [{ role: 'user', text: `第${i}问` }, { role: 'claude', text: `回答${i}。` + '很长的一段话。\n\n'.repeat(40) }]);
