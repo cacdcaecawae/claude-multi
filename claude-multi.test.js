@@ -840,6 +840,13 @@ if (SESSION0) {
   assert.deepEqual(codexKeys('\r'), { data: '\r', words: false });
   assert.deepEqual(codexKeys('\x1b[B'), { data: '\x1b[B', words: false });
   assert.deepEqual(codexKeys('\x03'), { data: '\x03', words: false });
+  // what's typed into a Gemini: a character neither a letter nor ASCII as a key carrying it (the pty would hand agy
+  // Alt+numpad presses); letters (Chinese too), ASCII, keys alone, an emoji as they are
+  const { gemKeys } = require('./claude-multi');
+  const K = (u) => `\x1b[0;0;${u};1;0;1_\x1b[0;0;${u};0;0;1_`;
+  assert.equal(gemKeys('\x1b[200~1366×768\r中文，π é…\x1b[201~'), `\x1b[200~1366${K(0xd7)}768\r中文${K(0xff0c)}π é${K(0x2026)}\x1b[201~`);
+  assert.equal(gemKeys('\u{1f600}a'), '\u{1f600}a');
+  for (const k of ['\r', '\x1b', '\x1b[B', '\x03', 'plain words']) assert.equal(gemKeys(k), k);
   fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(work, { recursive: true, force: true });
   console.log('gpt ok');
 }
@@ -1493,7 +1500,16 @@ if (SESSION0) {
 
   // A Writable can fail after write() returns. The API must await its callback, for both GPT and Claude mirrors.
   const { CODEX_END } = require('./claude-multi');
-  const terms = new Map(), inputApi = vm.runInNewContext(api('input', 'resize'), { terms, sleep: async () => {}, codexKeys: require('./claude-multi').codexKeys, CODEX_END });
+  const terms = new Map(), inputApi = vm.runInNewContext(api('input', 'resize'), { terms, sleep: async () => {}, codexKeys: require('./claude-multi').codexKeys, CODEX_END, gemKeys: require('./claude-multi').gemKeys });
+  // a Gemini this service runs: × as a key carrying it; one in a terminal window (console-bridge.ps1 types each character
+  // as a key already) and a Claude one as sent
+  const typedIn = {};
+  for (const [name, t] of [['gem', { kind: 'pty', gem: { id: 'G' } }], ['gemPc', { kind: 'pc', gem: { id: 'G' } }], ['claude', { kind: 'pty' }]]) {
+    typedIn[name] = [];
+    terms.set(name, { ...t, proc: t.kind === 'pty' ? { write(d) { typedIn[name].push(d); } } : { stdin: new Writable({ write(c, e, done) { typedIn[name].push(JSON.parse(c).k); done(); } }) } });
+    await inputApi(null, { key: name, data: '\x1b[200~1366×768\x1b[201~' });
+  }
+  assert.deepEqual(typedIn, { gem: ['\x1b[200~1366\x1b[0;0;215;1;0;1_\x1b[0;0;215;0;0;1_768\x1b[201~'], gemPc: ['\x1b[200~1366×768\x1b[201~'], claude: ['\x1b[200~1366×768\x1b[201~'] });
   // a Codex's Enter after words: End before it, ending its paste (a long one still being read took the Enter as a new line
   // in it); an Enter alone (a pick in its list) as it is, and the next words' Enter gets one again
   const keys = [];
